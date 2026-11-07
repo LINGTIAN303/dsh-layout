@@ -102,6 +102,13 @@ window.__ModuleLoader__.load({
       surfaceDrift: '签名变化，待复核',
       surfacesEmpty: '当前没识别到插件页面。',
       surfacesCount: (n) => `共 ${n} 个界面页面`,
+      reviewTitle: '待复核清单',
+      reviewEmpty: '没有识别异常。',
+      reviewExport: '导出待复核清单',
+      reviewClear: '清空',
+      reviewHint: '异常会自动记录：曾由登记认出的页面签名变了（drift），或从未登记、只能靠自动识别（unregistered）。导出 JSON 后照签名更新登记表。',
+      anomalyDrift: '签名变化',
+      anomalyUnregistered: '未登记',
     };
     const en = {
       title: 'Layout',
@@ -199,6 +206,13 @@ window.__ModuleLoader__.load({
       surfaceDrift: 'Signature changed, review needed',
       surfacesEmpty: 'No plugin page recognized yet.',
       surfacesCount: (n) => `${n} interface pages`,
+      reviewTitle: 'Review queue',
+      reviewEmpty: 'No recognition anomaly.',
+      reviewExport: 'Export review list',
+      reviewClear: 'Clear',
+      reviewHint: 'Anomalies are recorded automatically: a registered page whose signature changed (drift), or a page never registered and only auto-detected (unregistered). Export the JSON and update the registry by signature.',
+      anomalyDrift: 'Signature changed',
+      anomalyUnregistered: 'Not registered',
     };
 
     /* ============================== 配置 ============================== */
@@ -235,6 +249,7 @@ window.__ModuleLoader__.load({
       conversation: null,
       settings: null,
       surfaces: [],
+      anomalies: [],
     };
 
     function clampInt(value, min, max, fallback) {
@@ -360,12 +375,13 @@ window.__ModuleLoader__.load({
 
     function setTargets(targets) {
       const previous = snapshot.targets;
-      const surfaceSignature = (list) => list.map((surface) => `${surface.id}:${surface.active ? 1 : 0}:${surface.source}:${surface.recognized ? 1 : 0}`).join('|');
+      const surfaceSignature = (list) => list.map((surface) => `${surface.id}:${surface.active ? 1 : 0}:${surface.source}:${surface.tier}:${surface.recognized ? 1 : 0}`).join('|');
+      const anomalySignature = (list) => list.map((item) => `${item.label}:${item.kind}`).join('|');
       const signature = targets.ok
-        ? `${Object.keys(targets.regions).join(',')}|${targets.panels.map((panel) => panel.label).join('\u0001')}|${targets.settings ? 's' : ''}|${surfaceSignature(targets.surfaces)}`
+        ? `${Object.keys(targets.regions).join(',')}|${targets.panels.map((panel) => panel.label).join('\u0001')}|${targets.settings ? 's' : ''}|${surfaceSignature(targets.surfaces)}|${anomalySignature(targets.anomalies ?? [])}`
         : '';
       const previousSignature = previous.ok
-        ? `${Object.keys(previous.regions).join(',')}|${previous.panels.map((panel) => panel.label).join('\u0001')}|${previous.settings ? 's' : ''}|${surfaceSignature(previous.surfaces ?? [])}`
+        ? `${Object.keys(previous.regions).join(',')}|${previous.panels.map((panel) => panel.label).join('\u0001')}|${previous.settings ? 's' : ''}|${surfaceSignature(previous.surfaces ?? [])}|${anomalySignature(previous.anomalies ?? [])}`
         : '';
       if (signature === previousSignature && targets.ok === previous.ok) {
         snapshot = { ...snapshot, targets };
@@ -545,6 +561,8 @@ window.__ModuleLoader__.load({
     ];
 
     const SURFACE_STORE_KEY = 'dsh-layout/surfaces/v1';
+    /** 识别异常记录：登记表与真实界面对不上的页面，落到这里等复核。 */
+    const SURFACE_ANOMALY_KEY = 'dsh-layout/surface-anomalies/v1';
 
     function readJsonStore(key) {
       try {
@@ -571,6 +589,51 @@ window.__ModuleLoader__.load({
       if (!surfaceStoreDirty) return;
       surfaceStoreDirty = false;
       writeJsonStore(SURFACE_STORE_KEY, surfaceStore);
+    }
+
+    /**
+     * 识别异常表（键 = 页面名）。
+     * 两类：
+     * - drift：这一页曾由登记表认出来，现在签名对不上、掉到自动档 → 登记该复核了；
+     * - unregistered：一直是自动识别、也没登记 → 需要补进第三方表（或确认是官方新页面）。
+     * 记录实测签名与观测时间，导出后可直接照着改登记表。
+     */
+    let surfaceAnomalies = readJsonStore(SURFACE_ANOMALY_KEY);
+    let surfaceAnomalyDirty = false;
+
+    function recordAnomaly(label, kind, detail) {
+      const previous = surfaceAnomalies[label];
+      const same = previous !== undefined
+        && previous.kind === kind
+        && previous.observedTier === detail.observedTier
+        && JSON.stringify(previous.signature) === JSON.stringify(detail.signature);
+      // 同一条异常重复观测到就不动记录：避免每次界面刷新都改写时间戳，导致签名抖动与无谓写盘
+      if (same) return;
+      surfaceAnomalies[label] = {
+        label,
+        kind,
+        expectedTier: detail.expectedTier ?? null,
+        observedTier: detail.observedTier,
+        source: detail.source,
+        signature: detail.signature,
+        firstSeenAt: previous?.firstSeenAt ?? Date.now(),
+        lastSeenAt: Date.now(),
+        count: (previous?.count ?? 0) + 1,
+      };
+      surfaceAnomalyDirty = true;
+    }
+
+    function flushAnomalies() {
+      if (!surfaceAnomalyDirty) return;
+      surfaceAnomalyDirty = false;
+      writeJsonStore(SURFACE_ANOMALY_KEY, surfaceAnomalies);
+    }
+
+    /** 页面恢复正常登记后清掉对应异常，避免清单里留下已解决的问题。 */
+    function clearAnomaly(label) {
+      if (surfaceAnomalies[label] === undefined) return;
+      delete surfaceAnomalies[label];
+      surfaceAnomalyDirty = true;
     }
 
     /** 主面板当前渲染的页面根节点：可能是 section/div/iframe，取第一个有尺寸的子元素。 */
@@ -700,6 +763,14 @@ window.__ModuleLoader__.load({
             surfaceStore[label] = { source: current.source, tier: current.tier, signature: current.signature, registeredTier: nextRegisteredTier, seenAt: Date.now() };
             surfaceStoreDirty = true;
           }
+          // 异常自动记录：掉档记 drift，从未登记的自动档记 unregistered；恢复正常则清掉旧异常。
+          if (drift) {
+            recordAnomaly(label, 'drift', { expectedTier: registeredTier, observedTier: current.tier, source: current.source, signature: current.signature });
+          } else if (current.tier === 'auto') {
+            recordAnomaly(label, 'unregistered', { expectedTier: null, observedTier: current.tier, source: current.source, signature: current.signature });
+          } else {
+            clearAnomaly(label);
+          }
         }
         out.push({
           id: `page.panel:${label}`,
@@ -715,6 +786,7 @@ window.__ModuleLoader__.load({
         });
       }
       flushSurfaceStore();
+      flushAnomalies();
       return out;
     }
 
@@ -747,8 +819,9 @@ window.__ModuleLoader__.load({
       const conversation = centerCol ? first(centerCol, '[data-conversation-content]') : null;
       const settings = document.querySelector('[data-shortcut-modal="settings"]');
       const ok = Boolean(sidebarCol && centerCol && rightbarCol);
-      const targets = { ok, frame, regions, sidebarRoot, blocks, panels, conversation, settings, surfaces: [] };
+      const targets = { ok, frame, regions, sidebarRoot, blocks, panels, conversation, settings, surfaces: [], anomalies: [] };
       targets.surfaces = readSurfaces(targets);
+      targets.anomalies = Object.values(surfaceAnomalies).sort((a, b) => b.lastSeenAt - a.lastSeenAt);
       return targets;
     }
 
@@ -1524,6 +1597,46 @@ window.__ModuleLoader__.load({
       const officialCount = pluginPages.filter((surface) => surface.tier === 'official').length;
       const thirdCount = pluginPages.filter((surface) => surface.tier === 'third').length;
       const autoCount = pluginPages.filter((surface) => surface.tier === 'auto' || surface.tier === 'pending').length;
+      const anomalies = targets.anomalies ?? [];
+      const anomalyLabel = (item) => (item.kind === 'drift' ? t('anomalyDrift') : t('anomalyUnregistered'));
+      const exportReview = () => {
+        const payload = {
+          exportedAt: new Date().toISOString(),
+          plugin: 'dsh-layout',
+          version: 1,
+          note: '识别异常待复核清单：drift = 曾由登记表认出、现在签名对不上；unregistered = 从未登记、一直靠自动识别。',
+          total: anomalies.length,
+          anomalyCount: anomalies.filter((item) => item.kind === 'drift').length,
+          unregisteredCount: anomalies.filter((item) => item.kind === 'unregistered').length,
+          items: anomalies.map((item) => ({
+            label: item.label,
+            kind: item.kind,
+            expectedTier: item.expectedTier,
+            observedTier: item.observedTier,
+            source: item.source,
+            count: item.count,
+            firstSeenAt: new Date(item.firstSeenAt).toISOString(),
+            lastSeenAt: new Date(item.lastSeenAt).toISOString(),
+            signature: item.signature,
+          })),
+        };
+        try {
+          const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const anchor = document.createElement('a');
+          anchor.href = url;
+          anchor.download = `dsh-layout-review-${new Date().toISOString().slice(0, 10)}.json`;
+          anchor.click();
+          window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+        } catch (error) {
+          console.warn('[dsh-layout] 导出复核清单失败', error);
+        }
+      };
+      const clearReview = () => {
+        for (const key of Object.keys(surfaceAnomalies)) delete surfaceAnomalies[key];
+        writeJsonStore(SURFACE_ANOMALY_KEY, {});
+        refresh();
+      };
       return h(Card, { title: t('surfaces'), desc: t('surfacesHint') },
         h('div', { className: 'dshl-surfaceGroup' },
           h('div', { className: 'dshl-surfaceGroupTitle' }, t('surfaceNative')),
@@ -1539,7 +1652,29 @@ window.__ModuleLoader__.load({
             : h('div', { className: 'dshl-list dshl-listScroll' }, pluginPages.map((surface) => renderRow(
               surface,
               surface.drift === true ? t('surfaceDrift') : `${tierText(surface)}${surface.recognized ? '' : ` · ${t('surfacePending')}`}`,
-            )))));
+            )))),
+        h('div', { className: 'dshl-surfaceGroup' },
+          h('div', { className: 'dshl-surfaceGroupTitle' }, `${t('reviewTitle')} · ${anomalies.length}`),
+          anomalies.length === 0
+            ? h('div', { className: 'dshl-hint' }, t('reviewEmpty'))
+            : h('div', { className: 'dshl-list dshl-listScroll' }, anomalies.map((item) => h('div', { key: item.label, className: 'dshl-item' },
+              h('span', { className: 'dshl-surfaceDot', 'data-on': 'false', 'data-source': item.source, 'aria-hidden': true }),
+              h('span', { className: 'dshl-itemLabel', title: `${item.label} · ${item.kind}` }, item.label),
+              h('span', { className: 'dshl-itemSub' }, `${anomalyLabel(item)} · ×${item.count}`)))),
+          h('div', { className: 'dshl-row' },
+            h('button', {
+              type: 'button',
+              className: 'dshl-btn',
+              disabled: anomalies.length === 0,
+              onClick: exportReview,
+            }, t('reviewExport')),
+            h('button', {
+              type: 'button',
+              className: 'dshl-btn',
+              disabled: anomalies.length === 0,
+              onClick: clearReview,
+            }, t('reviewClear'))),
+          h('p', { className: 'dshl-hint' }, t('reviewHint'))));
     }
 
     function FollowField({ label, value, fallback, min, max, step, onChange, t }) {

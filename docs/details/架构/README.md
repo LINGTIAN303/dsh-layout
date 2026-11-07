@@ -50,6 +50,7 @@ flowchart LR
 
 - 页面身份用**签名**表达：`tag` + CSS 模块前缀 + `data-*` 名值对；iframe 用源前缀。优先用宿主/插件自己写死的 `data` 值（如 `data-plugin-panel="true"`、`data-dsh-plugin="task-board"`），CSS 模块哈希只作次要依据。
 - **登记失配可观测**：缓存记住 `registeredTier`（上次命中登记的档位）。若某页曾由登记认出来、现在掉到自动档，卡片显示「签名变化，待复核」——这说明 DSH 升级或插件更新改了结构，该去复核登记表。这条直接对应「官方每次更新必须适配」的要求。
+- **异常自动落盘 + 一键导出**：识别异常写入 `localStorage` 键 `dsh-layout/surface-anomalies/v1`，两类：`drift`（登记过但签名变了）与 `unregistered`（从未登记、只靠自动识别）。「界面结构」卡片底部「待复核清单」列出条目并提供「导出待复核清单」（JSON，含实测签名、观测时间、命中次数）与「清空」。导出文件可直接对照更新 `OFFICIAL_PAGES` / `THIRD_PARTY_PAGES`。异常在页面恢复正常登记时自动清除，清单不会堆积已解决的问题。
 - 页面列表来自侧栏面板行（`aria-current="page"` 判当前页），只收 `button` 子节点，排除「更多」这类菜单触发器。
 
 ## 恢复通道（不可恢复状态防护）
