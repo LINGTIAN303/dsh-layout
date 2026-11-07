@@ -69,9 +69,12 @@ window.__ModuleLoader__.load({
       recoveryHint: '自定义布局可能挡住插件入口；这个按钮始终能打开编辑浮层并恢复默认。',
       recoveryShortcut: '布局：打开编辑浮层（恢复入口）',
       openPlugins: '插件页',
-      riskyHint: '注意：侧栏或面板入口已被隐藏。右下角会保留「布局」恢复按钮，快捷键也能打开编辑浮层。',
+      riskyHint: '注意：侧栏或面板入口已被隐藏，界面上会留一个「布局」恢复按钮（位置随留白走）。快捷键也能打开编辑浮层。',
       shortcutHint: '快捷键：Ctrl/⌘+Alt+L 打开编辑浮层；再加 Shift 直接恢复默认布局。',
       offsetClamped: '偏移会自动限制，保证设置面板始终留在屏幕内。',
+      blankHint: '点击恢复布局，或按 Ctrl/⌘+Alt+L',
+      showAll: '显示全部',
+      launcherOnBlank: '仅剩空白页',
     };
     const en = {
       title: 'Layout',
@@ -136,9 +139,12 @@ window.__ModuleLoader__.load({
       recoveryHint: 'A custom layout can hide the plugin entry; this button always opens the edit overlay and can restore defaults.',
       recoveryShortcut: 'Layout: open the edit overlay (recovery)',
       openPlugins: 'Plugins page',
-      riskyHint: 'Heads up: the sidebar or panel entry is hidden. A "Layout" recovery button stays in the corner, and the shortcut also opens the edit overlay.',
+      riskyHint: 'Heads up: the sidebar or panel entry is hidden, so a "Layout" recovery button floats in a clear spot. The shortcut also opens the edit overlay.',
       shortcutHint: 'Shortcuts: Ctrl/⌘+Alt+L opens the edit overlay; add Shift to restore the default layout.',
       offsetClamped: 'Offsets are clipped so the settings panel always stays on screen.',
+      blankHint: 'Click to restore the layout, or press Ctrl/⌘+Alt+L',
+      showAll: 'Show all',
+      launcherOnBlank: 'Blank page',
     };
 
     /* ============================== 配置 ============================== */
@@ -156,6 +162,7 @@ window.__ModuleLoader__.load({
         centerMinWidth: 400,
         hideSidebar: false,
         hideRightbar: false,
+        hideCenter: false,
         hideBottom: false,
         resizeHandles: true,
       },
@@ -209,6 +216,7 @@ window.__ModuleLoader__.load({
         centerMinWidth: clampInt(col.centerMinWidth, 240, 1200, base.columns.centerMinWidth),
         hideSidebar: col.hideSidebar === true,
         hideRightbar: col.hideRightbar === true,
+        hideCenter: col.hideCenter === true,
         hideBottom: col.hideBottom === true,
         resizeHandles: col.resizeHandles !== false,
       };
@@ -255,6 +263,8 @@ window.__ModuleLoader__.load({
     const listeners = new Set();
     let persistTimer = null;
     let cssFrame = null;
+    /** 本次模块加载的随机盐：同一份配置在不同加载里会落到不同留白处。 */
+    const mountSalt = Math.floor(Math.random() * 0xFFFFFFFF).toString(36);
 
     function notify() {
       for (const listener of listeners) {
@@ -532,7 +542,15 @@ window.__ModuleLoader__.load({
 .dshl-toolbarTitle { font-weight:600; padding:0 2px; white-space:nowrap; }
 .dshl-toolbar .dshl-chip { height:24px; padding:0 9px; font-size:11px; white-space:nowrap; }
 .dshl-toolbar .dshl-btn { height:24px; padding:0 9px; font-size:11px; white-space:nowrap; }
-.dshl-launcher { position:fixed; left:calc(var(--dsh-frame-leading-clearance, 0px) + 12px); bottom:14px; z-index:1300; display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 12px 0 9px; border-radius:999px; border:1px solid var(--dsw-alias-border-l2); background:var(--dsw-alias-bg-overlay); color:var(--dsw-alias-label-primary); font-size:12px; font-family:inherit; cursor:pointer; pointer-events:auto; box-shadow:var(--dsw-elevation-prominent, 0 6px 18px rgba(0,0,0,.25)); opacity:.72; transition:opacity .15s; }
+.dshl-launcherDock { position:fixed; z-index:1300; display:flex; flex-direction:column; align-items:center; gap:8px; pointer-events:none; transform:translate(-50%, -50%); }
+.dshl-launcherDock[data-mode="blank"] { left:50%; top:50%; }
+.dshl-launcherDock[data-mode="corner"] { left:calc(var(--dsh-frame-leading-clearance, 0px) + 12px); bottom:14px; top:auto; transform:none; }
+.dshl-launcherRow { display:flex; align-items:center; gap:8px; pointer-events:none; }
+.dshl-launcherQuestion { font-size:13px; line-height:20px; color:var(--dsw-alias-label-secondary); }
+.dshl-launcherDock[data-mode="blank"] .dshl-launcher { height:44px; padding:0 22px 0 16px; font-size:14px; opacity:1; border-color:var(--dsw-alias-brand-primary); box-shadow:0 10px 28px rgba(0,0,0,.32); }
+.dshl-launcherDock[data-mode="blank"] .dshl-launcherGhost { border-color:var(--dsw-alias-border-l2); font-weight:400; }
+.dshl-launcherHint { font-size:11px; line-height:16px; color:var(--dsw-alias-label-secondary); background:var(--dsw-alias-bg-overlay); border:1px solid var(--dsw-alias-border-l1); border-radius:999px; padding:2px 10px; white-space:nowrap; }
+.dshl-launcher { display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 12px 0 9px; border-radius:999px; border:1px solid var(--dsw-alias-border-l2); background:var(--dsw-alias-bg-overlay); color:var(--dsw-alias-label-primary); font-size:12px; font-family:inherit; cursor:pointer; pointer-events:auto; box-shadow:var(--dsw-elevation-prominent, 0 6px 18px rgba(0,0,0,.25)); opacity:.72; transition:opacity .15s; }
 .dshl-launcher:hover { opacity:1; }
 .dshl-warn { margin:0; font-size:11px; line-height:17px; color:var(--dsw-alias-state-warn-primary); }
 `;
@@ -580,7 +598,7 @@ window.__ModuleLoader__.load({
       const order = col.order;
       const sidebarTrack = col.hideSidebar ? '0px' : `${Math.round(col.sidebarWidth)}px`;
       const rightbarTrack = col.hideRightbar ? '0px' : `${Math.round(col.rightbarWidth)}px`;
-      const centerTrack = `minmax(${Math.round(col.centerMinWidth)}px, 1fr)`;
+      const centerTrack = col.hideCenter ? '0px' : `minmax(${Math.round(col.centerMinWidth)}px, 1fr)`;
       const track = (region, rightShown) => {
         if (region === 'sidebar') return sidebarTrack;
         if (region === 'rightbar') return rightShown ? rightbarTrack : '0px';
@@ -596,6 +614,7 @@ window.__ModuleLoader__.load({
       lines.push('[data-dshl-frame] > [data-dshl-region="bottom"] { grid-row: 2 !important; grid-column: 1 / -1 !important; }');
       lines.push('[data-dshl-frame] > [data-side] { display: none !important; }');
       if (col.hideSidebar) lines.push('[data-dshl-frame] > [data-dshl-region="sidebar"] { display: none !important; }');
+      if (col.hideCenter) lines.push('[data-dshl-frame] > [data-dshl-region="center"] { display: none !important; }');
       if (col.hideRightbar) {
         lines.push('[data-dshl-frame] > [data-dshl-region="rightbar"] { display: none !important; }');
         lines.push('[data-dshl-frame] [data-sidebar-right-panel] { display: none !important; }');
@@ -781,6 +800,145 @@ window.__ModuleLoader__.load({
       return value;
     }
 
+    /* ============================== 恢复按钮的落点 ============================== */
+    /**
+     * 恢复按钮的落点策略：
+     * 1. 界面只剩空白页（四个区域都不可见）→ 屏幕正中，最大号；
+     * 2. 还有可见区域 → 在可见区域的空白处随机挑一个点（避开可交互元素）；
+     * 3. 探测失败 → 固定左下角兜底。
+     */
+    const INTERACTIVE_SELECTOR = 'button, a, input, textarea, select, label, summary, [role="button"], [role="menuitem"], [role="tab"], [role="switch"], [contenteditable="true"]';
+
+    function isInteractiveNode(node) {
+      if (node === null || node === undefined) return false;
+      if (node.closest('[data-dshl-layer]') !== null) return false;
+      return node.closest(INTERACTIVE_SELECTOR) !== null;
+    }
+
+    /** 按钮按半宽/半高采样：中心、四边中点、四角外扩一点，任一命中可交互元素即视为会压住内容。 */
+    function probeOccupancy(x, y, halfWidth, halfHeight) {
+      const pad = 4;
+      const dx = halfWidth + pad;
+      const dy = halfHeight + pad;
+      const points = [[0, 0], [-dx, 0], [dx, 0], [0, -dy], [0, dy], [-dx, -dy], [dx, -dy], [-dx, dy], [dx, dy]];
+      let hits = 0;
+      for (const [ox, oy] of points) {
+        const px = x + ox;
+        const py = y + oy;
+        if (px < 0 || py < 0 || px >= window.innerWidth || py >= window.innerHeight) {
+          hits += 1;
+          continue;
+        }
+        if (isInteractiveNode(document.elementFromPoint(px, py))) hits += 1;
+      }
+      return hits;
+    }
+
+    /** 四方向最近的可交互元素距离，越大越“空”。 */
+    function probeClearance(x, y) {
+      const steps = [16, 32, 48, 64, 96];
+      const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+      let clearance = 0;
+      for (const [dx, dy] of dirs) {
+        let reach = 0;
+        for (const step of steps) {
+          const px = x + dx * step;
+          const py = y + dy * step;
+          if (px < 0 || py < 0 || px >= window.innerWidth || py >= window.innerHeight) break;
+          if (isInteractiveNode(document.elementFromPoint(px, py))) break;
+          reach = step;
+        }
+        clearance += reach;
+      }
+      return clearance;
+    }
+
+    function mulberry32(seed) {
+      let a = seed >>> 0;
+      return () => {
+        a = (a + 0x6D2B79F5) >>> 0;
+        let t = a;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+
+    function hashString(text) {
+      let hash = 2166136261;
+      for (let i = 0; i < text.length; i += 1) {
+        hash ^= text.charCodeAt(i);
+        hash = Math.imul(hash, 16777619);
+      }
+      return hash >>> 0;
+    }
+
+    /** 恢复按钮的近似尺寸：自由落点用小号按钮，空白页用大号按钮。 */
+    const LAUNCHER_HALF = { free: [40, 20], blank: [115, 55], corner: [40, 20] };
+
+    /** 计算恢复按钮的落点；返回视口坐标与呈现模式。 */
+    function computeLauncherPlacement(regions, seedText) {
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      const visible = [];
+      for (const [name, node] of Object.entries(regions)) {
+        if (node === null || node === undefined) continue;
+        const rect = node.getBoundingClientRect();
+        if (rect.width < 24 || rect.height < 24) continue;
+        if (rect.right <= 0 || rect.bottom <= 0 || rect.left >= viewportWidth || rect.top >= viewportHeight) continue;
+        visible.push({
+          name,
+          left: Math.max(0, rect.left),
+          top: Math.max(0, rect.top),
+          right: Math.min(viewportWidth, rect.right),
+          bottom: Math.min(viewportHeight, rect.bottom),
+        });
+      }
+      // 只剩空白页：屏幕正中，最大号的恢复入口
+      if (visible.length === 0) return { mode: 'blank', x: Math.round(viewportWidth / 2), y: Math.round(viewportHeight / 2) };
+
+      const random = mulberry32(hashString(seedText));
+      const [halfWidth, halfHeight] = LAUNCHER_HALF.free;
+      const insetX = halfWidth + 6;
+      const insetY = halfHeight + 6;
+      const candidates = [];
+      for (const region of visible) {
+        const left = region.left + insetX;
+        const right = region.right - insetX;
+        const top = region.top + insetY;
+        const bottom = region.bottom - insetY;
+        if (right <= left || bottom <= top) continue;
+        const step = 40;
+        for (let x = left; x <= right; x += step) {
+          for (let y = top; y <= bottom; y += step) {
+            candidates.push({ x: Math.round(x), y: Math.round(y), region: region.name });
+          }
+        }
+      }
+      if (candidates.length === 0) return { mode: 'corner', x: 0, y: 0 };
+
+      // 采样上限：探针要调 elementFromPoint，候选太多会卡顿；均匀抽样保留空间分布
+      const MAX_PROBES = 220;
+      const probes = [];
+      if (candidates.length <= MAX_PROBES) {
+        probes.push(...candidates);
+      } else {
+        const stride = candidates.length / MAX_PROBES;
+        for (let i = 0; i < MAX_PROBES; i += 1) probes.push(candidates[Math.floor(i * stride)]);
+      }
+      const clear = [];
+      for (const candidate of probes) {
+        if (probeOccupancy(candidate.x, candidate.y, halfWidth, halfHeight) > 0) continue;
+        clear.push({ ...candidate, clearance: probeClearance(candidate.x, candidate.y) });
+      }
+      if (clear.length === 0) return { mode: 'corner', x: 0, y: 0 };
+      // 只留最空的一批再随机：位置看起来随机，但永远优先落在留白最充裕处
+      const best = Math.max(...clear.map((candidate) => candidate.clearance));
+      const pool = clear.filter((candidate) => candidate.clearance >= Math.max(best - 16, best * 0.7));
+      const pick = pool[Math.floor(random() * pool.length)] ?? clear[0];
+      return { mode: 'free', x: pick.x, y: pick.y, region: pick.region, clearance: pick.clearance };
+    }
+
     /* ============================== 编辑面板（插件详情页内） ============================== */
     const REGION_LABEL_KEYS = { sidebar: 'sidebar', center: 'center', rightbar: 'rightbar', bottom: 'bottomBar' };
     const BLOCK_LABEL_KEYS = { brand: 'blockBrand', 'new-session': 'blockNewSession', panels: 'blockPanels', workspaces: 'blockWorkspaces', footer: 'blockFooter' };
@@ -801,11 +959,14 @@ window.__ModuleLoader__.load({
           }),
           renderLabel: (item) => labels[item.region],
           renderTrailing: (item) => h(Switch, {
-            checked: item.region === 'sidebar' ? !col.hideSidebar : item.region === 'rightbar' ? !col.hideRightbar : true,
+            checked: item.region === 'sidebar' ? !col.hideSidebar
+              : item.region === 'rightbar' ? !col.hideRightbar
+                : !col.hideCenter,
             label: `${labels[item.region]} ${t('hide')}`,
             onChange: (on) => updateConfig((draft) => {
               if (item.region === 'sidebar') draft.columns.hideSidebar = !on;
               if (item.region === 'rightbar') draft.columns.hideRightbar = !on;
+              if (item.region === 'center') draft.columns.hideCenter = !on;
             }),
           }),
         }),
@@ -1043,6 +1204,8 @@ window.__ModuleLoader__.load({
       const { config, targets, ui } = useStoreSnapshot();
       const [bounds, setBounds] = React.useState(null);
       const [dragging, setDragging] = React.useState(null);
+      const [probeTick, setProbeTick] = React.useState(0);
+      const placementRef = React.useRef({ key: '', value: null });
 
       const measure = React.useCallback(() => {
         const frame = targets.frame;
@@ -1076,6 +1239,21 @@ window.__ModuleLoader__.load({
         measure();
       }, [measure, config]);
 
+      // 内容渲染完再探一次落点：首帧时会话/面板往往还是空的，探针会挑到马上被覆盖的位置
+      React.useEffect(() => {
+        let timer = null;
+        let tries = 0;
+        const bump = () => {
+          tries += 1;
+          setProbeTick((tick) => tick + 1);
+          if (tries < 4) timer = window.setTimeout(bump, 350 * tries);
+        };
+        timer = window.setTimeout(bump, 320);
+        return () => {
+          if (timer !== null) window.clearTimeout(timer);
+        };
+      }, []);
+
       React.useEffect(() => {
         if (!ui.editing) return undefined;
         const onKeyDown = (event) => {
@@ -1097,6 +1275,12 @@ window.__ModuleLoader__.load({
           if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) return;
           event.preventDefault();
           event.stopPropagation();
+          // 空白页上的按钮直接恢复默认；其余情况打开编辑浮层（与按钮自身点击语义一致）
+          if (launcher.getAttribute('data-action') === 'reset') {
+            replaceConfig(null);
+            setEditing(false);
+            return;
+          }
           setEditing(true);
         };
         document.addEventListener('pointerdown', hitLauncher, true);
@@ -1133,10 +1317,23 @@ window.__ModuleLoader__.load({
       })();
       const risk = config.enabled
         && (config.columns.hideSidebar
+          || config.columns.hideCenter
           || config.sidebar.panelHidden.length > 0
           || config.sidebar.hidden.length >= BLOCKS.length
           || !sidebarReachable
           || !centerReachable);
+
+      // 落点随「可见区域的空白分布 + 配置指纹 + 本次加载的随机盐」变化：
+      // 同一份配置每次打开可能落在不同留白处，但同一次会话内不会抖动。
+      const placementSeed = `${config.columns.order.join(',')}|${config.columns.hideSidebar}|${config.columns.hideCenter}|${config.columns.hideRightbar}|${config.columns.hideBottom}|${config.sidebar.panelHidden.join(',')}|${config.sidebar.hidden.join(',')}|${window.innerWidth}x${window.innerHeight}|${mountSalt}`;
+      const placementKey = `${risk ? 1 : 0}|${probeTick}|${placementSeed}`;
+      if (placementRef.current.key !== placementKey) {
+        placementRef.current = {
+          key: placementKey,
+          value: risk ? computeLauncherPlacement(targets.regions, placementSeed) : null,
+        };
+      }
+      const placement = placementRef.current.value;
       const openPlugins = () => {
         const layout = ctx !== null && ctx !== undefined && typeof ctx.get === 'function' ? ctx.get('layout') : undefined;
         if (layout === null || layout === undefined || typeof layout.selectPanel !== 'function') return;
@@ -1230,15 +1427,35 @@ window.__ModuleLoader__.load({
           h('span', { className: 'dshl-itemSub' }, `${Math.round(config.columns.sidebarWidth)} / ${Math.round(config.columns.rightbarWidth)}`),
           h('button', { type: 'button', className: 'dshl-btn', 'data-primary': 'true', onClick: () => setEditing(false) }, t('done')))
         : null;
-      const launcher = risk
-        ? h('button', {
-          type: 'button',
-          className: 'dshl-launcher',
-          'data-dshl-launcher': '',
-          style: { pointerEvents: 'auto' },
-          title: t('recoveryHint'),
-          onClick: () => setEditing(true),
-        }, icon(ICON_LAYOUT, 14), h('span', null, t('title')))
+      const launcher = risk && placement !== null
+        ? h('div', {
+          className: 'dshl-launcherDock',
+          'data-dshl-layer': '',
+          'data-mode': placement.mode,
+          style: placement.mode === 'free'
+            ? { left: `${placement.x}px`, top: `${placement.y}px` }
+            : undefined,
+        },
+        placement.mode === 'blank' ? h('span', { className: 'dshl-launcherQuestion' }, t('launcherOnBlank')) : null,
+        h('div', { className: 'dshl-launcherRow' },
+          h('button', {
+            type: 'button',
+            className: 'dshl-launcher',
+            'data-dshl-launcher': '',
+            'data-action': placement.mode === 'blank' ? 'reset' : 'edit',
+            style: { pointerEvents: 'auto' },
+            title: t('recoveryHint'),
+            onClick: placement.mode === 'blank' ? () => { replaceConfig(null); setEditing(false); } : () => setEditing(true),
+          }, icon(ICON_LAYOUT, placement.mode === 'blank' ? 17 : 14), h('span', null, placement.mode === 'blank' ? t('reset') : t('title'))),
+          placement.mode === 'blank'
+            ? h('button', {
+              type: 'button',
+              className: 'dshl-launcher dshl-launcherGhost',
+              style: { pointerEvents: 'auto' },
+              onClick: () => setEditing(true),
+            }, h('span', null, t('editing')))
+            : null),
+        placement.mode === 'blank' ? h('span', { className: 'dshl-launcherHint' }, t('blankHint')) : null)
         : null;
       return h('div', { className: 'dshl-editLayer' }, boxes, handles, launcher, toolbar);
     }
