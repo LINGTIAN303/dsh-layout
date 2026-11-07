@@ -45,7 +45,14 @@ window.__ModuleLoader__.load({
       panelsHint: '左栏面板图标的顺序与显隐；列表来自当前界面。',
       panelsEmpty: '未检测到面板，先打开左栏。',
       conversation: '会话区',
-      conversationHint: '会话内容宽度；留空跟随默认列宽。',
+      conversationHint: '会话内容宽度；留空跟随默认列宽。下方可把会话区拆成三块分别控制。',
+      convPartsHint: '会话区拆解：三块可独立显隐；会话头能与正文换前后，输入区能提到消息区上方。',
+      convPartsMissing: '未识别会话区内部结构，拆解项暂不可用。',
+      partHeader: '会话头',
+      partMessages: '消息区',
+      partComposer: '输入区',
+      partHeaderBottom: '会话头放到正文下方',
+      partComposerTop: '输入区提到消息区上方',
       contentWidth: '内容宽度',
       followDefault: '跟随默认',
       settingsPanel: '设置页',
@@ -149,7 +156,14 @@ window.__ModuleLoader__.load({
       panelsHint: 'Order and visibility of the sidebar panel icons, read from the interface.',
       panelsEmpty: 'No panels detected; open the sidebar first.',
       conversation: 'Conversation',
-      conversationHint: 'Content width; empty follows the default column width.',
+      conversationHint: 'Content width; empty follows the default column width. Below you can split the conversation area into three parts.',
+      convPartsHint: 'Conversation parts: three independently hideable blocks; the header can move below the body and the composer can move above the messages.',
+      convPartsMissing: 'The conversation internals are not recognized; the split controls are unavailable.',
+      partHeader: 'Session header',
+      partMessages: 'Messages',
+      partComposer: 'Composer',
+      partHeaderBottom: 'Header below the body',
+      partComposerTop: 'Composer above the messages',
       contentWidth: 'Content width',
       followDefault: 'Default',
       settingsPanel: 'Settings page',
@@ -235,7 +249,10 @@ window.__ModuleLoader__.load({
         resizeHandles: true,
       },
       sidebar: { order: [...BLOCKS], hidden: [], panelOrder: [], panelHidden: [] },
-      center: { contentWidth: null },
+      center: {
+        contentWidth: null,
+        parts: { hideHeader: false, hideMessages: false, hideComposer: false, headerBottom: false, composerTop: false },
+      },
       settings: { width: null, height: null, navWidth: null, offsetX: 0, offsetY: 0 },
     };
 
@@ -301,7 +318,18 @@ window.__ModuleLoader__.load({
         panelHidden: [...new Set(strings(sb.panelHidden))],
       };
       const center = raw.center && typeof raw.center === 'object' ? raw.center : {};
-      out.center = { contentWidth: center.contentWidth == null ? null : clampInt(center.contentWidth, 520, 1600, null) };
+      const parts = center.parts && typeof center.parts === 'object' ? center.parts : {};
+      out.center = {
+        contentWidth: center.contentWidth == null ? null : clampInt(center.contentWidth, 520, 1600, null),
+        // 会话区拆解：三块独立显隐 + 两个位置开关（会话头置底、输入区置顶）
+        parts: {
+          hideHeader: parts.hideHeader === true,
+          hideMessages: parts.hideMessages === true,
+          hideComposer: parts.hideComposer === true,
+          headerBottom: parts.headerBottom === true,
+          composerTop: parts.composerTop === true,
+        },
+      };
       const settings = raw.settings && typeof raw.settings === 'object' ? raw.settings : {};
       out.settings = {
         width: settings.width == null ? null : clampInt(settings.width, 560, 1400, null),
@@ -790,8 +818,57 @@ window.__ModuleLoader__.load({
       return out;
     }
 
-    function readTargets() {
-      const rootEl = document.getElementById('root');
+    /**
+     * 会话区拆解：把会话区认成三块，每块都是「真正参与 flex 布局的元素」。
+     * 结构（宿主实现）：
+     *   ._root_（flex column）
+     *   ├─ [data-slot=conversation.header]（display:contents）→ header 本身才是 flex 项
+     *   └─ ._body_（flex column）
+     *      └─ ._scrollBody_（flex column，滚动容器）
+     *         ├─ [data-slot=conversation.session]（display:contents）→ 消息内容
+     *         └─ ._composerSeat_（flex 项）
+     *            └─ [data-slot=conversation.composer]（display:contents）→ 输入区
+     * 会话头与 body 同级可排前后；消息区与输入区同在 scrollBody 下可互换。
+     */
+    function readConversationParts(centerCol) {
+      if (centerCol === null || centerCol === undefined) return null;
+      const headerSlot = first(centerCol, '[data-slot="conversation.header"]');
+      const sessionSlot = first(centerCol, '[data-slot="conversation.session"]');
+      const composerSlot = first(centerCol, '[data-slot="conversation.composer"]');
+      if (headerSlot === null || sessionSlot === null || composerSlot === null) return null;
+      const root = headerSlot.parentElement;
+      const body = sessionSlot.parentElement?.parentElement ?? null;
+      const scrollBody = sessionSlot.parentElement;
+      // flex 项解析：display:contents 的槽位本身不占位，取它的第一个元素子级
+      const resolveItem = (slot) => {
+        if (slot === null) return null;
+        const style = getComputedStyle(slot);
+        return style.display === 'contents' ? slot.firstElementChild : slot;
+      };
+      const headerItem = resolveItem(headerSlot);
+      const messagesItem = sessionSlot;
+      const composerItem = composerSlot.parentElement ?? null;
+      if (root === null || scrollBody === null) return null;
+      return { root, body, scrollBody, headerSlot, sessionSlot, composerSlot, headerItem, messagesItem, composerItem };
+    }
+
+    /**
+     * 会话区结构「见过没有」的记忆。
+     * 编辑区挂在插件详情页上，此时主面板是插件页、会话区不在 DOM 里，
+     * 如果每次都按「当前 DOM 有没有」来判断，控制项会在插件页上永远显示不可用。
+     * 因此一旦在会话页识别成功过就记下来（跨会话持久化），让控制项始终可用——
+     * CSS 规则是常驻的，切回会话页自然生效。
+     */
+    const CONV_PARTS_KEY = 'dsh-layout/conv-parts/v1';
+    let convPartsSeen = (() => {
+      try {
+        return window.localStorage.getItem(CONV_PARTS_KEY) === '1';
+      } catch (error) {
+        return false;
+      }
+    })();
+
+    function readTargets() {      const rootEl = document.getElementById('root');
       if (rootEl === null) return ABSENT_TARGETS;
       const frame = first(rootEl, '[data-slot="root"] > div');
       if (frame === null) return ABSENT_TARGETS;
@@ -817,9 +894,14 @@ window.__ModuleLoader__.load({
         }
       }
       const conversation = centerCol ? first(centerCol, '[data-conversation-content]') : null;
+      const convParts = readConversationParts(centerCol);
+      if (convParts !== null && !convPartsSeen) {
+        convPartsSeen = true;
+        try { window.localStorage.setItem(CONV_PARTS_KEY, '1'); } catch (error) { console.warn('[dsh-layout] 保存会话区结构标记失败', error); }
+      }
       const settings = document.querySelector('[data-shortcut-modal="settings"]');
       const ok = Boolean(sidebarCol && centerCol && rightbarCol);
-      const targets = { ok, frame, regions, sidebarRoot, blocks, panels, conversation, settings, surfaces: [], anomalies: [] };
+      const targets = { ok, frame, regions, sidebarRoot, blocks, panels, conversation, convParts, settings, surfaces: [], anomalies: [] };
       targets.surfaces = readSurfaces(targets);
       targets.anomalies = Object.values(surfaceAnomalies).sort((a, b) => b.lastSeenAt - a.lastSeenAt);
       return targets;
@@ -841,6 +923,15 @@ window.__ModuleLoader__.load({
       for (const [region, node] of Object.entries(targets.regions)) mark(node, 'data-dshl-region', region);
       for (const [block, node] of Object.entries(targets.blocks)) mark(node, 'data-dshl-block', block);
       for (const panel of targets.panels) mark(panel.node, 'data-dshl-panel', panel.label);
+      const parts = targets.convParts;
+      if (parts !== null && parts !== undefined) {
+        mark(parts.root, 'data-dshl-convroot');
+        mark(parts.body, 'data-dshl-convbody');
+        mark(parts.scrollBody, 'data-dshl-convscroll');
+        mark(parts.headerItem, 'data-dshl-part', 'header');
+        mark(parts.sessionSlot, 'data-dshl-part', 'messages');
+        mark(parts.composerItem, 'data-dshl-part', 'composer');
+      }
     }
 
     function refresh() {
@@ -1021,6 +1112,23 @@ window.__ModuleLoader__.load({
       if (config.center.contentWidth !== null) {
         const width = Math.round(config.center.contentWidth);
         lines.push(`[data-dshl-conv] { --dsh-chat-content-width: min(${width}px, 100%) !important; --dsh-composer-card-max-width: min(${width + 32}px, 100%) !important; }`);
+      }
+      // 会话区拆解：三块独立显隐与位置。
+      // 会话头与 body 同在 root 下；消息区与输入区同在 scrollBody 下（都是 flex column）。
+      const parts = config.center.parts;
+      if (parts.hideHeader) lines.push('[data-dshl-part="header"] { display: none !important; }');
+      if (parts.hideMessages) lines.push('[data-dshl-part="messages"] { display: none !important; }');
+      if (parts.hideComposer) lines.push('[data-dshl-part="composer"] { display: none !important; }');
+      if (parts.headerBottom) {
+        lines.push('[data-dshl-convroot] { display: flex !important; flex-direction: column !important; }');
+        lines.push('[data-dshl-convbody] { order: 1 !important; }');
+        lines.push('[data-dshl-part="header"] { order: 2 !important; }');
+      }
+      if (parts.composerTop) {
+        lines.push('[data-dshl-convscroll] { display: flex !important; flex-direction: column !important; }');
+        lines.push('[data-dshl-part="composer"] { order: -1 !important; }');
+        // 输入区默认是「粘在底部」的 sticky；提到上方后必须改成粘顶，否则它会跟着内容滚走、跑到屏幕外
+        lines.push('[data-dshl-part="composer"] { position: sticky !important; top: 0 !important; bottom: auto !important; }');
       }
       const settings = config.settings;
       if (settings.width !== null) {
@@ -1691,7 +1799,21 @@ window.__ModuleLoader__.load({
           }, icon(ICON_RESET, 13))));
     }
 
+    /**
+     * 会话区卡片：内容宽度 + 三块拆解。
+     * 拆解提供「独立显隐」与「位置互换」：会话头可以与正文换前后，输入区可以提到消息区上方。
+     * 每块都是宿主真实参与 flex 布局的元素，改动只走 CSS，不改 React 树。
+     */
     function ConversationCard({ config, t }) {
+      const parts = config.center.parts;
+      const detected = convPartsSeen;
+      const toggle = (key, label) => h('div', { className: 'dshl-row' },
+        h('span', { className: 'dshl-rowLabel' }, label),
+        h(Switch, {
+          checked: !parts[key],
+          label,
+          onChange: (on) => updateConfig((draft) => { draft.center.parts[key] = !on; }),
+        }));
       return h(Card, { title: t('conversation'), desc: t('conversationHint') },
         h(FollowField, {
           label: t('contentWidth'),
@@ -1702,7 +1824,26 @@ window.__ModuleLoader__.load({
           step: 10,
           t,
           onChange: (value) => updateConfig((draft) => { draft.center.contentWidth = value; }),
-        }));
+        }),
+        h('div', { className: 'dshl-divider' }),
+        h('div', { className: 'dshl-cardDesc' }, detected ? t('convPartsHint') : t('convPartsMissing')),
+        detected ? toggle('hideHeader', t('partHeader')) : null,
+        detected ? toggle('hideMessages', t('partMessages')) : null,
+        detected ? toggle('hideComposer', t('partComposer')) : null,
+        detected ? h('div', { className: 'dshl-row' },
+          h('span', { className: 'dshl-rowLabel' }, t('partHeaderBottom')),
+          h(Switch, {
+            checked: parts.headerBottom,
+            label: t('partHeaderBottom'),
+            onChange: (on) => updateConfig((draft) => { draft.center.parts.headerBottom = on; }),
+          })) : null,
+        detected ? h('div', { className: 'dshl-row' },
+          h('span', { className: 'dshl-rowLabel' }, t('partComposerTop')),
+          h(Switch, {
+            checked: parts.composerTop,
+            label: t('partComposerTop'),
+            onChange: (on) => updateConfig((draft) => { draft.center.parts.composerTop = on; }),
+          })) : null);
     }
 
     function SettingsCard({ config, t }) {

@@ -53,6 +53,21 @@ flowchart LR
 - **异常自动落盘 + 一键导出**：识别异常写入 `localStorage` 键 `dsh-layout/surface-anomalies/v1`，两类：`drift`（登记过但签名变了）与 `unregistered`（从未登记、只靠自动识别）。「界面结构」卡片底部「待复核清单」列出条目并提供「导出待复核清单」（JSON，含实测签名、观测时间、命中次数）与「清空」。导出文件可直接对照更新 `OFFICIAL_PAGES` / `THIRD_PARTY_PAGES`。异常在页面恢复正常登记时自动清除，清单不会堆积已解决的问题。
 - 页面列表来自侧栏面板行（`aria-current="page"` 判当前页），只收 `button` 子节点，排除「更多」这类菜单触发器。
 
+## 区域界面拆解（会话区）
+
+「拆解」= 把某个区域认成更小的可控单元，让它们能独立显隐与互换位置。第一个落地的区域是会话区：
+
+| 单元 | 宿主结构与判定 |
+| --- | --- |
+| 会话头 | `[data-slot="conversation.header"]`（`display:contents`）里的 `header` 元素，才是真正的 flex 项 |
+| 消息区 | `[data-slot="conversation.session"]`，位于 `._scrollBody_` 下 |
+| 输入区 | `[data-slot="conversation.composer"]` 的父元素 `._composerSeat_`，本身是 `position:sticky` 的 flex 项 |
+
+- 可做的操作：三块**独立显隐**；会话头与正文**换前后**（`convroot` 上设 `order`）；输入区**提到消息区上方**（`convscroll` 上设 `order:-1`）。
+- 提到上方时必须同时把输入区的 `position:sticky; bottom:0` 改成 `sticky; top:0`，否则它会跟着滚动内容一起跑出可视区——这是实测踩到的坑。
+- 拆解结果全部是 CSS `order` / `display` 覆盖，不改 React 树、不移动 DOM，宿主自身的滚动与粘贴行为不受影响。
+- 结构识别过一次会持久化标记（`dsh-layout/conv-parts/v1`）：编辑区挂在插件详情页上，此时会话区不在 DOM 里，若只按「当前 DOM 有没有」判断，控制项会在插件页上永远不可用。
+
 ## 恢复通道（不可恢复状态防护）
 
 布局可能改变「回到插件详情页」的路径，因此恢复能力必须独立于被改变的界面本身：

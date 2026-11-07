@@ -1,6 +1,6 @@
 {
   "name": "dsh-layout",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "private": true,
   "type": "module",
   "description": "布局：自定义 DSH 界面结构（左栏 / 右栏 / 会话区 / 设置页）",
