@@ -940,7 +940,6 @@ window.__ModuleLoader__.load({
     }
 
     /* ============================== 编辑面板（插件详情页内） ============================== */
-    const REGION_LABEL_KEYS = { sidebar: 'sidebar', center: 'center', rightbar: 'rightbar', bottom: 'bottomBar' };
     const BLOCK_LABEL_KEYS = { brand: 'blockBrand', 'new-session': 'blockNewSession', panels: 'blockPanels', workspaces: 'blockWorkspaces', footer: 'blockFooter' };
 
     function StructureCard({ config, t }) {
