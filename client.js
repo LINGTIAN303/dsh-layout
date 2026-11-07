@@ -77,6 +77,31 @@ window.__ModuleLoader__.load({
       nothingToDrag: '当前没有可见区域可拖拽，用预设或恢复默认',
       showAll: '显示全部',
       launcherOnBlank: '仅剩空白页',
+      surfaces: '界面结构',
+      surfacesHint: '宿主原生区域预先登记；插件提供的界面页面在运行时识别，不依赖任何具体插件名。',
+      surfaceNative: '原生区域',
+      surfacePages: '原生页面',
+      surfacePlugins: '插件页面',
+      surfaceConversation: '会话页',
+      surfaceSchedules: '自动化任务',
+      surfacePluginsManager: '插件页',
+      surfacePluginDetail: '插件详情页',
+      surfaceOverlay: '浮层',
+      surfaceSettingsDialog: '设置面板',
+      ownerOfficial: '官方',
+      ownerNative: '原生',
+      ownerThird: '第三方',
+      ownerAuto: '自动识别',
+      tierLabel: '识别方式',
+      tierOfficialShort: '官方登记',
+      tierThirdShort: '第三方登记',
+      tierAutoShort: '自动识别',
+      ownerUnknown: '来源未知',
+      surfaceRecognized: '已识别',
+      surfacePending: '待识别',
+      surfaceDrift: '签名变化，待复核',
+      surfacesEmpty: '当前没识别到插件页面。',
+      surfacesCount: (n) => `共 ${n} 个界面页面`,
     };
     const en = {
       title: 'Layout',
@@ -149,6 +174,31 @@ window.__ModuleLoader__.load({
       nothingToDrag: 'No visible region to drag; use a preset or restore defaults',
       showAll: 'Show all',
       launcherOnBlank: 'Blank page',
+      surfaces: 'Interface surfaces',
+      surfacesHint: 'Native regions are declared ahead of time; plugin-provided pages are recognized at runtime without knowing any specific plugin.',
+      surfaceNative: 'Native regions',
+      surfacePages: 'Native pages',
+      surfacePlugins: 'Plugin pages',
+      surfaceConversation: 'Conversation',
+      surfaceSchedules: 'Scheduled tasks',
+      surfacePluginsManager: 'Plugins page',
+      surfacePluginDetail: 'Plugin detail',
+      surfaceOverlay: 'Overlay',
+      surfaceSettingsDialog: 'Settings panel',
+      ownerOfficial: 'Official',
+      ownerNative: 'Native',
+      ownerThird: 'Third party',
+      ownerAuto: 'Auto-detected',
+      tierLabel: 'Detected by',
+      tierOfficialShort: 'Official registry',
+      tierThirdShort: 'Third-party registry',
+      tierAutoShort: 'Auto-detection',
+      ownerUnknown: 'Unknown source',
+      surfaceRecognized: 'Recognized',
+      surfacePending: 'Pending',
+      surfaceDrift: 'Signature changed, review needed',
+      surfacesEmpty: 'No plugin page recognized yet.',
+      surfacesCount: (n) => `${n} interface pages`,
     };
 
     /* ============================== 配置 ============================== */
@@ -184,6 +234,7 @@ window.__ModuleLoader__.load({
       panels: [],
       conversation: null,
       settings: null,
+      surfaces: [],
     };
 
     function clampInt(value, min, max, fallback) {
@@ -309,11 +360,12 @@ window.__ModuleLoader__.load({
 
     function setTargets(targets) {
       const previous = snapshot.targets;
+      const surfaceSignature = (list) => list.map((surface) => `${surface.id}:${surface.active ? 1 : 0}:${surface.source}:${surface.recognized ? 1 : 0}`).join('|');
       const signature = targets.ok
-        ? `${Object.keys(targets.regions).join(',')}|${targets.panels.map((panel) => panel.label).join('\u0001')}|${targets.settings ? 's' : ''}`
+        ? `${Object.keys(targets.regions).join(',')}|${targets.panels.map((panel) => panel.label).join('\u0001')}|${targets.settings ? 's' : ''}|${surfaceSignature(targets.surfaces)}`
         : '';
       const previousSignature = previous.ok
-        ? `${Object.keys(previous.regions).join(',')}|${previous.panels.map((panel) => panel.label).join('\u0001')}|${previous.settings ? 's' : ''}`
+        ? `${Object.keys(previous.regions).join(',')}|${previous.panels.map((panel) => panel.label).join('\u0001')}|${previous.settings ? 's' : ''}|${surfaceSignature(previous.surfaces ?? [])}`
         : '';
       if (signature === previousSignature && targets.ok === previous.ok) {
         snapshot = { ...snapshot, targets };
@@ -446,6 +498,226 @@ window.__ModuleLoader__.load({
       return (node.textContent ?? '').trim().slice(0, 24);
     }
 
+    /* ============================== 界面结构（surface）识别 ============================== */
+    /**
+     * 「界面结构」= 用户能看到的每一个界面单元：外壳区域 + 页面 + 浮层。
+     *
+     * 识别分三档，优先级从高到低（前两档都是人工登记，第三档才是算法兜底）：
+     * 1. 官方（official）：DSH 自带区域与官方页面，登记在 OFFICIAL_PAGES。
+     *    每次 DSH 升级都要主动复核这份表——它是适配责任，不是猜测结果。
+     * 2. 第三方（third）：已适配的第三方插件页面，登记在 THIRD_PARTY_PAGES。
+     *    逐个补，新插件没来得及适配时自然落到第三档。
+     * 3. 自动识别（auto）：登记的签名都对不上时，按通用证据现场判定——
+     *    iframe / data-dsh-plugin / 独立文档，命中即视为第三方；都不命中记 unknown。
+     *
+     * 关键纪律：未登记的页面绝不因为「长得像官方」被判成官方。官方只有一份人工名单。
+     */
+    const OFFICIAL_PAGES = [
+      // 宿主外壳区域
+      { id: 'region.sidebar', kind: 'region', labelKey: 'sidebar', selector: '[data-slot="sidebar"]' },
+      { id: 'region.center', kind: 'region', labelKey: 'center', selector: '[data-slot="main"]' },
+      { id: 'region.rightbar', kind: 'region', labelKey: 'rightbar', selector: '[data-slot="rightbar"]' },
+      { id: 'region.bottom', kind: 'region', labelKey: 'bottomBar', selector: '[data-slot="shell.bottom"]' },
+      { id: 'region.overlay', kind: 'region', labelKey: 'surfaceOverlay', selector: '[data-slot="shell.overlay"]' },
+      // 宿主自带页面与浮层
+      { id: 'page.conversation', kind: 'page', labelKey: 'surfaceConversation', selector: '[data-slot="main.conversation"]' },
+      { id: 'page.plugins', kind: 'page', labelKey: 'surfacePluginsManager', selector: '[data-plugin-panel]' },
+      { id: 'page.plugin-detail', kind: 'page', labelKey: 'surfacePluginDetail', selector: '[data-plugin-detail]' },
+      { id: 'dialog.settings', kind: 'dialog', labelKey: 'surfaceSettingsDialog', selector: '[data-shortcut-modal="settings"]' },
+      // 官方插件页面（随安装出现）。优先用宿主写死的 data 值做判定，比 CSS 模块哈希稳定得多。
+      { id: 'page.panel:插件', kind: 'official-page', labelKey: 'surfacePluginsManager', signature: { tag: 'section', dataValues: { 'data-plugin-panel': 'true' } } },
+      { id: 'page.panel:自动化任务', kind: 'official-page', labelKey: 'surfaceSchedules', signature: { tag: 'section', dataValues: { 'data-testid': 'task-manager-page' } } },
+    ];
+
+    /**
+     * 已适配的第三方页面登记表（逐步补充）。
+     * 判定优先用插件自己写的 data 值（最稳），其次才用 CSS 模块前缀；
+     * 插件更新导致签名失配时，这一页会自动退回第三档「自动识别」，不会误判成官方。
+     */
+    const THIRD_PARTY_PAGES = [
+      { id: 'page.panel:自媒体工作台', label: '自媒体工作台', signature: { tag: 'div', classPrefix: 'md-root' } },
+      { id: 'page.panel:歸藏设计', label: '歸藏设计', signature: { tag: 'iframe', iframePrefix: '/guizang-design/' } },
+      { id: 'page.panel:上下文洞察', label: '上下文洞察', signature: { tag: 'section', classPrefix: 'lc-ov-page' } },
+      { id: 'page.panel:任务看板', label: '任务看板', signature: { tag: 'div', dataValues: { 'data-dsh-plugin': 'task-board' } } },
+      { id: 'page.panel:技能中心', label: '技能中心', signature: { tag: 'div', dataValues: { 'data-dsh-plugin': 'skill-explorer' } } },
+      { id: 'page.panel:MCP连接器', label: 'MCP连接器', signature: { tag: 'div', classPrefix: 'mcpConnectorMarketPanel' } },
+      { id: 'page.panel:演示文稿', label: '演示文稿', signature: { tag: 'section', classPrefix: 'dshw', dataAttrs: ['data-main'] } },
+    ];
+
+    const SURFACE_STORE_KEY = 'dsh-layout/surfaces/v1';
+
+    function readJsonStore(key) {
+      try {
+        const raw = JSON.parse(window.localStorage.getItem(key) ?? '{}');
+        return raw !== null && typeof raw === 'object' ? raw : {};
+      } catch (error) {
+        console.warn(`[dsh-layout] 读取 ${key} 失败，按空处理`, error);
+        return {};
+      }
+    }
+
+    function writeJsonStore(key, value) {
+      try {
+        window.localStorage.setItem(key, JSON.stringify(value));
+      } catch (error) {
+        console.warn(`[dsh-layout] 保存 ${key} 失败`, error);
+      }
+    }
+
+    let surfaceStore = readJsonStore(SURFACE_STORE_KEY);
+    let surfaceStoreDirty = false;
+
+    function flushSurfaceStore() {
+      if (!surfaceStoreDirty) return;
+      surfaceStoreDirty = false;
+      writeJsonStore(SURFACE_STORE_KEY, surfaceStore);
+    }
+
+    /** 主面板当前渲染的页面根节点：可能是 section/div/iframe，取第一个有尺寸的子元素。 */
+    function mainPageRoot() {
+      const main = document.querySelector('[data-slot="main"]');
+      if (main === null) return null;
+      for (const child of main.children) {
+        const rect = child.getBoundingClientRect();
+        if (rect.width > 20 && rect.height > 20) return child;
+      }
+      return main.firstElementChild;
+    }
+
+    /** 页面签名：tag + CSS 模块前缀 + data-* 名值对，或 iframe 源前缀。 */
+    function pageSignatureOf(root) {
+      if (root === null || root === undefined) return null;
+      if (root.tagName === 'IFRAME') {
+        const src = (root.getAttribute('src') ?? '').split('?')[0];
+        return { tag: 'iframe', iframeSrc: src, dataAttrs: [], data: {}, classPrefix: '' };
+      }
+      const data = {};
+      const dataAttrs = [];
+      for (const attr of root.attributes) {
+        if (!attr.name.startsWith('data-') || attr.name.startsWith('data-dshl')) continue;
+        dataAttrs.push(attr.name);
+        data[attr.name] = attr.value;
+      }
+      dataAttrs.sort();
+      const classPrefix = (String(root.className ?? '').split(' ').filter(Boolean)[0] ?? '').split('_')[0].slice(0, 24);
+      return { tag: root.tagName.toLowerCase(), classPrefix, dataAttrs, data, iframeSrc: null };
+    }
+
+    /** 签名比对：tag 必须一致；iframe 比源前缀；dataValues 要求精确值；dataAttrs 要求属性存在；classPrefix 比前缀。 */
+    function signatureMatches(signature, rule) {
+      if (signature === null || rule === null || rule === undefined) return false;
+      if (rule.tag !== undefined && signature.tag !== rule.tag) return false;
+      if (rule.iframePrefix !== undefined) {
+        return signature.iframeSrc !== null && signature.iframeSrc.startsWith(rule.iframePrefix);
+      }
+      for (const [name, value] of Object.entries(rule.dataValues ?? {})) {
+        if (signature.data?.[name] !== value) return false;
+      }
+      for (const attr of rule.dataAttrs ?? []) {
+        if (!signature.dataAttrs.includes(attr)) return false;
+      }
+      if (rule.classPrefix !== undefined && rule.classPrefix !== '' && !signature.classPrefix.startsWith(rule.classPrefix)) return false;
+      return true;
+    }
+
+    /**
+     * 自动识别（第三档）：人工名单都没命中时的兜底判定。
+     * 只用「插件自己留下的痕迹」，不用外观推测，避免把第三方误认成官方。
+     */
+    function autoDetectSource(root, signature) {
+      if (signature === null) return 'unknown';
+      if (signature.tag === 'iframe') return 'third';
+      if (signature.dataAttrs.includes('data-dsh-plugin')) return 'third';
+      return 'unknown';
+    }
+
+    /**
+     * 判定当前页面的归属与识别档位。
+     * 顺序：官方登记 → 第三方登记 → 自动识别。返回 { source, tier, labelKey?, label? }。
+     */
+    function classifyPage(root) {
+      const signature = pageSignatureOf(root);
+      if (signature === null) return { source: 'unknown', tier: 'auto', signature: null };
+      for (const rule of OFFICIAL_PAGES) {
+        if (rule.signature !== undefined && signatureMatches(signature, rule.signature)) {
+          return { source: 'official', tier: 'official', labelKey: rule.labelKey, signature };
+        }
+      }
+      for (const rule of THIRD_PARTY_PAGES) {
+        if (signatureMatches(signature, rule.signature)) {
+          return { source: 'third', tier: 'third', label: rule.label, signature, pendingOfficial: rule.pendingOfficial === true };
+        }
+      }
+      return { source: autoDetectSource(root, signature), tier: 'auto', signature };
+    }
+
+    /**
+     * 收集当前所有界面结构。
+     * - 外壳区域与宿主页面：来自官方登记表，按选择器判在场；
+     * - 官方插件页面：只用于给侧栏面板行定档，不单独列一遍（面板行已经在插件页面组里）；
+     * - 侧栏插件页面：逐个按三档分级识别。
+     */
+    function readSurfaces(targets) {
+      const out = [];
+      for (const surface of OFFICIAL_PAGES) {
+        if (surface.selector === undefined) continue;
+        out.push({
+          id: surface.id,
+          kind: surface.kind,
+          labelKey: surface.labelKey,
+          source: 'official',
+          tier: 'official',
+          present: document.querySelector(surface.selector) !== null,
+        });
+      }
+      const root = mainPageRoot();
+      const current = classifyPage(root);
+      // 侧栏面板页面
+      const nav = targets.blocks.panels ?? null;
+      // 只收按钮：nav 里除面板按钮外还有「更多」这类菜单触发器，它们不指向页面
+      const rows = nav === null ? [] : [...nav.children].filter((node) => node.tagName === 'BUTTON');
+      const activeRow = rows.find((row) => row.getAttribute('aria-current') === 'page') ?? null;
+      const activeLabel = activeRow === null ? null : (activeRow.getAttribute('aria-label') ?? '').trim();
+      for (const row of rows) {
+        const label = (row.getAttribute('aria-label') ?? '').trim();
+        if (label === '') continue;
+        const isActive = label === activeLabel && root !== null;
+        // 侧栏面板的归属以「官方表命中 → 第三方表命中 → 自动识别」为准；
+        // 未激活的行看不到自己的页面，只能用已缓存的结果，缓存里没有就标为待识别。
+        const known = surfaceStore[label];
+        const result = isActive ? current : (known ?? null);
+        const source = result?.source ?? 'unknown';
+        const tier = result?.tier ?? 'pending';
+        // 登记失配：这一页曾经被官方/第三方登记表认出来，这次却掉到自动档 ——
+        // 说明页面签名变了（DSH 升级或插件更新），该复核登记表了。
+        // 用 registeredTier 记住「上次命中的档位」，不能拿当前结果比，否则一次失配就永久丢线索。
+        const registeredTier = known?.registeredTier ?? (known?.tier === 'official' || known?.tier === 'third' ? known.tier : null);
+        const drift = isActive && registeredTier !== null && current.tier === 'auto';
+        if (isActive && current.signature !== null) {
+          const nextRegisteredTier = current.tier === 'official' || current.tier === 'third' ? current.tier : registeredTier;
+          const recorded = JSON.stringify({ source: current.source, tier: current.tier, signature: current.signature, registeredTier: nextRegisteredTier });
+          if (known === undefined || JSON.stringify({ source: known.source, tier: known.tier, signature: known.signature, registeredTier }) !== recorded) {
+            surfaceStore[label] = { source: current.source, tier: current.tier, signature: current.signature, registeredTier: nextRegisteredTier, seenAt: Date.now() };
+            surfaceStoreDirty = true;
+          }
+        }
+        out.push({
+          id: `page.panel:${label}`,
+          kind: 'plugin-page',
+          label,
+          source,
+          tier,
+          drift,
+          present: true,
+          active: isActive,
+          signature: result?.signature ?? null,
+          recognized: isActive || known !== undefined,
+        });
+      }
+      flushSurfaceStore();
+      return out;
+    }
+
     function readTargets() {
       const rootEl = document.getElementById('root');
       if (rootEl === null) return ABSENT_TARGETS;
@@ -475,7 +747,9 @@ window.__ModuleLoader__.load({
       const conversation = centerCol ? first(centerCol, '[data-conversation-content]') : null;
       const settings = document.querySelector('[data-shortcut-modal="settings"]');
       const ok = Boolean(sidebarCol && centerCol && rightbarCol);
-      return { ok, frame, regions, sidebarRoot, blocks, panels, conversation, settings };
+      const targets = { ok, frame, regions, sidebarRoot, blocks, panels, conversation, settings, surfaces: [] };
+      targets.surfaces = readSurfaces(targets);
+      return targets;
     }
 
     const MARKERS = [
@@ -537,6 +811,13 @@ window.__ModuleLoader__.load({
 .dshl-item[data-dragover="true"] { border-color:var(--dsw-alias-brand-primary); }
 .dshl-itemHandle { cursor:grab; color:var(--dsw-alias-label-secondary); display:inline-flex; flex:none; }
 .dshl-itemLabel { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
+.dshl-item[data-active="true"] { border-color:var(--dsw-alias-brand-primary); background:color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, var(--dsw-alias-bg-layer-2)); }
+.dshl-surfaceGroup { display:flex; flex-direction:column; gap:4px; }
+.dshl-surfaceGroupTitle { font-size:11px; line-height:16px; color:var(--dsw-alias-label-secondary); }
+.dshl-surfaceDot { width:6px; height:6px; border-radius:50%; flex:none; background:var(--dsw-alias-label-secondary); opacity:.45; }
+.dshl-surfaceDot[data-on="true"] { opacity:1; background:var(--dsw-alias-state-success-primary); }
+.dshl-surfaceDot[data-on="true"][data-source="official"] { background:var(--dsw-alias-brand-primary); }
+.dshl-surfaceDot[data-on="true"][data-source="third"] { background:var(--dsw-alias-state-warn-primary); }
 .dshl-itemSub { font-size:11px; color:var(--dsw-alias-label-secondary); flex:none; }
 .dshl-iconBtn { width:22px; height:22px; flex:none; display:inline-flex; align-items:center; justify-content:center; padding:0; border:none; border-radius:4px; background:transparent; color:var(--dsw-alias-label-secondary); cursor:pointer; }
 .dshl-iconBtn:hover { background:var(--dsw-alias-interactive-bg-hover); color:var(--dsw-alias-label-primary); }
@@ -1220,6 +1501,47 @@ window.__ModuleLoader__.load({
           })));
     }
 
+    /**
+     * 界面结构卡片：把「用户能看到的界面单元」摊开成一张表。
+     * 三档识别在行上可见：官方登记 / 第三方登记 / 自动识别。
+     * 未登记的页面标「自动识别」而不是「官方」，避免把第三方误当成官方。
+     */
+    function SurfacesCard({ targets, t }) {
+      const surfaces = targets.surfaces ?? [];
+      const regions = surfaces.filter((surface) => surface.kind === 'region');
+      const hostPages = surfaces.filter((surface) => surface.kind === 'page' || surface.kind === 'dialog' || surface.kind === 'official-page');
+      const pluginPages = surfaces.filter((surface) => surface.kind === 'plugin-page');
+      const tierText = (surface) => {
+        if (surface.tier === 'official') return t('tierOfficialShort');
+        if (surface.tier === 'third') return t('tierThirdShort');
+        if (surface.tier === 'pending') return t('surfacePending');
+        return t('tierAutoShort');
+      };
+      const renderRow = (surface, extra) => h('div', { key: surface.id, className: 'dshl-item', 'data-active': surface.active === true ? 'true' : undefined },
+        h('span', { className: 'dshl-surfaceDot', 'data-on': surface.present === false ? 'false' : 'true', 'data-source': surface.source, 'aria-hidden': true }),
+        h('span', { className: 'dshl-itemLabel', title: surface.labelKey === undefined ? surface.label : undefined }, surface.labelKey === undefined ? surface.label : t(surface.labelKey)),
+        extra === undefined ? null : h('span', { className: 'dshl-itemSub' }, extra));
+      const officialCount = pluginPages.filter((surface) => surface.tier === 'official').length;
+      const thirdCount = pluginPages.filter((surface) => surface.tier === 'third').length;
+      const autoCount = pluginPages.filter((surface) => surface.tier === 'auto' || surface.tier === 'pending').length;
+      return h(Card, { title: t('surfaces'), desc: t('surfacesHint') },
+        h('div', { className: 'dshl-surfaceGroup' },
+          h('div', { className: 'dshl-surfaceGroupTitle' }, t('surfaceNative')),
+          h('div', { className: 'dshl-list' }, regions.map((surface) => renderRow(surface, t('ownerNative'))))),
+        h('div', { className: 'dshl-surfaceGroup' },
+          h('div', { className: 'dshl-surfaceGroupTitle' }, t('surfacePages')),
+          h('div', { className: 'dshl-list' }, hostPages.map((surface) => renderRow(surface, surface.present ? t('surfaceRecognized') : '—')))),
+        h('div', { className: 'dshl-surfaceGroup' },
+          h('div', { className: 'dshl-surfaceGroupTitle' }, `${t('surfacePlugins')} · ${t('surfacesCount')(pluginPages.length)}`),
+          h('div', { className: 'dshl-hint' }, `${t('ownerOfficial')} ${officialCount} · ${t('ownerThird')} ${thirdCount} · ${t('ownerAuto')} ${autoCount}`),
+          pluginPages.length === 0
+            ? h('div', { className: 'dshl-hint' }, t('surfacesEmpty'))
+            : h('div', { className: 'dshl-list dshl-listScroll' }, pluginPages.map((surface) => renderRow(
+              surface,
+              surface.drift === true ? t('surfaceDrift') : `${tierText(surface)}${surface.recognized ? '' : ` · ${t('surfacePending')}`}`,
+            )))));
+    }
+
     function FollowField({ label, value, fallback, min, max, step, onChange, t }) {
       return h(Field, { label, valueText: value === null ? t('followDefault') : `${value}${t('px')}` },
         h('div', { className: 'dshl-row' },
@@ -1366,6 +1688,7 @@ window.__ModuleLoader__.load({
           h(StructureCard, { config, t }),
           h(BlocksCard, { config, t }),
           h(PanelsCard, { config, targets, t }),
+          h(SurfacesCard, { targets, t }),
           h(ConversationCard, { config, t }),
           h(SettingsCard, { config, t })),
         h('div', { className: 'dshl-divider' }),
