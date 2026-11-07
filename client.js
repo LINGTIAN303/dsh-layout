@@ -532,7 +532,7 @@ window.__ModuleLoader__.load({
 .dshl-toolbarTitle { font-weight:600; padding:0 2px; white-space:nowrap; }
 .dshl-toolbar .dshl-chip { height:24px; padding:0 9px; font-size:11px; white-space:nowrap; }
 .dshl-toolbar .dshl-btn { height:24px; padding:0 9px; font-size:11px; white-space:nowrap; }
-.dshl-launcher { position:fixed; left:calc(var(--dsh-frame-leading-clearance, 0px) + 12px); bottom:14px; z-index:1300; display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 12px 0 9px; border-radius:999px; border:1px solid var(--dsw-alias-border-l2); background:var(--dsw-alias-bg-overlay); color:var(--dsw-alias-label-primary); font-size:12px; font-family:inherit; cursor:pointer; box-shadow:var(--dsw-elevation-prominent, 0 6px 18px rgba(0,0,0,.25)); opacity:.72; transition:opacity .15s; }
+.dshl-launcher { position:fixed; left:calc(var(--dsh-frame-leading-clearance, 0px) + 12px); bottom:14px; z-index:1300; display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 12px 0 9px; border-radius:999px; border:1px solid var(--dsw-alias-border-l2); background:var(--dsw-alias-bg-overlay); color:var(--dsw-alias-label-primary); font-size:12px; font-family:inherit; cursor:pointer; pointer-events:auto; box-shadow:var(--dsw-elevation-prominent, 0 6px 18px rgba(0,0,0,.25)); opacity:.72; transition:opacity .15s; }
 .dshl-launcher:hover { opacity:1; }
 .dshl-warn { margin:0; font-size:11px; line-height:17px; color:var(--dsw-alias-state-warn-primary); }
 `;
@@ -543,13 +543,18 @@ window.__ModuleLoader__.load({
     let refreshFrame = null;
 
     function ensureStyles() {
-      if (baseStyle === null) {
+      // 插件模块热更新会重新执行 apply：清掉上一代留下的同名样式，避免旧规则覆盖新规则；
+      // 本代自己的两个标签保持复用，防止每次重绘都重建样式。
+      for (const stale of document.querySelectorAll('style[data-dsh-layout]')) {
+        if (stale !== baseStyle && stale !== dynamicStyle) stale.remove();
+      }
+      if (baseStyle === null || !baseStyle.isConnected) {
         baseStyle = document.createElement('style');
         baseStyle.dataset.dshLayout = 'base';
         baseStyle.textContent = BASE_CSS;
         document.head.appendChild(baseStyle);
       }
-      if (dynamicStyle === null) {
+      if (dynamicStyle === null || !dynamicStyle.isConnected) {
         dynamicStyle = document.createElement('style');
         dynamicStyle.dataset.dshLayout = 'dynamic';
         document.head.appendChild(dynamicStyle);
@@ -1082,6 +1087,26 @@ window.__ModuleLoader__.load({
         return () => window.removeEventListener('keydown', onKeyDown, true);
       }, [ui.editing]);
 
+      // 兜底点击通道：即使恢复按钮被 pointer-events/遮挡问题吃掉，按坐标命中同样能打开浮层
+      React.useEffect(() => {
+        const hitLauncher = (event) => {
+          if (event.button !== 0 || event.defaultPrevented) return;
+          const launcher = document.querySelector('[data-dshl-launcher]');
+          if (launcher === null) return;
+          const rect = launcher.getBoundingClientRect();
+          if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) return;
+          event.preventDefault();
+          event.stopPropagation();
+          setEditing(true);
+        };
+        document.addEventListener('pointerdown', hitLauncher, true);
+        document.addEventListener('mousedown', hitLauncher, true);
+        return () => {
+          document.removeEventListener('pointerdown', hitLauncher, true);
+          document.removeEventListener('mousedown', hitLauncher, true);
+        };
+      }, []);
+
       const active = config.enabled && bounds !== null;
       if (!active) return null;
 
@@ -1209,6 +1234,8 @@ window.__ModuleLoader__.load({
         ? h('button', {
           type: 'button',
           className: 'dshl-launcher',
+          'data-dshl-launcher': '',
+          style: { pointerEvents: 'auto' },
           title: t('recoveryHint'),
           onClick: () => setEditing(true),
         }, icon(ICON_LAYOUT, 14), h('span', null, t('title')))
