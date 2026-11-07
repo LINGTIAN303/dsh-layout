@@ -66,6 +66,12 @@ window.__ModuleLoader__.load({
       px: 'px',
       follow: '默认',
       disabledHint: '启用后才会改变界面；右侧预览不需要重启。',
+      recoveryHint: '自定义布局可能挡住插件入口；这个按钮始终能打开编辑浮层并恢复默认。',
+      recoveryShortcut: '布局：打开编辑浮层（恢复入口）',
+      openPlugins: '插件页',
+      riskyHint: '注意：侧栏或面板入口已被隐藏。右下角会保留「布局」恢复按钮，快捷键也能打开编辑浮层。',
+      shortcutHint: '快捷键：Ctrl/⌘+Alt+L 打开编辑浮层；再加 Shift 直接恢复默认布局。',
+      offsetClamped: '偏移会自动限制，保证设置面板始终留在屏幕内。',
     };
     const en = {
       title: 'Layout',
@@ -127,6 +133,12 @@ window.__ModuleLoader__.load({
       px: 'px',
       follow: 'Default',
       disabledHint: 'Nothing changes until enabled; preview applies immediately.',
+      recoveryHint: 'A custom layout can hide the plugin entry; this button always opens the edit overlay and can restore defaults.',
+      recoveryShortcut: 'Layout: open the edit overlay (recovery)',
+      openPlugins: 'Plugins page',
+      riskyHint: 'Heads up: the sidebar or panel entry is hidden. A "Layout" recovery button stays in the corner, and the shortcut also opens the edit overlay.',
+      shortcutHint: 'Shortcuts: Ctrl/⌘+Alt+L opens the edit overlay; add Shift to restore the default layout.',
+      offsetClamped: 'Offsets are clipped so the settings panel always stays on screen.',
     };
 
     /* ============================== 配置 ============================== */
@@ -516,10 +528,13 @@ window.__ModuleLoader__.load({
 .dshl-drag { position:absolute; top:0; bottom:0; width:12px; margin-left:-6px; pointer-events:auto; cursor:col-resize; touch-action:none; }
 .dshl-drag:after { content:''; position:absolute; top:0; bottom:0; left:5px; width:2px; background:var(--dsw-alias-brand-primary); opacity:0; transition:opacity .12s; }
 .dshl-drag:hover:after, .dshl-drag[data-active="true"]:after { opacity:.85; }
-.dshl-toolbar { position:fixed; left:50%; bottom:18px; transform:translateX(-50%); z-index:1200; display:flex; align-items:center; gap:8px; padding:7px 9px; border-radius:12px; background:var(--dsw-alias-bg-overlay); border:1px solid var(--dsw-alias-border-l2); box-shadow:var(--dsw-elevation-prominent, 0 8px 24px rgba(0,0,0,.25)); pointer-events:auto; font-size:12px; color:var(--dsw-alias-label-primary); }
-.dshl-toolbarTitle { font-weight:600; padding:0 2px; }
-.dshl-toolbar .dshl-chip { height:24px; padding:0 9px; font-size:11px; }
-.dshl-toolbar .dshl-btn { height:24px; padding:0 9px; font-size:11px; }
+.dshl-toolbar { position:fixed; left:50%; bottom:18px; transform:translateX(-50%); z-index:1200; display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:8px; max-width:calc(100vw - 24px); padding:7px 9px; border-radius:12px; background:var(--dsw-alias-bg-overlay); border:1px solid var(--dsw-alias-border-l2); box-shadow:var(--dsw-elevation-prominent, 0 8px 24px rgba(0,0,0,.25)); pointer-events:auto; font-size:12px; color:var(--dsw-alias-label-primary); }
+.dshl-toolbarTitle { font-weight:600; padding:0 2px; white-space:nowrap; }
+.dshl-toolbar .dshl-chip { height:24px; padding:0 9px; font-size:11px; white-space:nowrap; }
+.dshl-toolbar .dshl-btn { height:24px; padding:0 9px; font-size:11px; white-space:nowrap; }
+.dshl-launcher { position:fixed; left:calc(var(--dsh-frame-leading-clearance, 0px) + 12px); bottom:14px; z-index:1300; display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 12px 0 9px; border-radius:999px; border:1px solid var(--dsw-alias-border-l2); background:var(--dsw-alias-bg-overlay); color:var(--dsw-alias-label-primary); font-size:12px; font-family:inherit; cursor:pointer; box-shadow:var(--dsw-elevation-prominent, 0 6px 18px rgba(0,0,0,.25)); opacity:.72; transition:opacity .15s; }
+.dshl-launcher:hover { opacity:1; }
+.dshl-warn { margin:0; font-size:11px; line-height:17px; color:var(--dsw-alias-state-warn-primary); }
 `;
 
     let baseStyle = null;
@@ -571,7 +586,7 @@ window.__ModuleLoader__.load({
       lines.push(`[data-dshl-frame]:not([data-sidebar-collapsed]) { grid-template-columns: ${template(true)} !important; }`);
       lines.push(`[data-dshl-frame]:not([data-sidebar-collapsed])[data-rightbar-collapsed] { grid-template-columns: ${template(false)} !important; }`);
       order.forEach((region, index) => {
-        lines.push(`[data-dshl-frame] > [data-dshl-region="${region}"] { grid-column: ${index + 1} !important; grid-row: 1 !important; }`);
+        lines.push(`[data-dshl-frame]:not([data-sidebar-collapsed]) > [data-dshl-region="${region}"] { grid-column: ${index + 1} !important; grid-row: 1 !important; }`);
       });
       lines.push('[data-dshl-frame] > [data-dshl-region="bottom"] { grid-row: 2 !important; grid-column: 1 / -1 !important; }');
       lines.push('[data-dshl-frame] > [data-side] { display: none !important; }');
@@ -618,8 +633,25 @@ window.__ModuleLoader__.load({
       if (settings.navWidth !== null) {
         lines.push(`[data-dshl-settings] { grid-template-columns: ${settings.navWidth}px minmax(0, 1fr) !important; }`);
       }
+      // 偏移只用来微调位置：夹取到「面板仍在屏幕内」的区间，避免把设置面板推到看不见的地方
       if (settings.offsetX !== 0 || settings.offsetY !== 0) {
-        lines.push(`[data-dshl-settings] { position: relative !important; left: ${settings.offsetX}px !important; top: ${settings.offsetY}px !important; }`);
+        const viewportWidth = Math.max(360, window.innerWidth || 1280);
+        const viewportHeight = Math.max(360, window.innerHeight || 800);
+        const effectiveWidth = Math.min(settings.width ?? 800, viewportWidth - 48);
+        const effectiveHeight = Math.min(settings.height ?? 684, viewportHeight - 48);
+        const centerX = (viewportWidth - effectiveWidth) / 2;
+        const centerY = (viewportHeight - effectiveHeight) / 2;
+        const minLeft = 8;
+        const maxLeft = Math.max(minLeft, viewportWidth - 8 - effectiveWidth);
+        const minTop = 8;
+        const maxTop = Math.max(minTop, viewportHeight - 8 - effectiveHeight);
+        const left = Math.min(maxLeft, Math.max(minLeft, centerX + settings.offsetX));
+        const top = Math.min(maxTop, Math.max(minTop, centerY + settings.offsetY));
+        const deltaX = Math.round(left - centerX);
+        const deltaY = Math.round(top - centerY);
+        if (deltaX !== 0 || deltaY !== 0) {
+          lines.push(`[data-dshl-settings] { position: relative !important; left: ${deltaX}px !important; top: ${deltaY}px !important; }`);
+        }
       }
       return lines.join('\n');
     }
@@ -642,6 +674,7 @@ window.__ModuleLoader__.load({
 
     const ICON_GRIP = ['M6 4h.01M10 4h.01M6 8h.01M10 8h.01M6 12h.01M10 12h.01'];
     const ICON_RESET = ['M3.2 8a4.8 4.8 0 1 0 1.5-3.5', 'M3.2 3.2v3.4h3.4'];
+    const ICON_LAYOUT = ['M2.8 3.2h3v9.6h-3zM8.2 3.2h3v4.8h-3zM8.2 9.6h3v3.2h-3z'];
 
     function Switch({ checked, onChange, label }) {
       return h('button', {
@@ -891,7 +924,8 @@ window.__ModuleLoader__.load({
         num(t('settingsHeight'), 'height', 800, 380, 1200),
         num(t('settingsNav'), 'navWidth', 188, 120, 360),
         offset(t('offsetX'), 'offsetX', -600, 600),
-        offset(t('offsetY'), 'offsetY', -500, 500));
+        offset(t('offsetY'), 'offsetY', -500, 500),
+        h('p', { className: 'dshl-hint' }, t('offsetClamped')));
     }
 
     function Editor({ t }) {
@@ -933,6 +967,10 @@ window.__ModuleLoader__.load({
         ['rightSide', t('presetRightSide')],
         ['wide', t('presetWide')],
       ];
+      const risky = config.enabled
+        && (config.columns.hideSidebar
+          || config.sidebar.panelHidden.length > 0
+          || config.sidebar.hidden.length >= BLOCKS.length);
 
       return h('div', { className: 'dshl-root' },
         h('div', { className: 'dshl-head' },
@@ -950,6 +988,7 @@ window.__ModuleLoader__.load({
             onChange: (on) => updateConfig((draft) => { draft.enabled = on; }, { capture: on }),
           })),
         h('p', { className: 'dshl-hint' }, t('enableHint')),
+        risky ? h('p', { className: 'dshl-warn' }, t('riskyHint')) : null,
         h('div', { className: 'dshl-presets' },
           h('span', { className: 'dshl-presetsLabel' }, t('presets')),
           ...presetLabels.map(([name, label]) => h('button', {
@@ -978,6 +1017,7 @@ window.__ModuleLoader__.load({
             },
           })),
         h('p', { className: 'dshl-hint' }, t('editingHint')),
+        h('p', { className: 'dshl-hint' }, t('shortcutHint')),
         h('div', { className: 'dshl-cards' },
           h(StructureCard, { config, t }),
           h(BlocksCard, { config, t }),
@@ -994,7 +1034,7 @@ window.__ModuleLoader__.load({
     }
 
     /* ============================== 编辑模式浮层 ============================== */
-    function EditOverlay({ t }) {
+    function EditOverlay({ t, ctx }) {
       const { config, targets, ui } = useStoreSnapshot();
       const [bounds, setBounds] = React.useState(null);
       const [dragging, setDragging] = React.useState(null);
@@ -1031,8 +1071,56 @@ window.__ModuleLoader__.load({
         measure();
       }, [measure, config]);
 
+      React.useEffect(() => {
+        if (!ui.editing) return undefined;
+        const onKeyDown = (event) => {
+          if (event.key !== 'Escape' || event.defaultPrevented) return;
+          if (document.querySelector('[role="dialog"]') !== null) return;
+          setEditing(false);
+        };
+        window.addEventListener('keydown', onKeyDown, true);
+        return () => window.removeEventListener('keydown', onKeyDown, true);
+      }, [ui.editing]);
+
       const active = config.enabled && bounds !== null;
       if (!active) return null;
+
+      // 恢复入口的判定：只要「打开插件详情页」的路径可能断掉，就常驻一个恢复按钮
+      const sidebarReachable = (() => {
+        const sidebar = targets.regions.sidebar;
+        if (sidebar === null || sidebar === undefined) return false;
+        const rect = sidebar.getBoundingClientRect();
+        if (rect.width < 40 || rect.right <= 8 || rect.left >= window.innerWidth - 8) return false;
+        const nav = targets.blocks.panels;
+        if (nav === null || nav === undefined) return true;
+        return [...nav.children].some((node) => {
+          const box = node.getBoundingClientRect();
+          const style = getComputedStyle(node);
+          return box.width > 0 && box.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+        });
+      })();
+      // 编辑区在会话区（main 面板）里：中栏被挤到屏幕外时同样进不了插件详情页
+      const centerReachable = (() => {
+        const center = targets.regions.center;
+        if (center === null || center === undefined) return false;
+        const rect = center.getBoundingClientRect();
+        return rect.width >= 120 && rect.right > 8 && rect.left < window.innerWidth - 8;
+      })();
+      const risk = config.enabled
+        && (config.columns.hideSidebar
+          || config.sidebar.panelHidden.length > 0
+          || config.sidebar.hidden.length >= BLOCKS.length
+          || !sidebarReachable
+          || !centerReachable);
+      const openPlugins = () => {
+        const layout = ctx !== null && ctx !== undefined && typeof ctx.get === 'function' ? ctx.get('layout') : undefined;
+        if (layout === null || layout === undefined || typeof layout.selectPanel !== 'function') return;
+        try {
+          layout.selectPanel('plugins');
+        } catch (error) {
+          console.warn('[dsh-layout] 打开插件面板失败', error);
+        }
+      };
 
       const labels = {
         sidebar: t('sidebar'),
@@ -1112,11 +1200,20 @@ window.__ModuleLoader__.load({
             className: 'dshl-chip',
             onClick: () => applyPreset(name),
           }, label)),
+          h('button', { type: 'button', className: 'dshl-btn', onClick: openPlugins }, t('openPlugins')),
           h('button', { type: 'button', className: 'dshl-btn', onClick: () => replaceConfig(null) }, t('reset')),
           h('span', { className: 'dshl-itemSub' }, `${Math.round(config.columns.sidebarWidth)} / ${Math.round(config.columns.rightbarWidth)}`),
           h('button', { type: 'button', className: 'dshl-btn', 'data-primary': 'true', onClick: () => setEditing(false) }, t('done')))
         : null;
-      return h('div', { className: 'dshl-editLayer' }, boxes, handles, toolbar);
+      const launcher = risk
+        ? h('button', {
+          type: 'button',
+          className: 'dshl-launcher',
+          title: t('recoveryHint'),
+          onClick: () => setEditing(true),
+        }, icon(ICON_LAYOUT, 14), h('span', null, t('title')))
+        : null;
+      return h('div', { className: 'dshl-editLayer' }, boxes, handles, launcher, toolbar);
     }
 
     /* ============================== 插件装配 ============================== */
@@ -1157,6 +1254,78 @@ window.__ModuleLoader__.load({
 
       ctx.effect(() => subscribe(() => applyDynamicCss()), 'dsh-layout: layout styles');
 
+      // 最后一道兜底：不依赖浮层组件是否渲染，直接从键盘恢复默认
+      ctx.effect(() => {
+        const onKeyDown = (event) => {
+          if (event.ctrlKey !== true || event.altKey !== true || event.shiftKey !== true || event.metaKey === true) return;
+          if (event.code !== 'KeyL') return;
+          event.preventDefault();
+          replaceConfig(null);
+          setEditing(false);
+        };
+        window.addEventListener('keydown', onKeyDown, true);
+        return () => window.removeEventListener('keydown', onKeyDown, true);
+      }, 'dsh-layout: hard reset shortcut');
+
+      // Web 端的应急入口：地址栏加 #dsh-layout=reset 即可恢复默认
+      ctx.effect(() => {
+        const consumeHash = () => {
+          const hash = window.location.hash;
+          const at = hash.indexOf('dsh-layout=');
+          if (at === -1) return;
+          const value = hash.slice(at + 'dsh-layout='.length).split('&')[0];
+          if (value !== 'reset' && value !== 'off') return;
+          replaceConfig(null);
+          setEditing(false);
+          try {
+            window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+          } catch (error) {
+            console.warn('[dsh-layout] 无法清理地址栏哈希', error);
+          }
+        };
+        consumeHash();
+        window.addEventListener('hashchange', consumeHash);
+        return () => window.removeEventListener('hashchange', consumeHash);
+      }, 'dsh-layout: url reset');
+
+      ctx.effect(() => {
+        const activate = () => {
+          if (!snapshot.config.enabled) updateConfig((draft) => { draft.enabled = true; }, { capture: true });
+          setEditing(true);
+        };
+        const shortcuts = typeof ctx.get === 'function' ? ctx.get('shortcuts') : undefined;
+        if (shortcuts !== null && shortcuts !== undefined && typeof shortcuts.register === 'function') {
+          try {
+            return shortcuts.register({
+              id: 'dsh-layout.recovery',
+              label: () => t('recoveryShortcut'),
+              aliases: ['layout', 'recovery', '布局'],
+              defaults: {
+                'desktop:macos': { code: 'KeyL', modifiers: ['primary', 'alt'] },
+                'desktop:windows': { code: 'KeyL', modifiers: ['primary', 'alt'] },
+                'desktop:linux': { code: 'KeyL', modifiers: ['primary', 'alt'] },
+                'web:macos': { code: 'KeyL', modifiers: ['primary', 'alt'] },
+                'web:windows': { code: 'KeyL', modifiers: ['primary', 'alt'] },
+                'web:linux': { code: 'KeyL', modifiers: ['primary', 'alt'] },
+              },
+              regions: ['page'],
+              modals: [],
+              resolve: () => ({ status: 'handled', run: activate }),
+            });
+          } catch (error) {
+            console.warn('[dsh-layout] 快捷键注册失败，改用内置监听', error);
+          }
+        }
+        const onKeyDown = (event) => {
+          if (event.ctrlKey !== true || event.altKey !== true || event.metaKey === true || event.shiftKey === true) return;
+          if (event.code !== 'KeyL') return;
+          event.preventDefault();
+          activate();
+        };
+        window.addEventListener('keydown', onKeyDown, true);
+        return () => window.removeEventListener('keydown', onKeyDown, true);
+      }, 'dsh-layout: recovery shortcut');
+
       ctx.effect(() => ctx.slots.inject('plugins.detail.section', () => ctx.slots.register({
         name: 'plugins.detail.section',
         id: 'dsh-layout-section',
@@ -1177,7 +1346,7 @@ window.__ModuleLoader__.load({
         id: 'dsh-layout-editor',
         order: 900,
         label: () => t('editLayer'),
-      }, () => h(Boundary, null, h(EditOverlay, { t })))), 'dsh-layout: edit overlay');
+      }, () => h(Boundary, null, h(EditOverlay, { t, ctx })))), 'dsh-layout: edit overlay');
     }
 
     return { apply, inject };
