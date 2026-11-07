@@ -73,6 +73,7 @@ window.__ModuleLoader__.load({
       shortcutHint: '快捷键：Ctrl/⌘+Alt+L 打开编辑浮层；再加 Shift 直接恢复默认布局。',
       offsetClamped: '偏移会自动限制，保证设置面板始终留在屏幕内。',
       blankHint: '点击恢复布局，或按 Ctrl/⌘+Alt+L',
+      nothingToDrag: '当前没有可见区域可拖拽，用预设或恢复默认',
       showAll: '显示全部',
       launcherOnBlank: '仅剩空白页',
     };
@@ -143,6 +144,7 @@ window.__ModuleLoader__.load({
       shortcutHint: 'Shortcuts: Ctrl/⌘+Alt+L opens the edit overlay; add Shift to restore the default layout.',
       offsetClamped: 'Offsets are clipped so the settings panel always stays on screen.',
       blankHint: 'Click to restore the layout, or press Ctrl/⌘+Alt+L',
+      nothingToDrag: 'No visible region to drag; use a preset or restore defaults',
       showAll: 'Show all',
       launcherOnBlank: 'Blank page',
     };
@@ -1264,23 +1266,19 @@ window.__ModuleLoader__.load({
         return () => window.removeEventListener('keydown', onKeyDown, true);
       }, [ui.editing]);
 
-      // 兜底点击通道：即使恢复按钮被 pointer-events/遮挡问题吃掉，按坐标命中同样能打开浮层
+      // 兜底点击通道：即使按钮被 pointer-events/遮挡问题吃掉，按坐标命中同样能触发
       React.useEffect(() => {
         const hitLauncher = (event) => {
           if (event.button !== 0 || event.defaultPrevented) return;
-          const launcher = document.querySelector('[data-dshl-launcher]');
-          if (launcher === null) return;
-          const rect = launcher.getBoundingClientRect();
-          if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) return;
-          event.preventDefault();
-          event.stopPropagation();
-          // 空白页上的按钮直接恢复默认；其余情况打开编辑浮层（与按钮自身点击语义一致）
-          if (launcher.getAttribute('data-action') === 'reset') {
-            replaceConfig(null);
-            setEditing(false);
+          const buttons = [...document.querySelectorAll('[data-dshl-button]')];
+          for (const button of buttons) {
+            const rect = button.getBoundingClientRect();
+            if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) continue;
+            event.preventDefault();
+            event.stopPropagation();
+            button.click();
             return;
           }
-          setEditing(true);
         };
         document.addEventListener('pointerdown', hitLauncher, true);
         document.addEventListener('mousedown', hitLauncher, true);
@@ -1333,7 +1331,11 @@ window.__ModuleLoader__.load({
         };
       }
       const placement = placementRef.current.value;
+      // 打开插件页：中栏被藏起来时先放出来，否则切过去也是空白
       const openPlugins = () => {
+        if (snapshot.config.columns.hideCenter) {
+          updateConfig((draft) => { draft.columns.hideCenter = false; });
+        }
         const layout = ctx !== null && ctx !== undefined && typeof ctx.get === 'function' ? ctx.get('layout') : undefined;
         if (layout === null || layout === undefined || typeof layout.selectPanel !== 'function') return;
         try {
@@ -1406,6 +1408,7 @@ window.__ModuleLoader__.load({
           style: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
         }, h('span', { className: 'dshl-editTag' }, labels[region] ?? region)))
         : null;
+      const visibleRegionCount = Object.keys(bounds.regions).length;
       const toolbar = ui.editing
         ? h('div', { className: 'dshl-toolbar' },
           h('span', { className: 'dshl-toolbarTitle' }, t('editLayer')),
@@ -1423,9 +1426,21 @@ window.__ModuleLoader__.load({
           }, label)),
           h('button', { type: 'button', className: 'dshl-btn', onClick: openPlugins }, t('openPlugins')),
           h('button', { type: 'button', className: 'dshl-btn', onClick: () => replaceConfig(null) }, t('reset')),
-          h('span', { className: 'dshl-itemSub' }, `${Math.round(config.columns.sidebarWidth)} / ${Math.round(config.columns.rightbarWidth)}`),
+          visibleRegionCount === 0
+            ? h('span', { className: 'dshl-itemSub' }, t('nothingToDrag'))
+            : h('span', { className: 'dshl-itemSub' }, `${Math.round(config.columns.sidebarWidth)} / ${Math.round(config.columns.rightbarWidth)}`),
           h('button', { type: 'button', className: 'dshl-btn', 'data-primary': 'true', onClick: () => setEditing(false) }, t('done')))
         : null;
+      // 恢复入口的按钮组：自由模式只有一枚「布局」；空白模式并排放 恢复默认 / 插件页 / 编辑模式
+      const launcherActions = placement === null
+        ? []
+        : placement.mode === 'blank'
+          ? [
+            { key: 'reset', label: t('reset'), iconSize: 17, primary: true, run: () => { replaceConfig(null); setEditing(false); } },
+            { key: 'plugins', label: t('openPlugins'), primary: false, run: openPlugins },
+            { key: 'edit', label: t('editing'), primary: false, run: () => setEditing(true) },
+          ]
+          : [{ key: 'edit', label: t('title'), iconSize: 14, primary: false, run: () => setEditing(true) }];
       const launcher = risk && placement !== null
         ? h('div', {
           className: 'dshl-launcherDock',
@@ -1437,23 +1452,18 @@ window.__ModuleLoader__.load({
         },
         placement.mode === 'blank' ? h('span', { className: 'dshl-launcherQuestion' }, t('launcherOnBlank')) : null,
         h('div', { className: 'dshl-launcherRow' },
-          h('button', {
+          ...launcherActions.map((action) => h('button', {
+            key: action.key,
             type: 'button',
-            className: 'dshl-launcher',
-            'data-dshl-launcher': '',
-            'data-action': placement.mode === 'blank' ? 'reset' : 'edit',
+            className: action.primary ? 'dshl-launcher' : 'dshl-launcher dshl-launcherGhost',
+            'data-dshl-button': action.key,
+            'data-dshl-launcher': action.key === 'edit' && placement.mode === 'free' ? '' : undefined,
             style: { pointerEvents: 'auto' },
-            title: t('recoveryHint'),
-            onClick: placement.mode === 'blank' ? () => { replaceConfig(null); setEditing(false); } : () => setEditing(true),
-          }, icon(ICON_LAYOUT, placement.mode === 'blank' ? 17 : 14), h('span', null, placement.mode === 'blank' ? t('reset') : t('title'))),
-          placement.mode === 'blank'
-            ? h('button', {
-              type: 'button',
-              className: 'dshl-launcher dshl-launcherGhost',
-              style: { pointerEvents: 'auto' },
-              onClick: () => setEditing(true),
-            }, h('span', null, t('editing')))
-            : null),
+            title: action.key === 'edit' && placement.mode === 'free' ? t('recoveryHint') : undefined,
+            onClick: action.run,
+          }, action.key === 'edit' && placement.mode === 'free' ? icon(ICON_LAYOUT, 14) : null,
+            action.key === 'reset' ? icon(ICON_LAYOUT, 17) : null,
+            h('span', null, action.label)))),
         placement.mode === 'blank' ? h('span', { className: 'dshl-launcherHint' }, t('blankHint')) : null)
         : null;
       return h('div', { className: 'dshl-editLayer' }, boxes, handles, launcher, toolbar);
