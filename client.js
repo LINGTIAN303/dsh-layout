@@ -817,21 +817,43 @@ window.__ModuleLoader__.load({
       return node.closest(INTERACTIVE_SELECTOR) !== null;
     }
 
-    /** 按钮按半宽/半高采样：中心、四边中点、四角外扩一点，任一命中可交互元素即视为会压住内容。 */
+    /**
+     * 按按钮矩形采样判定是否会压住内容。
+     * 用 7×5 网格 + 4px 外扩：按钮是药丸形，稀疏采样会从间隙漏进底下的输入框/按钮，
+     * 表现为「按钮边缘压住输入框的一角」；外扩是给按钮周围留出一点呼吸空间。
+     */
     function probeOccupancy(x, y, halfWidth, halfHeight) {
       const pad = 4;
-      const dx = halfWidth + pad;
-      const dy = halfHeight + pad;
-      const points = [[0, 0], [-dx, 0], [dx, 0], [0, -dy], [0, dy], [-dx, -dy], [dx, -dy], [-dx, dy], [dx, dy]];
+      const hw = halfWidth + pad;
+      const hh = halfHeight + pad;
+      const cols = [-1, -2 / 3, -1 / 3, 0, 1 / 3, 2 / 3, 1];
+      const rows = [-1, -0.5, 0, 0.5, 1];
       let hits = 0;
-      for (const [ox, oy] of points) {
-        const px = x + ox;
-        const py = y + oy;
-        if (px < 0 || py < 0 || px >= window.innerWidth || py >= window.innerHeight) {
-          hits += 1;
-          continue;
+      for (const col of cols) {
+        for (const row of rows) {
+          const px = x + col * hw;
+          const py = y + row * hh;
+          if (px < 0 || py < 0 || px >= window.innerWidth || py >= window.innerHeight) {
+            hits += 1;
+            continue;
+          }
+          if (isInteractiveNode(document.elementFromPoint(px, py))) hits += 1;
         }
-        if (isInteractiveNode(document.elementFromPoint(px, py))) hits += 1;
+      }
+      return hits;
+    }
+
+    /** 实测已落位按钮的矩形，看它是否真的压住了可交互元素（落位后的自检）。 */
+    function measureLauncherOverlap(button) {
+      if (button === null || button === undefined) return;
+      const rect = button.getBoundingClientRect();
+      if (rect.width < 1 || rect.height < 1) return 0;
+      let hits = 0;
+      for (let x = rect.left + 1; x <= rect.right - 1; x += 6) {
+        for (let y = rect.top + 1; y <= rect.bottom - 1; y += 6) {
+          const el = document.elementFromPoint(Math.round(x), Math.round(y));
+          if (el !== null && el !== undefined && !button.contains(el) && isInteractiveNode(el)) hits += 1;
+        }
       }
       return hits;
     }
@@ -875,8 +897,8 @@ window.__ModuleLoader__.load({
       return hash >>> 0;
     }
 
-    /** 恢复按钮的近似尺寸：自由落点用小号按钮，空白页用大号按钮。 */
-    const LAUNCHER_HALF = { free: [40, 20], blank: [115, 55], corner: [40, 20] };
+    /** 恢复按钮的近似尺寸（半宽 / 半高）：自由落点用小号按钮，空白页用大号按钮。 */
+    const LAUNCHER_HALF = { free: [36, 16], blank: [120, 60], corner: [36, 16] };
 
     /** 计算恢复按钮的落点；返回视口坐标与呈现模式。 */
     function computeLauncherPlacement(regions, seedText) {
@@ -920,7 +942,7 @@ window.__ModuleLoader__.load({
       if (candidates.length === 0) return { mode: 'corner', x: 0, y: 0 };
 
       // 采样上限：探针要调 elementFromPoint，候选太多会卡顿；均匀抽样保留空间分布
-      const MAX_PROBES = 220;
+      const MAX_PROBES = 140;
       const probes = [];
       if (candidates.length <= MAX_PROBES) {
         probes.push(...candidates);
@@ -1206,6 +1228,7 @@ window.__ModuleLoader__.load({
       const [bounds, setBounds] = React.useState(null);
       const [dragging, setDragging] = React.useState(null);
       const [probeTick, setProbeTick] = React.useState(0);
+      const [placementRetry, setPlacementRetry] = React.useState(0);
       const placementRef = React.useRef({ key: '', value: null });
 
       const measure = React.useCallback(() => {
@@ -1289,7 +1312,6 @@ window.__ModuleLoader__.load({
       }, []);
 
       const active = config.enabled && bounds !== null;
-      if (!active) return null;
 
       // 恢复入口的判定：只要「打开插件详情页」的路径可能断掉，就常驻一个恢复按钮
       const sidebarReachable = (() => {
@@ -1322,7 +1344,7 @@ window.__ModuleLoader__.load({
 
       // 落点随「可见区域的空白分布 + 配置指纹 + 本次加载的随机盐」变化：
       // 同一份配置每次打开可能落在不同留白处，但同一次会话内不会抖动。
-      const placementSeed = `${config.columns.order.join(',')}|${config.columns.hideSidebar}|${config.columns.hideCenter}|${config.columns.hideRightbar}|${config.columns.hideBottom}|${config.sidebar.panelHidden.join(',')}|${config.sidebar.hidden.join(',')}|${window.innerWidth}x${window.innerHeight}|${mountSalt}`;
+      const placementSeed = `${config.columns.order.join(',')}|${config.columns.hideSidebar}|${config.columns.hideCenter}|${config.columns.hideRightbar}|${config.columns.hideBottom}|${config.sidebar.panelHidden.join(',')}|${config.sidebar.hidden.join(',')}|${window.innerWidth}x${window.innerHeight}|${mountSalt}|${placementRetry}`;
       const placementKey = `${risk ? 1 : 0}|${probeTick}|${placementSeed}`;
       if (placementRef.current.key !== placementKey) {
         placementRef.current = {
@@ -1331,6 +1353,27 @@ window.__ModuleLoader__.load({
         };
       }
       const placement = placementRef.current.value;
+
+      // 落位后持续自检：首帧会话是骨架屏，按钮可能先落在空处、随后被加载出来的内容盖住；
+      // 因此在头几秒内分次复检，发现压住内容就换种子重探（最多 6 次）。
+      // 放在 active 早退之前：hooks 不能条件调用。
+      React.useEffect(() => {
+        if (placement === null || placement.mode !== 'free') return undefined;
+        const timers = [];
+        for (const delay of [300, 900, 1800, 3200]) {
+          timers.push(window.setTimeout(() => {
+            const button = document.querySelector('[data-dshl-button="edit"]');
+            if (measureLauncherOverlap(button) > 0) {
+              setPlacementRetry((count) => (count < 6 ? count + 1 : count));
+            }
+          }, delay));
+        }
+        return () => {
+          for (const timer of timers) window.clearTimeout(timer);
+        };
+      }, [placement]);
+
+      if (!active) return null;
       // 打开插件页：中栏被藏起来时先放出来，否则切过去也是空白
       const openPlugins = () => {
         if (snapshot.config.columns.hideCenter) {
