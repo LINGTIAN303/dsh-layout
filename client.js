@@ -73,6 +73,7 @@ window.__ModuleLoader__.load({
       shortcutHint: '快捷键：Ctrl/⌘+Alt+L 打开编辑浮层；再加 Shift 直接恢复默认布局。',
       offsetClamped: '偏移会自动限制，保证设置面板始终留在屏幕内。',
       blankHint: '点击恢复布局，或按 Ctrl/⌘+Alt+L',
+      anchorHint: '依附位置',
       nothingToDrag: '当前没有可见区域可拖拽，用预设或恢复默认',
       showAll: '显示全部',
       launcherOnBlank: '仅剩空白页',
@@ -144,6 +145,7 @@ window.__ModuleLoader__.load({
       shortcutHint: 'Shortcuts: Ctrl/⌘+Alt+L opens the edit overlay; add Shift to restore the default layout.',
       offsetClamped: 'Offsets are clipped so the settings panel always stays on screen.',
       blankHint: 'Click to restore the layout, or press Ctrl/⌘+Alt+L',
+      anchorHint: 'Anchored to',
       nothingToDrag: 'No visible region to drag; use a preset or restore defaults',
       showAll: 'Show all',
       launcherOnBlank: 'Blank page',
@@ -261,6 +263,8 @@ window.__ModuleLoader__.load({
       config: readStoredConfig() ?? normalizeConfig(null),
       targets: ABSENT_TARGETS,
       ui: { editing: false },
+      /** 落点重算信号：界面变化（新插件出现、布局重排）导致按钮被遮挡时递增。 */
+      reposition: 0,
     };
     const listeners = new Set();
     let persistTimer = null;
@@ -341,6 +345,21 @@ window.__ModuleLoader__.load({
     function setEditing(editing) {
       if (snapshot.ui.editing === editing) return;
       snapshot = { ...snapshot, ui: { ...snapshot.ui, editing } };
+      notify();
+    }
+
+    /**
+     * 请求重新计算恢复按钮的落点。
+     * 由全局 refresh 循环（跟着 DOM 变化跑）在检测到遮挡时调用：用户新装的插件、
+     * 动态弹出的挂件都可能出现在按钮之后，落点必须能跟着改。
+     * 加最小间隔，避免界面高频变动时按钮满屏跳。
+     */
+    let lastRepositionAt = 0;
+    function requestReposition() {
+      const now = Date.now();
+      if (now - lastRepositionAt < 1200) return;
+      lastRepositionAt = now;
+      snapshot = { ...snapshot, reposition: snapshot.reposition + 1 };
       notify();
     }
 
@@ -804,12 +823,17 @@ window.__ModuleLoader__.load({
 
     /* ============================== 恢复按钮的落点 ============================== */
     /**
-     * 恢复按钮的落点策略：
-     * 1. 界面只剩空白页（四个区域都不可见）→ 屏幕正中，最大号；
-     * 2. 还有可见区域 → 在可见区域的空白处随机挑一个点（避开可交互元素）；
-     * 3. 探测失败 → 固定左下角兜底。
+     * 恢复按钮的落点策略（优先级从高到低）：
+     * 1. 依附：贴在页面上某个可见控件的旁侧空隙里，视觉上像同一排的一部分；
+     * 2. 留白：没有可用锚点时，在可用区域的空白处随机挑一个点；
+     * 3. 空白页：整页没有任何可见区域 → 屏幕正中，最大号；
+     * 4. 兜底：探测失败 → 左下角固定位。
+     *
+     * 关键约束：这套算法不认识任何具体插件。它只依赖浏览器提供的通用几何事实
+     * （元素矩形、可见性、是否可交互），因此第三方插件无论把控件渲染到哪个容器、
+     * 用什么框架、起什么类名，都会被同一套规则纳入计算。
      */
-    const INTERACTIVE_SELECTOR = 'button, a, input, textarea, select, label, summary, [role="button"], [role="menuitem"], [role="tab"], [role="switch"], [contenteditable="true"]';
+    const INTERACTIVE_SELECTOR = 'button, a, input, textarea, select, label, summary, [role="button"], [role="menuitem"], [role="tab"], [role="switch"], [role="combobox"], [contenteditable="true"]';
 
     function isInteractiveNode(node) {
       if (node === null || node === undefined) return false;
@@ -817,30 +841,55 @@ window.__ModuleLoader__.load({
       return node.closest(INTERACTIVE_SELECTOR) !== null;
     }
 
+    /** 元素是否真实可见、有可点击尺寸、且与本插件无关（通用判定，不依赖类名）。 */
+    function visibleRectOf(node) {
+      if (node === null || node === undefined) return null;
+      if (node.closest('[data-dshl-layer]') !== null) return null;
+      const style = getComputedStyle(node);
+      if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) < 0.15) return null;
+      if (node.closest('[inert]') !== null) return null;
+      const rect = node.getBoundingClientRect();
+      if (rect.width < 12 || rect.height < 12) return null;
+      if (rect.right <= 0 || rect.bottom <= 0 || rect.left >= window.innerWidth || rect.top >= window.innerHeight) return null;
+      return rect;
+    }
+
     /**
-     * 按按钮矩形采样判定是否会压住内容。
-     * 用 7×5 网格 + 4px 外扩：按钮是药丸形，稀疏采样会从间隙漏进底下的输入框/按钮，
-     * 表现为「按钮边缘压住输入框的一角」；外扩是给按钮周围留出一点呼吸空间。
+     * 从整个文档收集「占位矩形」与「可依附锚点」。
+     * 遍历 document.body 而不是四个列区域：第三方插件可能把界面渲染到 overlay、portal、
+     * 甚至 body 直下，只扫列区域会完全看不见它们，于是按钮会压上去。
+     * 悬浮小挂件（体积小、独立浮层）同样被纳入占位，避免遮挡。
      */
-    function probeOccupancy(x, y, halfWidth, halfHeight) {
-      const pad = 4;
-      const hw = halfWidth + pad;
-      const hh = halfHeight + pad;
-      const cols = [-1, -2 / 3, -1 / 3, 0, 1 / 3, 2 / 3, 1];
-      const rows = [-1, -0.5, 0, 0.5, 1];
-      let hits = 0;
-      for (const col of cols) {
-        for (const row of rows) {
-          const px = x + col * hw;
-          const py = y + row * hh;
-          if (px < 0 || py < 0 || px >= window.innerWidth || py >= window.innerHeight) {
-            hits += 1;
-            continue;
-          }
-          if (isInteractiveNode(document.elementFromPoint(px, py))) hits += 1;
-        }
+    function surveyPage() {
+      const rects = [];
+      const anchors = [];
+      const seen = new Set();
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      for (const candidate of document.body.querySelectorAll(INTERACTIVE_SELECTOR)) {
+        if (seen.has(candidate)) continue;
+        seen.add(candidate);
+        const rect = visibleRectOf(candidate);
+        if (rect === null) continue;
+        rects.push({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom });
+        // 太宽的控件（输入区、整行容器）不适合做「旁边落点」的参照
+        if (rect.width > viewportWidth * 0.6) continue;
+        if (rect.top < 0 || rect.left < 0 || rect.bottom > viewportHeight || rect.right > viewportWidth) continue;
+        anchors.push({ node: candidate, rect });
       }
-      return hits;
+      return { rects, anchors };
+    }
+
+    /** 候选矩形是否与任何占位矩形相交（含 margin 呼吸空间）。矩形比较比点采样精确：点采样会从圆角和窄缝漏过去。 */
+    function collidesRects(x, y, halfWidth, halfHeight, rects, margin) {
+      const left = x - halfWidth - margin;
+      const right = x + halfWidth + margin;
+      const top = y - halfHeight - margin;
+      const bottom = y + halfHeight + margin;
+      for (const rect of rects) {
+        if (rect.left < right && rect.right > left && rect.top < bottom && rect.bottom > top) return true;
+      }
+      return false;
     }
 
     /** 实测已落位按钮的矩形，看它是否真的压住了可交互元素（落位后的自检）。 */
@@ -900,7 +949,100 @@ window.__ModuleLoader__.load({
     /** 恢复按钮的近似尺寸（半宽 / 半高）：自由落点用小号按钮，空白页用大号按钮。 */
     const LAUNCHER_HALF = { free: [36, 16], blank: [120, 60], corner: [36, 16] };
 
-    /** 计算恢复按钮的落点；返回视口坐标与呈现模式。 */
+    /** 依附落点：贴在锚点控件旁侧的空隙里，返回按「贴合度」排序的候选。完全由几何决定，不认识任何插件。 */
+    function anchorCandidates(anchors, rects, halfWidth, halfHeight) {
+      const gap = 10;
+      const out = [];
+      const describe = (node) => {
+        const direct = (node.getAttribute('aria-label') || node.innerText || node.getAttribute('placeholder') || '').replace(/\s+/g, ' ').trim();
+        if (direct !== '') return direct.slice(0, 32);
+        const img = node.querySelector('svg[data-icon], img[alt]');
+        if (img !== null) {
+          const hint = img.getAttribute('data-icon') || img.getAttribute('alt');
+          if (hint) return hint.slice(0, 32);
+        }
+        const slot = node.closest('[data-slot]')?.getAttribute('data-slot');
+        if (slot) return slot.split('.').pop();
+        const cls = String(node.className || '').split(' ').find((name) => name !== '' && !/^_/.test(name));
+        if (cls) return cls.replace(/-trigger$|-button$/, '');
+        return node.tagName.toLowerCase();
+      };
+
+      // 把同一水平带（中心 y 相差 <12）的控件归成「一排」。一排的跨度就是可视工具栏的范围：
+      // 依附点必须落在这个跨度内，否则会飘到工具栏外侧、看着像挂在卡片外面的异物。
+      // 分组只看 y 坐标，不看父容器——跨插件、跨容器的同排控件也会被正确归到一起。
+      const rows = [];
+      const sorted = [...anchors].sort((a, b) => (a.rect.top + a.rect.height / 2) - (b.rect.top + b.rect.height / 2));
+      for (const anchor of sorted) {
+        const cy = anchor.rect.top + anchor.rect.height / 2;
+        const row = rows.find((candidate) => Math.abs(candidate.centerY - cy) < 12);
+        if (row === undefined) rows.push({ centerY: cy, anchors: [anchor] });
+        else row.anchors.push(anchor);
+      }
+      for (const row of rows) {
+        row.left = Math.min(...row.anchors.map((anchor) => anchor.rect.left));
+        row.right = Math.max(...row.anchors.map((anchor) => anchor.rect.right));
+      }
+      const rowOf = (anchor) => rows.find((row) => row.anchors.includes(anchor));
+
+      for (const anchor of anchors) {
+        const rect = anchor.rect;
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        const row = rowOf(anchor);
+        const inRow = row !== undefined && row.anchors.length >= 2;
+        // 控件高度在工具栏量级（20~48）才像「同一排的东西」
+        const toolbarLike = rect.height >= 20 && rect.height <= 48;
+        const sides = [
+          { side: 'right', x: rect.right + gap + halfWidth, y: centerY, horizontal: true },
+          { side: 'left', x: rect.left - gap - halfWidth, y: centerY, horizontal: true },
+          { side: 'below', x: centerX, y: rect.bottom + gap + halfHeight, horizontal: false },
+          { side: 'above', x: centerX, y: rect.top - gap - halfHeight, horizontal: false },
+        ];
+        for (const candidate of sides) {
+          // 只有落在一排控件的跨度内，才算「工具栏里多了一个按钮」；否则宁可不用这个锚点
+          if (inRow && (candidate.x - halfWidth < row.left - 2 || candidate.x + halfWidth > row.right + 2)) continue;
+          // 纵向贴靠容易落进输入区/正文里，只在没有同排伙伴时才允许
+          if (!inRow && !candidate.horizontal) continue;
+          const x = Math.round(candidate.x);
+          const y = Math.round(candidate.y);
+          if (x - halfWidth < 4 || x + halfWidth > window.innerWidth - 4) continue;
+          if (y - halfHeight < 4 || y + halfHeight > window.innerHeight - 4) continue;
+          // 用矩形碰撞而不是点采样：点采样会从圆角和窄缝漏过去
+          if (collidesRects(x, y, halfWidth, halfHeight, rects, 6)) continue;
+          // 反方向是否还有控件贴着：两侧都有控件说明落在一个真正的「缝」里，最协调
+          const probe = candidate.horizontal
+            ? { x: candidate.side === 'right' ? x + halfWidth + gap : x - halfWidth - gap, y }
+            : { x, y: candidate.side === 'below' ? y + halfHeight + gap : y - halfHeight - gap };
+          const neighbor = (probe.x > 0 && probe.y > 0 && probe.x < window.innerWidth && probe.y < window.innerHeight)
+            ? document.elementFromPoint(Math.round(probe.x), Math.round(probe.y))
+            : null;
+          const inGap = isInteractiveNode(neighbor);
+          let score = 0;
+          if (candidate.horizontal) score += 60;
+          if (inGap) score += 45;
+          if (toolbarLike) score += 20;
+          if (inRow) score += 25;
+          score += Math.max(0, 30 - Math.abs(candidate.y - centerY) - Math.abs(candidate.x - centerX) / 8);
+          out.push({
+            mode: 'anchor',
+            x,
+            y,
+            score,
+            anchor: describe(anchor.node),
+            side: candidate.side,
+          });
+        }
+      }
+      out.sort((a, b) => b.score - a.score);
+      return out;
+    }
+
+    /**
+     * 计算恢复按钮的落点；返回视口坐标与呈现模式。
+     * 只用「整页测量 + 矩形碰撞」这一套通用规则，不认识任何具体插件：
+     * 谁把控件放在哪里，都只是一个矩形，算法一视同仁。
+     */
     function computeLauncherPlacement(regions, seedText) {
       const viewportWidth = window.innerWidth;
       const viewportHeight = window.innerHeight;
@@ -923,9 +1065,23 @@ window.__ModuleLoader__.load({
 
       const random = mulberry32(hashString(seedText));
       const [halfWidth, halfHeight] = LAUNCHER_HALF.free;
+      const { rects, anchors } = surveyPage();
+
+      // 第一优先：依附到页面上任意控件旁边。位置由界面结构决定，人读到的是「那一排多了一个按钮」，
+      // 而不是一个随机飘着的异物；只在高分候选里随机，避免每次都贴在同一个控件上。
+      if (anchors.length > 0) {
+        const candidates = anchorCandidates(anchors, rects, halfWidth, halfHeight);
+        if (candidates.length > 0) {
+          const best = candidates[0].score;
+          const pool = candidates.filter((candidate) => candidate.score >= best - 12).slice(0, 6);
+          return pool[Math.floor(random() * pool.length)] ?? candidates[0];
+        }
+      }
+
+      // 第二优先：在可见区域的留白里随机。候选点用矩形碰撞一次性筛掉，不再逐点 elementFromPoint。
       const insetX = halfWidth + 6;
       const insetY = halfHeight + 6;
-      const candidates = [];
+      const grid = [];
       for (const region of visible) {
         const left = region.left + insetX;
         const right = region.right - insetX;
@@ -935,24 +1091,23 @@ window.__ModuleLoader__.load({
         const step = 40;
         for (let x = left; x <= right; x += step) {
           for (let y = top; y <= bottom; y += step) {
-            candidates.push({ x: Math.round(x), y: Math.round(y), region: region.name });
+            grid.push({ x: Math.round(x), y: Math.round(y), region: region.name });
           }
         }
       }
-      if (candidates.length === 0) return { mode: 'corner', x: 0, y: 0 };
+      if (grid.length === 0) return { mode: 'corner', x: 0, y: 0 };
 
-      // 采样上限：探针要调 elementFromPoint，候选太多会卡顿；均匀抽样保留空间分布
-      const MAX_PROBES = 140;
+      const MAX_PROBES = 220;
       const probes = [];
-      if (candidates.length <= MAX_PROBES) {
-        probes.push(...candidates);
+      if (grid.length <= MAX_PROBES) {
+        probes.push(...grid);
       } else {
-        const stride = candidates.length / MAX_PROBES;
-        for (let i = 0; i < MAX_PROBES; i += 1) probes.push(candidates[Math.floor(i * stride)]);
+        const stride = grid.length / MAX_PROBES;
+        for (let i = 0; i < MAX_PROBES; i += 1) probes.push(grid[Math.floor(i * stride)]);
       }
       const clear = [];
       for (const candidate of probes) {
-        if (probeOccupancy(candidate.x, candidate.y, halfWidth, halfHeight) > 0) continue;
+        if (collidesRects(candidate.x, candidate.y, halfWidth, halfHeight, rects, 6)) continue;
         clear.push({ ...candidate, clearance: probeClearance(candidate.x, candidate.y) });
       }
       if (clear.length === 0) return { mode: 'corner', x: 0, y: 0 };
@@ -1224,7 +1379,7 @@ window.__ModuleLoader__.load({
 
     /* ============================== 编辑模式浮层 ============================== */
     function EditOverlay({ t, ctx }) {
-      const { config, targets, ui } = useStoreSnapshot();
+      const { config, targets, ui, reposition } = useStoreSnapshot();
       const [bounds, setBounds] = React.useState(null);
       const [dragging, setDragging] = React.useState(null);
       const [probeTick, setProbeTick] = React.useState(0);
@@ -1344,7 +1499,7 @@ window.__ModuleLoader__.load({
 
       // 落点随「可见区域的空白分布 + 配置指纹 + 本次加载的随机盐」变化：
       // 同一份配置每次打开可能落在不同留白处，但同一次会话内不会抖动。
-      const placementSeed = `${config.columns.order.join(',')}|${config.columns.hideSidebar}|${config.columns.hideCenter}|${config.columns.hideRightbar}|${config.columns.hideBottom}|${config.sidebar.panelHidden.join(',')}|${config.sidebar.hidden.join(',')}|${window.innerWidth}x${window.innerHeight}|${mountSalt}|${placementRetry}`;
+      const placementSeed = `${config.columns.order.join(',')}|${config.columns.hideSidebar}|${config.columns.hideCenter}|${config.columns.hideRightbar}|${config.columns.hideBottom}|${config.sidebar.panelHidden.join(',')}|${config.sidebar.hidden.join(',')}|${window.innerWidth}x${window.innerHeight}|${mountSalt}|${placementRetry}|${reposition}`;
       const placementKey = `${risk ? 1 : 0}|${probeTick}|${placementSeed}`;
       if (placementRef.current.key !== placementKey) {
         placementRef.current = {
@@ -1354,20 +1509,15 @@ window.__ModuleLoader__.load({
       }
       const placement = placementRef.current.value;
 
-      // 落位后持续自检：首帧会话是骨架屏，按钮可能先落在空处、随后被加载出来的内容盖住；
-      // 因此在头几秒内分次复检，发现压住内容就换种子重探（最多 6 次）。
-      // 放在 active 早退之前：hooks 不能条件调用。
+      // 落位后持续自检：按钮可能先落在空处，随后被加载出来的内容盖住——包括用户新装的、
+      // 我们完全不认识的第三方插件控件。检测挂在全局 refresh 循环里（本来就跟着 DOM 变化跑），
+      // 发现遮挡就 bump reposition 让落点重算。放在 active 早退之前：hooks 不能条件调用。
       React.useEffect(() => {
-        if (placement === null || placement.mode !== 'free') return undefined;
-        const timers = [];
-        for (const delay of [300, 900, 1800, 3200]) {
-          timers.push(window.setTimeout(() => {
-            const button = document.querySelector('[data-dshl-button="edit"]');
-            if (measureLauncherOverlap(button) > 0) {
-              setPlacementRetry((count) => (count < 6 ? count + 1 : count));
-            }
-          }, delay));
-        }
+        if (placement === null || (placement.mode !== 'free' && placement.mode !== 'anchor')) return undefined;
+        const timers = [300, 900, 1800, 3200].map((delay) => window.setTimeout(() => {
+          const button = document.querySelector('[data-dshl-button="edit"]');
+          if (button !== null && measureLauncherOverlap(button) > 0) requestReposition();
+        }, delay));
         return () => {
           for (const timer of timers) window.clearTimeout(timer);
         };
@@ -1484,12 +1634,14 @@ window.__ModuleLoader__.load({
             { key: 'edit', label: t('editing'), primary: false, run: () => setEditing(true) },
           ]
           : [{ key: 'edit', label: t('title'), iconSize: 14, primary: false, run: () => setEditing(true) }];
+      const floating = placement !== null && (placement.mode === 'free' || placement.mode === 'anchor');
       const launcher = risk && placement !== null
         ? h('div', {
           className: 'dshl-launcherDock',
           'data-dshl-layer': '',
           'data-mode': placement.mode,
-          style: placement.mode === 'free'
+          title: placement.mode === 'anchor' ? `${t('anchorHint')}：${placement.anchor ?? ''}` : undefined,
+          style: floating
             ? { left: `${placement.x}px`, top: `${placement.y}px` }
             : undefined,
         },
@@ -1500,11 +1652,11 @@ window.__ModuleLoader__.load({
             type: 'button',
             className: action.primary ? 'dshl-launcher' : 'dshl-launcher dshl-launcherGhost',
             'data-dshl-button': action.key,
-            'data-dshl-launcher': action.key === 'edit' && placement.mode === 'free' ? '' : undefined,
+            'data-dshl-launcher': action.key === 'edit' && floating ? '' : undefined,
             style: { pointerEvents: 'auto' },
-            title: action.key === 'edit' && placement.mode === 'free' ? t('recoveryHint') : undefined,
+            title: action.key === 'edit' && floating ? t('recoveryHint') : undefined,
             onClick: action.run,
-          }, action.key === 'edit' && placement.mode === 'free' ? icon(ICON_LAYOUT, 14) : null,
+          }, action.key === 'edit' && floating ? icon(ICON_LAYOUT, 14) : null,
             action.key === 'reset' ? icon(ICON_LAYOUT, 17) : null,
             h('span', null, action.label)))),
         placement.mode === 'blank' ? h('span', { className: 'dshl-launcherHint' }, t('blankHint')) : null)
@@ -1549,6 +1701,29 @@ window.__ModuleLoader__.load({
       }, 'dsh-layout: interface bridge');
 
       ctx.effect(() => subscribe(() => applyDynamicCss()), 'dsh-layout: layout styles');
+
+      // 遮挡守卫：DOM 变化后（含第三方插件刚出现）检查恢复按钮是否被压住，是则请求重新落点。
+      // 放在 refresh 循环之外单独跑：refresh 只做识别，这里做的是「落点是否仍然成立」的判定。
+      ctx.effect(() => {
+        let timer = null;
+        const check = () => {
+          const button = document.querySelector('[data-dshl-button="edit"]');
+          if (button !== null && measureLauncherOverlap(button) > 0) requestReposition();
+        };
+        const schedule = () => {
+          if (timer !== null) return;
+          timer = window.setTimeout(() => {
+            timer = null;
+            check();
+          }, 600);
+        };
+        const observer2 = new MutationObserver(schedule);
+        observer2.observe(document.body, { childList: true, subtree: true });
+        return () => {
+          observer2.disconnect();
+          if (timer !== null) window.clearTimeout(timer);
+        };
+      }, 'dsh-layout: overlap guard');
 
       // 最后一道兜底：不依赖浮层组件是否渲染，直接从键盘恢复默认
       ctx.effect(() => {
