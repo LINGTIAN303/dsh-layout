@@ -10,6 +10,7 @@ bundle: dsh-layout（package.json 的 dsh.bundle.patch + dsh.client）
    ├─ DOM 注解器                   识别外壳结构，写 data-dshl-* 标记
    ├─ 界面结构识别                 官方登记 / 第三方登记 / 自动识别 三档
    ├─ 区域结构快照                 官方区域可见时记下单元清单与时间（area-snapshots/v1）
+   ├─ 白板几何快照                 每页归一化节点矩形，供跨页骨架使用（board-geometry/v1）
    ├─ 插件来源                     宿主 slots 注册表 + React fiber 定位组件条目
    ├─ 槽位编排                     可排列容器（宿主布局容器 + 列表槽位出口）与网格排列
    ├─ 区域搬移                     投影：源节点 fixed 定位 + 目标容器占位符 + 矩形差校准
@@ -18,7 +19,9 @@ bundle: dsh-layout（package.json 的 dsh.bundle.patch + dsh.client）
    ├─ 布局方案                     整套配置快照存成命名方案，切换即整套替换（localStorage，上限 20 套）
    ├─ 样式引擎                     按配置生成 style[data-dsh-layout="dynamic"]
    ├─ plugins.detail.section 注册  插件详情页入口（开关 + 概览 + 打开面板）
-   └─ shell.overlay 注册           全局编辑面板（四类分页）+ 编辑模式层（列分隔条、区域框、工具条）
+   ├─ shell.overlay 注册           全局编辑面板（四类分页）+ 编辑模式层（列分隔条、区域框、工具条）
+   └─ 白板宿主面 boardHost         导出给 chunk：状态、配置写入、通用组件、识别结果、几何快照读写
+└─ 白板 chunk client.board.js     按需加载（require.async）：结构树、四栏、画布、属性面板
 ```
 
 ```mermaid
@@ -363,6 +366,53 @@ flowchart TD
 - 恢复按钮的点击还有一层不依赖样式的坐标命中兜底（document 捕获阶段监听 `pointerdown`/`mousedown`）。
 - 设置面板偏移在生成样式时按视口夹取，面板不可能被配置到屏幕外。
 - 折叠态（`:not([data-sidebar-collapsed])` 门控）不叠加本插件列序，避免「宿主列宽 + 本插件列序」错位造成的不可点击。
+
+## 布局白板（按需加载的独立 chunk）
+
+编辑模式只解决「当前这一页上的两根分隔条」。它的根本限制来自识别层：只看得见此刻渲染在 DOM 里的那一层界面，设置页 / 插件详情页 / 第三方插件页面都不常驻 DOM，切过去才能调，而切过去前一层就消失了。白板把「结构」从「当前 DOM」里解耦。
+
+### 为什么是独立 chunk
+
+主 bundle 已七千行，白板再加一千行会难以维护。DSH 的 `client-modules` loader 原生支持包内异步 chunk（本机实测）：
+
+- chunk 文件名必须匹配 `^client\.[A-Za-z0-9][A-Za-z0-9._-]*\.js$`；
+- chunk 自己用 `{ id: '<ownerId>', chunk: '<fileName>', factory }` 注册，模块 id 由 loader 拼成 `<ownerId>/<fileName>`；
+- 主 bundle 用 `require.async('./client.board.js')` 按需拉取，URL 由 loader 从包 URL 推导（`/plugins/dsh-layout/client.board.js?rev=<rev>`）；
+- 宿主按包的 mtime/ctime/size 推导 rev，**改完文件必须 touch 才会换 rev**，否则浏览器拿到旧 chunk。
+
+白板与主 bundle 的边界是 `require('dsh-layout').boardHost`：主 bundle 导出状态、配置写入、通用组件、识别结果与几何快照读写，chunk 只读它，不复制第二份状态。
+
+### 结构树：七套词汇收敛成四层
+
+白板的第一件事是把既有词汇收成一棵树，四栏只是它按层级过滤的视图：
+
+| 层 | id 形式 | 数据来源 | 可调项 |
+| --- | --- | --- | --- |
+| 区域 | `region:sidebar` | `targets.regions`、`OFFICIAL_PAGES` | order / width / minWidth / hidden |
+| 容器 | `block:panels`、`unit:conv-header`、`arrange:<id>` | `BLOCKS`、各 `*Parts`、`readArrangeContainers` | order / columns / gap / hidden / 搬移到 |
+| 槽位 | `slot:sidebar.panellist` | `slotSources.graph` | 条目 order / hidden |
+| 控件 | `unit:<id>`、`entry:<slot>::<id>`、`xunit:<page>::<key>`、`store:<zone>::<id>` | `PART_UNITS`、`slotSources`、`external.units`、`storageZones` | hidden / order / 搬移 / 收进「更多」 |
+
+属性面板只认 `path`（配置路径）与四种控件描述（flag / num / move / note），不为每类节点各写一套渲染。
+
+### 画布两态
+
+| 态 | 触发 | 实现 |
+| --- | --- | --- |
+| 描图 | 目标页在屏幕上（默认） | 全屏 fixed 层、`pointer-events:none` 让真实界面仍可操作；框取真实元素矩形**减去画布原点**（画布铺满整层，所以结果等于视口坐标），随 400ms 定时 + resize 重算，矩形没变不 setState |
+| 骨架 | 目标页不在屏幕上 | 读 `board-geometry/v1` 的归一化矩形铺到画布；切页后白板不空 |
+
+几何快照按页面 key 分桶（`conversation` / `plugins` / `pluginDetail` / `settings` / `external:<面板名>`），每页存归一化到 0..1 的节点矩形，上限 8 页、按观测时间淘汰，5 秒节流。
+
+### 三个必须记住的实现约束
+
+1. **白板样式不能用 `data-dsh-layout` 属性**：`ensureStyles()` 会删掉所有不属于自己的 `style[data-dsh-layout]`，白板样式会被一起清掉（实测白板塌成一排）。用独立的 `data-dshl-board`。
+2. **白板必须 portal 到 body**：留在 `shell.overlay` 里时层级受父层限制，设置弹层一打开就把白板整条压住。
+3. **控件层分页必须按桶**：全局取前 N 条会把第三方单元（排在槽位条目之后）整批截掉，而它正是用户最关心的那类。
+
+### 与编辑模式的关系
+
+白板与编辑面板互斥：打开白板会关掉面板并退出编辑模式，避免两层虚线框叠加。编辑模式保留（拖分隔条的直接手感），六页面板降级为「高级面板」入口，能力一项不删。
 
 ## 与宿主的交互面
 

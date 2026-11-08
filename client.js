@@ -396,6 +396,52 @@ window.__ModuleLoader__.load({
       reviewHint: '异常会自动记录：曾由登记认出的页面签名变了（drift），或从未登记、只能靠自动识别（unregistered）。导出 JSON 后照签名更新登记表。',
       anomalyDrift: '签名变化',
       anomalyUnregistered: '未登记',
+      // 布局白板（client.board.js 的文案也从这里取，白板不另建字典）
+      board: '白板',
+      boardTitle: '布局白板',
+      boardOpen: '打开白板',
+      boardHint: '左侧四栏列出全部结构；点画布上的框或栏里的行选中，右侧调它的可调项。改动即时生效。',
+      boardPage: '当前页面',
+      boardModeTrace: '描图',
+      boardModeSkeleton: '骨架',
+      boardCapture: '重新抓取',
+      boardAdvanced: '高级面板',
+      boardFilter: '搜索结构',
+      boardEmptyGroup: '这一层没有节点',
+      boardNoSelection: '在左侧四栏或画布上选一个节点，这里显示它的可调项。',
+      boardSkeletonEmpty: '这个页面还没有结构快照。切到该页面看一次，或点「重新抓取」。',
+      boardLayerRegion: '区域',
+      boardLayerContainer: '容器',
+      boardLayerSlot: '槽位',
+      boardLayerControl: '控件',
+      boardPresent: '此刻在场',
+      boardAbsent: '此刻不在场',
+      boardMoveLeft: '往前移一位',
+      boardMoveRight: '往后移一位',
+      boardMoveUp: '上移',
+      boardMoveDown: '下移',
+      boardCenterMinWidth: '会话区最小宽度',
+      boardContentWidth: '会话内容最大宽度',
+      boardNavWidth: '设置页导航宽度',
+      boardColumns: '列数',
+      boardGap: '间距',
+      boardOrder: '顺序',
+      boardRelocateTo: '搬移到',
+      boardRelocateNone: '不搬移',
+      boardStoreTo: '收进「更多」',
+      boardReadonly: '这一项只读（入口类槽位只允许排序，隐藏会切断回页面的路径）。',
+      boardReadonlyOverlay: '浮层 / 菜单类条目只读。',
+      boardGeometryDrift: '结构快照可能已过期，建议重新抓取。',
+      boardLoading: '正在加载白板…',
+      boardLoadFail: '白板模块加载失败，已回落到编辑面板。',
+      boardShowMore: '显示更多',
+      boardLayers: '结构',
+      boardProps: '属性',
+      boardBucketUnit: '拆解单元',
+      boardBucketEntry: '槽位条目',
+      boardBucketXunit: '第三方单元',
+      boardBucketStore: '可收纳入口',
+      boardBucketOther: '其它',
     };
     const en = {
       title: 'Layout',
@@ -768,7 +814,153 @@ window.__ModuleLoader__.load({
       reviewHint: 'Anomalies are recorded automatically: a registered page whose signature changed (drift), or a page never registered and only auto-detected (unregistered). Export the JSON and update the registry by signature.',
       anomalyDrift: 'Signature changed',
       anomalyUnregistered: 'Not registered',
+      // Layout board (client.board.js reads this dictionary; the board keeps no second copy)
+      board: 'Board',
+      boardTitle: 'Layout board',
+      boardOpen: 'Open board',
+      boardHint: 'The four columns on the left list every structure; select a box on the canvas or a row in a column, then tune it on the right. Changes apply instantly.',
+      boardPage: 'Current page',
+      boardModeTrace: 'Trace',
+      boardModeSkeleton: 'Skeleton',
+      boardCapture: 'Capture again',
+      boardAdvanced: 'Advanced panel',
+      boardFilter: 'Filter structure',
+      boardEmptyGroup: 'No node in this layer',
+      boardNoSelection: 'Pick a node in the four columns or on the canvas to see its controls here.',
+      boardSkeletonEmpty: 'No structure snapshot for this page yet. Visit the page once, or use "Capture again".',
+      boardLayerRegion: 'Region',
+      boardLayerContainer: 'Container',
+      boardLayerSlot: 'Slot',
+      boardLayerControl: 'Control',
+      boardPresent: 'Present now',
+      boardAbsent: 'Not on this page',
+      boardMoveLeft: 'Move one place earlier',
+      boardMoveRight: 'Move one place later',
+      boardMoveUp: 'Move up',
+      boardMoveDown: 'Move down',
+      boardCenterMinWidth: 'Conversation min width',
+      boardContentWidth: 'Conversation content max width',
+      boardNavWidth: 'Settings nav width',
+      boardColumns: 'Columns',
+      boardGap: 'Gap',
+      boardOrder: 'Order',
+      boardRelocateTo: 'Move to',
+      boardRelocateNone: 'Do not move',
+      boardStoreTo: 'Store into "More"',
+      boardReadonly: 'Read-only: entry-like slots may only be reordered; hiding one cuts the way back to its page.',
+      boardReadonlyOverlay: 'Overlay and menu entries are read-only.',
+      boardGeometryDrift: 'The structure snapshot may be stale; capture again.',
+      boardLoading: 'Loading the board…',
+      boardLoadFail: 'The board module failed to load; fell back to the editor panel.',
+      boardShowMore: 'Show more',
+      boardLayers: 'Structure',
+      boardProps: 'Properties',
+      boardBucketUnit: 'Decomposed units',
+      boardBucketEntry: 'Slot entries',
+      boardBucketXunit: 'Third-party units',
+      boardBucketStore: 'Storable entries',
+      boardBucketOther: 'Other',
     };
+
+    /* ============================== 布局白板：几何快照 ============================== */
+    /**
+     * 白板要能跨页编辑：目标页不在 DOM 里时画「结构骨架」，所以除了现有的
+     * `area-snapshots`（只存单元 id）之外还要存几何。
+     *
+     * 坐标一律归一化到 frame 的 0..1，这样窗口大小、DPI 变化都不影响骨架比例。
+     * 每页各存一份，按页面 key 索引；只存节点矩形，不存元素引用。
+     * 详见 docs/plans/2026-11-09-布局白板.md。
+     */
+    const BOARD_GEOMETRY_KEY = 'dsh-layout/board-geometry/v1';
+    const BOARD_GEOMETRY_MAX_PAGES = 8;
+    const BOARD_GEOMETRY_REFRESH_MS = 5000;
+    let boardGeometry = readJsonStore(BOARD_GEOMETRY_KEY);
+
+    /** 归一化矩形：相对 frame 的左上角与尺寸，保留三位小数（骨架精度足够，体积小一半）。 */
+    function normalizedRect(node, frameRect) {
+      if (node === null || node === undefined || node.isConnected !== true) return null;
+      const rect = node.getBoundingClientRect();
+      if (rect.width < 1 || rect.height < 1) return null;
+      if (frameRect.width < 1 || frameRect.height < 1) return null;
+      const round = (value) => Math.round(value * 1000) / 1000;
+      return {
+        x: round((rect.left - frameRect.left) / frameRect.width),
+        y: round((rect.top - frameRect.top) / frameRect.height),
+        w: round(rect.width / frameRect.width),
+        h: round(rect.height / frameRect.height),
+      };
+    }
+
+    /** 当前页面的几何快照：区域 → 容器 → 槽位 → 控件，四层一次量完。 */
+    function collectBoardGeometry(targets) {
+      const frame = targets.frame;
+      if (frame === null || frame === undefined) return null;
+      const frameRect = frame.getBoundingClientRect();
+      if (frameRect.width < 1 || frameRect.height < 1) return null;
+      const nodes = [];
+      const push = (id, layer, node) => {
+        const rect = normalizedRect(node, frameRect);
+        if (rect === null) return;
+        nodes.push({ id, layer, ...rect });
+      };
+      for (const [region, node] of Object.entries(targets.regions)) push(`region:${region}`, 'region', node);
+      if (targets.settings !== null && targets.settings !== undefined) push('region:settings', 'region', targets.settings);
+      for (const [block, node] of Object.entries(targets.blocks)) push(`block:${block}`, 'container', node);
+      for (const [unitId, list] of Object.entries(targets.units ?? {})) push(`unit:${unitId}`, 'container', list[0]);
+      for (const entry of targets.arrange ?? []) if (entry.id !== undefined) push(`arrange:${entry.id}`, 'container', entry.node);
+      for (const group of targets.slotSources?.graph ?? []) {
+        const first = group.items.find((item) => item.rendered && item.tops.length > 0);
+        if (first !== undefined) push(`slot:${group.slot}`, 'slot', first.tops[0]);
+      }
+      for (const group of targets.slotSources?.graph ?? []) {
+        for (const item of group.items) {
+          if (!item.rendered || item.tops.length === 0) continue;
+          push(`entry:${item.entryKey}`, 'control', item.tops[0]);
+        }
+      }
+      for (const unit of targets.external?.units ?? []) push(`xunit:${targets.external.pageKey}::${unit.key}`, 'control', unit.node);
+      return { at: Date.now(), frame: { width: Math.round(frameRect.width), height: Math.round(frameRect.height) }, nodes };
+    }
+
+    /** 页面 key：白板按页面分桶，与联动规则的页面枚举同一套词。 */
+    function boardPageKey(targets) {
+      if (areaLive(targets, 'settings')) return 'settings';
+      const external = targets.external ?? null;
+      if (external !== null && external !== undefined) return `external:${external.pageKey}`;
+      if (targets.conversation !== null && targets.conversation !== undefined) return 'conversation';
+      if (document.querySelector('[data-plugin-detail]') !== null) return 'pluginDetail';
+      return 'plugins';
+    }
+
+    function writeBoardGeometry() {
+      // 页面数量上限：按观测时间淘汰最旧的，避免 localStorage 无界增长
+      const keys = Object.keys(boardGeometry);
+      if (keys.length > BOARD_GEOMETRY_MAX_PAGES) {
+        keys.sort((a, b) => Number(boardGeometry[a]?.at ?? 0) - Number(boardGeometry[b]?.at ?? 0));
+        for (const key of keys.slice(0, keys.length - BOARD_GEOMETRY_MAX_PAGES)) delete boardGeometry[key];
+      }
+      writeJsonStore(BOARD_GEOMETRY_KEY, boardGeometry);
+    }
+
+    /**
+     * 记录当前页几何。
+     * 只在「这一页还没有快照」或「超过刷新间隔」时重量，避免每次 DOM 变动都量一遍
+     * （refresh 由 MutationObserver 驱动，流式输出时非常频繁）。
+     */
+    let boardGeometryDirty = false;
+    function recordBoardGeometry(targets, force) {
+      if (targets.ok !== true) return;
+      const key = boardPageKey(targets);
+      const previous = boardGeometry[key];
+      const now = Date.now();
+      if (force !== true && previous !== undefined && now - Number(previous.at ?? 0) < BOARD_GEOMETRY_REFRESH_MS) return;
+      const value = collectBoardGeometry(targets);
+      if (value === null || value.nodes.length === 0) return;
+      boardGeometry = { ...boardGeometry, [key]: value };
+      boardGeometryDirty = true;
+      writeBoardGeometry();
+      boardGeometryDirty = false;
+    }
 
     /* ============================== 配置 ============================== */
     const STORAGE_KEY = 'dsh-layout/config/v1';
@@ -1230,14 +1422,14 @@ window.__ModuleLoader__.load({
     let snapshot = {
       config: readStoredConfig() ?? normalizeConfig(null),
       targets: ABSENT_TARGETS,
-      /** panel：编辑面板（全局浮层）是否打开；side：面板贴哪一侧。 */
+      /** panel：编辑面板（全局浮层）是否打开；board：白板是否打开；side：面板贴哪一侧。 */
       ui: (() => {
         try {
           const raw = JSON.parse(window.localStorage.getItem('dsh-layout/ui/v1') ?? '{}');
-          return { editing: false, panel: false, side: raw !== null && raw.side === 'left' ? 'left' : 'right' };
+          return { editing: false, panel: false, board: false, side: raw !== null && raw.side === 'left' ? 'left' : 'right' };
         } catch (error) {
           console.warn('[dsh-layout] 读取界面记忆失败，使用默认值', error);
-          return { editing: false, panel: false, side: 'right' };
+          return { editing: false, panel: false, board: false, side: 'right' };
         }
       })(),
       /** 落点重算信号：界面变化（新插件出现、布局重排）导致按钮被遮挡时递增。 */
@@ -1342,6 +1534,17 @@ window.__ModuleLoader__.load({
       notify();
     }
 
+    /** 打开/关闭布局白板；白板与编辑面板互斥（同屏两个全屏层没有意义），编辑模式的虚线框也一并退掉。 */
+    function setBoard(board) {
+      if (snapshot.ui.board === board) return;
+      snapshot = {
+        ...snapshot,
+        ui: { ...snapshot.ui, board, panel: board ? false : snapshot.ui.panel, editing: board ? false : snapshot.ui.editing },
+      };
+      if (board) boardGeometryDirty = true;
+      notify();
+    }
+
     function setPanelSide(side) {
       if (snapshot.ui.side === side) return;
       snapshot = { ...snapshot, ui: { ...snapshot.ui, side } };
@@ -1357,6 +1560,12 @@ window.__ModuleLoader__.load({
     function openPanel() {
       if (!snapshot.config.enabled) updateConfig((draft) => { draft.enabled = true; }, { capture: true });
       setPanel(true);
+    }
+
+    /** 白板入口：没启用就先启用，再关掉编辑面板、打开白板。 */
+    function openBoard() {
+      if (!snapshot.config.enabled) updateConfig((draft) => { draft.enabled = true; }, { capture: true });
+      setBoard(true);
     }
 
     /**
@@ -3888,6 +4097,8 @@ window.__ModuleLoader__.load({
       const targets = readTargets();
       annotate(targets);
       setTargets(targets);
+      // 白板骨架数据：每轮 refresh 都可能带上新页面，按间隔节流后落盘
+      recordBoardGeometry(targets, false);
       // 识别结果可能没变（签名相同、不重绘），但联动条件可能变了（页面、折叠、条目在场），样式与投影每轮重算一次
       applyDynamicCss();
       // 「切方案」规则要在样式与投影之前生效：它会替换整套配置，后续两步必须按新配置算
@@ -4022,6 +4233,10 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
 .dshl-launcher:hover { opacity:1; }
 .dshl-warn { margin:0; font-size:11px; line-height:17px; color:var(--dsw-alias-state-warn-primary); }
 .dshl-panel { position:fixed; top:52px; bottom:16px; z-index:1250; width:min(480px, calc(100vw - 32px)); display:flex; flex-direction:column; border-radius:14px; border:1px solid var(--dsw-alias-border-l2); background:var(--dsw-alias-bg-overlay); box-shadow:0 16px 40px rgba(0,0,0,.28); pointer-events:auto; color:var(--dsw-alias-label-primary); overflow:hidden; }
+/* 白板加载中 / 加载失败的兜底层：与白板同层，不留白屏也不挡住恢复通道 */
+.dshl-boardFallback { position:fixed; inset:0; z-index:1260; display:flex; align-items:center; justify-content:center; padding:24px; background:color-mix(in srgb, var(--dsw-alias-bg-overlay, #1b1b1f) 88%, transparent); color:var(--dsw-alias-label-primary); pointer-events:auto; }
+.dshl-boardFallbackBox { display:flex; flex-direction:column; gap:10px; max-width:420px; padding:16px; border-radius:12px; border:1px solid var(--dsw-alias-border-l2); background:var(--dsw-alias-bg-layer-1); }
+.dshl-boardFallbackBox p { margin:0; font-size:13px; line-height:20px; }
 .dshl-panel[data-side="right"] { right:16px; }
 .dshl-panel[data-side="left"] { left:16px; }
 .dshl-panelHead { display:flex; align-items:center; gap:6px; padding:9px 10px 9px 12px; border-bottom:1px solid var(--dsw-alias-border-l1); flex:none; }
@@ -6491,7 +6706,9 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
                 if (on && !snapshot.config.enabled) updateConfig((draft) => { draft.enabled = true; }, { capture: true });
                 setEditing(on);
               },
-            }))),
+            })),
+          h('div', { className: 'dshl-control' },
+            h('button', { type: 'button', className: 'dshl-btn', 'data-primary': 'true', onClick: openBoard }, t('boardOpen')))),
         risky ? h('p', { className: 'dshl-warn' }, t('riskyHint')) : null,
         h('div', { className: 'dshl-presets' },
           h('span', { className: 'dshl-presetsLabel' }, t('presets')),
@@ -6616,6 +6833,91 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
         risky ? h('p', { className: 'dshl-warn' }, t('riskyHint')) : null,
         h('p', { className: 'dshl-hint' }, t('shortcutHint')),
         h('p', { className: 'dshl-hint' }, t('disabledHint')));
+    }
+
+    /* ============================== 布局白板（按需加载） ============================== */
+    /**
+     * 白板主体在独立 chunk `client.board.js` 里：主 bundle 已七千行，白板再加一千行会让它难以维护。
+     * 这里只做三件事——首次打开时按需加载、把 chunk 的组件挂上去、加载失败时降级提示。
+     *
+     * 加载走 loader 的 `require.async('./client.board.js')`（DSH client-modules 原生支持的
+     * 包内异步 chunk，chunk 自己用 `{ id, chunk, factory }` 注册）。失败不影响任何现有功能：
+     * 用户仍能用编辑面板与全部恢复通道。
+     * 详见 docs/plans/2026-11-09-布局白板.md。
+     */
+    let boardModule = null;
+    let boardLoading = false;
+    let boardError = null;
+    const boardListeners = new Set();
+
+    function notifyBoard() {
+      for (const listener of boardListeners) {
+        try {
+          listener();
+        } catch (error) {
+          console.warn('[dsh-layout] 白板订阅回调失败', error);
+        }
+      }
+    }
+
+    function loadBoardModule() {
+      if (boardModule !== null || boardLoading) return;
+      boardLoading = true;
+      boardError = null;
+      notifyBoard();
+      // 没有 require.async 的宿主（老版本 loader）直接降级
+      const asyncRequire = typeof require.async === 'function' ? require.async : null;
+      if (asyncRequire === null) {
+        boardLoading = false;
+        boardError = 'require.async 不可用';
+        notifyBoard();
+        return;
+      }
+      Promise.resolve()
+        .then(() => asyncRequire('./client.board.js'))
+        .then((mod) => {
+          boardModule = mod;
+          boardLoading = false;
+          if (typeof mod.ensureBoardCss === 'function') mod.ensureBoardCss();
+          notifyBoard();
+        })
+        .catch((error) => {
+          boardModule = null;
+          boardLoading = false;
+          boardError = String(error);
+          console.warn('[dsh-layout] 白板模块加载失败，编辑面板与恢复通道不受影响', error);
+          notifyBoard();
+        });
+    }
+
+    function useBoardModule() {
+      const [, setTick] = React.useState(0);
+      React.useEffect(() => {
+        const listener = () => setTick((value) => value + 1);
+        boardListeners.add(listener);
+        return () => boardListeners.delete(listener);
+      }, []);
+      return { module: boardModule, loading: boardLoading, error: boardError };
+    }
+
+    /** 白板层：只在打开时加载 chunk；加载中与失败各有明确提示，不留白屏。 */
+    function BoardLayer({ t }) {
+      const { module: loaded, loading, error } = useBoardModule();
+      React.useEffect(() => {
+        loadBoardModule();
+      }, []);
+      if (error !== null) {
+        return h('div', { className: 'dshl-boardFallback', 'data-dshl-layer': '' },
+          h('div', { className: 'dshl-boardFallbackBox' },
+            h('p', null, `${t('boardTitle')}：${t('boardLoadFail')}`),
+            h('p', { className: 'dshl-hint' }, error),
+            h('button', { type: 'button', className: 'dshl-btn', onClick: () => { setBoard(false); setPanel(true); } }, t('boardAdvanced'))));
+      }
+      if (loaded === null || loading) {
+        return h('div', { className: 'dshl-boardFallback', 'data-dshl-layer': '' },
+          h('div', { className: 'dshl-boardFallbackBox' }, h('p', null, t('boardLoading'))));
+      }
+      return h(loaded.Board, { t });
     }
 
     /* ============================== 编辑模式浮层 ============================== */
@@ -6773,10 +7075,14 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       const panelNode = ui.panel ? h(EditorPanel, { t }) : null;
       // 设置弹层是 body 下的 fixed 层（z-index 1000）：留在 shell.overlay 里会被整层盖住，所以渲染到 body。
       const panel = panelNode === null || createPortal === null ? panelNode : createPortal(panelNode, document.body);
+      // 白板同理：它要描在设置弹层、插件页这些页面之上，留在 overlay 里会被盖住（实测设置页打开后白板整条被压住）。
+      const boardNode = ui.board ? h(Boundary, null, h(BoardLayer, { t })) : null;
+      const board = boardNode === null || createPortal === null ? boardNode : createPortal(boardNode, document.body);
       // 授予式「更多」：设置页导航与插件页第三方组没有 actions 槽位，锚点挂到这两个容器里
       const granted = h(GrantedStorageMenus, { t });
-      // 面板不依赖三栏骨架：没有可拖区域时也能开，用于识别与调整
-      if (!active) return h(React.Fragment, null, granted, panel);
+      // 面板不依赖三栏骨架：没有可拖区域时也能开，用于识别与调整。
+      // 白板同理：它要能在「未启用 / 未识别结构」时打开（比如刚恢复默认想重新搭），所以一起带上。
+      if (!active) return h(React.Fragment, null, granted, board, panel);
       // 打开插件页：中栏被藏起来时先放出来，否则切过去也是空白
       const openPlugins = () => {
         if (snapshot.config.columns.hideCenter) {
@@ -6917,11 +7223,74 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       return h(React.Fragment, null,
         h('div', { className: 'dshl-editLayer', 'data-dshl-layer': '' }, boxes, handles, launcher, toolbar),
         granted,
+        // 白板是独立 chunk，只在打开时才挂载并加载；关闭时不占任何开销。portal 到 body 才能盖住设置弹层
+        board,
         panel);
     }
 
     /* ============================== 插件装配 ============================== */
     const inject = ['slots', 'locale', 'configForms'];
+
+    /**
+     * 白板的宿主面：client.board.js 是独立 chunk，通过模块表 `require('dsh-layout')`
+     * 取回这里的引用，从而共用同一份配置、识别结果与通用组件。
+     *
+     * 只暴露白板真正需要的东西。白板不复制状态、不自己写 localStorage，
+     * 所有改动都经 updateConfig / replaceConfig 走同一套校验与持久化
+     * （docs/plans/2026-11-09-布局白板.md）。
+     */
+    const boardHost = {
+      t: null,
+      h,
+      React,
+      Switch,
+      BLOCKS,
+      PART_UNITS,
+      RELOCATE_DESTINATIONS,
+      RELOCATE_DESTINATION_IDS,
+      BLOCK_LABEL_KEYS,
+      readPath,
+      writePath,
+      pageKindOf,
+      currentPageLabel,
+      useStoreSnapshot,
+      updateConfig,
+      replaceConfig,
+      applyPreset,
+      setBoard,
+      setPanel,
+      openBoard,
+      /** 白板切页面场景：复用宿主 layout 服务与快捷键，不自己造路由。 */
+      navigate(kind) {
+        if (kind === 'settings') {
+          // 设置弹层由宿主快捷键打开（Ctrl/⌘ + Alt + ,）；侧栏那个「设置」是菜单触发器，
+          // 点它只会弹出菜单，不会直接开面板（实测）。
+          window.dispatchEvent(new KeyboardEvent('keydown', {
+            key: ',', code: 'Comma', ctrlKey: true, altKey: true, bubbles: true, cancelable: true,
+          }));
+          return;
+        }
+        const layout = typeof ctxRef?.get === 'function' ? ctxRef.get('layout') : undefined;
+        if (layout === null || layout === undefined || typeof layout.selectPanel !== 'function') return;
+        try {
+          // 会话页 = 关掉主面板；插件页 = 切到宿主自带的插件面板；插件详情页只能从插件页点进去，先到插件页
+          if (kind === 'conversation') layout.selectPanel(null);
+          else layout.selectPanel('plugins');
+        } catch (error) {
+          console.warn('[dsh-layout] 白板切页面失败，本次跳过', error);
+        }
+      },
+      /** 白板读骨架：按页面 key 取几何快照。 */
+      readGeometry(key) {
+        return boardGeometry[key] ?? null;
+      },
+      /** 白板「重新抓取」：立刻重量当前页并落盘。 */
+      recordGeometryNow() {
+        recordBoardGeometry(snapshot.targets, true);
+        notify();
+      },
+    };
+    let ctxRef = null;
 
     function apply(ctx) {
       const t = ctx.locale.bind(NS);
@@ -6930,6 +7299,9 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       bindSlotsService(ctx);
       // 宿主设置文档：配置与方案的第一存储（跨浏览器），服务不在场时全程走 localStorage（docs/plans/2026-11-08-配置跨浏览器持久化.md）
       bindHostForm(ctx);
+      // 白板宿主面要用 ctx 切页面（layout.selectPanel）与取快捷键
+      ctxRef = ctx;
+      boardHost.t = t;
 
       let refreshTimer = null;
       const scheduleRefresh = () => {
@@ -7132,6 +7504,6 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       }, (props) => h(Boundary, null, h(GuideStorageMenu, { ...props })))), 'dsh-layout: guide storage menu');
     }
 
-    return { apply, inject };
+    return { apply, inject, boardHost };
   },
 });
