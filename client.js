@@ -1132,10 +1132,20 @@ window.__ModuleLoader__.load({
         }
         return out;
       };
+      // 开始页卡片的稳定身份就是 kind：早期条目 id 为空时在此补成 id=kind（docs/plans/2026-11-08-身份键收口.md）
+      const guideZone = () => {
+        const out = [];
+        for (const entry of storageZone(storageRaw.guide)) {
+          const upgraded = entry.id === '' && (entry.kind ?? '') !== '' ? { ...entry, id: entry.kind } : entry;
+          if (out.some((item) => item.id === upgraded.id && item.label === upgraded.label)) continue;
+          out.push(upgraded);
+        }
+        return out;
+      };
       const storage = {
         sidebar: storageZone(storageRaw.sidebar),
         views: storageZone(storageRaw.views),
-        guide: storageZone(storageRaw.guide),
+        guide: guideZone(),
         settings: storageZone(storageRaw.settings),
         plugins: storageZone(storageRaw.plugins),
         headerUtilities: storageZone(storageRaw.headerUtilities),
@@ -2607,9 +2617,29 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /**
+     * 槽位扫描有时效缓存；设置页这类「后打开的面板」第一次 refresh 时可能还在缓存期内，
+     * 已渲染的条目拿不到标记。这里在「未渲染条目对应的槽位出口已经出现在 DOM」时提前让缓存失效，
+     * 限频 300ms，避免流式输出等高频变更拖慢扫描。
+     */
+    function scanSlotsIfStale() {
+      if (slotScan.graph.length === 0) return;
+      const now = Date.now();
+      if (now - slotScan.at >= SLOT_SCAN_MS || now - slotScan.at < 300) return;
+      for (const group of slotScan.graph) {
+        if (group.items.every((item) => item.rendered)) continue;
+        const outlet = document.querySelector(`[data-slot="${group.slot}"]`);
+        if (outlet !== null && outlet.childElementCount > 0) {
+          slotScan = { ...slotScan, at: 0 };
+          return;
+        }
+      }
+    }
+
     /** 把已渲染条目标记到 DOM：样式与卡片都按 `槽位::条目id` 定位。 */
     const slotAnnotated = new Set();
     function annotateSlotEntries() {
+      scanSlotsIfStale();
       const scan = scanSlots();
       if (slotsService === null || scan.graph.length === 0) return;
       const done = new Set();
@@ -3037,6 +3067,81 @@ window.__ModuleLoader__.load({
     const STORED_GUIDE_ATTR = 'data-dshl-stored-guide';
     const STORED_SECTION_ATTR = 'data-dshl-stored-section';
     const STORED_BUTTON_ATTR = 'data-dshl-stored-button';
+    /** 开始页卡片的宿主属性：值就是入口 kind，同一时刻唯一（docs/plans/2026-11-08-身份键收口.md）。 */
+    const GUIDE_ENTRY_ATTR = 'data-sidebar-right-guide-entry';
+    /** 槽位包装组件与 HOC：每个条目外面都有，组件名对身份没有区分度。 */
+    const IDENTITY_NOISE = new Set(['SessionEntry', 'StrictSessionEntry', 'SlotErrorBoundary', 'SlotOutlet', 'RootEntry', 'Fragment', 'Suspense', 'Boundary', 'ErrorBoundary', 'Provider', 'Consumer']);
+
+    /** 自身或附近祖先上的槽位条目标记：部分槽位把标记打在条目包裹层上（如设置页页头操作）。 */
+    function slotEntryOf(node) {
+      let current = node;
+      for (let depth = 0; depth < 3 && current !== null && current !== undefined; depth += 1) {
+        if (typeof current.getAttribute !== 'function') break;
+        const value = current.getAttribute(SLOT_ENTRY_ATTR);
+        if (typeof value === 'string' && value !== '') return value;
+        current = current.parentElement;
+      }
+      return '';
+    }
+
+    /** 最近的 React 列表 key：宿主渲染槽位条目与列表项时用的条目 id，不随显示文案变化。 */
+    function fiberKeyOf(node) {
+      const fiberKey = Object.keys(node).find((name) => name.startsWith('__reactFiber$'));
+      let fiber = fiberKey === undefined ? null : node[fiberKey];
+      for (let depth = 0; depth < 12 && fiber !== null && fiber !== undefined; depth += 1) {
+        if (typeof fiber.key === 'string' && fiber.key !== '') return fiber.key;
+        fiber = fiber.return;
+      }
+      return '';
+    }
+
+    /** 最近的业务组件名：按钮既没有槽位键也没有列表 key 时，用宿主定义它的组件名兜底。 */
+    function bizComponentOf(node) {
+      const fiberKey = Object.keys(node).find((name) => name.startsWith('__reactFiber$'));
+      let fiber = fiberKey === undefined ? null : node[fiberKey];
+      for (let depth = 0; depth < 16 && fiber !== null && fiber !== undefined; depth += 1) {
+        const type = fiber.type;
+        if (typeof type === 'function') {
+          const name = type.displayName ?? type.name ?? '';
+          if (/^[A-Z][A-Za-z0-9]{3,}$/.test(name) && !IDENTITY_NOISE.has(name)) return name;
+        }
+        fiber = fiber.return;
+      }
+      return '';
+    }
+
+    /** DOM 元素在宿主里的稳定身份；取不到的部分是空串。 */
+    function stableIdentityOf(node, options) {
+      if (node === null || node === undefined) return { slotEntry: '', fiberKey: '', component: '' };
+      return {
+        slotEntry: slotEntryOf(node),
+        fiberKey: fiberKeyOf(node),
+        component: options !== null && options !== undefined && options.component === true ? bizComponentOf(node) : '',
+      };
+    }
+
+    /** 配置里的身份键与 DOM 身份是否同一项：完整槽位键与 `槽位::id` 的后段都认。 */
+    function identityMatches(id, identity) {
+      if (typeof id !== 'string' || id === '') return false;
+      if (identity.slotEntry !== '') {
+        if (id === identity.slotEntry) return true;
+        const at = identity.slotEntry.indexOf('::');
+        if (at !== -1 && id === identity.slotEntry.slice(at + 2)) return true;
+      }
+      if (identity.fiberKey !== '' && (id === identity.fiberKey || id === `fiber:${identity.fiberKey}`)) return true;
+      if (identity.component !== '' && id === `comp:${identity.component}`) return true;
+      return false;
+    }
+
+    /** 收纳条目的身份：稳定 id 优先；早期只有显示名的条目退回 kind+label。 */
+    function storageKeyOf(entry) {
+      if (entry.id !== '') return entry.id;
+      return `${entry.kind ?? ''}\u0000${entry.label}`;
+    }
+
+    function sameStorageEntry(left, right) {
+      return storageKeyOf(left) === storageKeyOf(right);
+    }
 
     function resolveLabelText(label) {
       if (typeof label === 'function') {
@@ -3067,7 +3172,7 @@ window.__ModuleLoader__.load({
       return out;
     }
 
-    /** 右栏开始页卡片：宿主不暴露条目列表，从 DOM 上自动发现（kind 属性 + 标题文本）。 */
+    /** 右栏开始页卡片：宿主不暴露条目列表，从 DOM 自动发现；身份就是卡片属性里的 kind（同一时刻唯一）。 */
     function guideLabelOf(node) {
       const title = node.querySelector('[class*="entryTitle"]');
       return ((title === null ? node.textContent : title.textContent) ?? '').trim().slice(0, 60);
@@ -3075,12 +3180,14 @@ window.__ModuleLoader__.load({
 
     function readGuideEntries() {
       const out = [];
-      for (const node of document.querySelectorAll('[data-sidebar-right-guide-entry]')) {
-        const kind = node.getAttribute('data-sidebar-right-guide-entry') ?? '';
+      for (const node of document.querySelectorAll(`[${GUIDE_ENTRY_ATTR}]`)) {
+        const kind = node.getAttribute(GUIDE_ENTRY_ATTR) ?? '';
+        // 文件（files）是宿主保留的兜底入口：收起后没有可用的「更多」能回到它，不参与收纳
+        if (kind === '' || kind === 'files') continue;
         const label = guideLabelOf(node);
-        if (kind === '' || label === '') continue;
-        if (out.some((entry) => entry.kind === kind && entry.label === label)) continue;
-        out.push({ kind, label, id: '' });
+        if (label === '') continue;
+        if (out.some((entry) => entry.id === kind)) continue;
+        out.push({ kind, label, id: kind });
       }
       return out;
     }
@@ -3119,7 +3226,21 @@ window.__ModuleLoader__.load({
       return out;
     }
 
-    /** 按钮类入口（会话头工具行 / 设置页页头操作）：容器里的按钮自动发现；槽位条目带稳定键，其余按显示名。 */
+    /** 按钮的显示名：只用于展示与旧配置的 `label:` 键回退。 */
+    function buttonLabelOf(button) {
+      return (button.getAttribute('aria-label') ?? button.textContent ?? '').trim().slice(0, 60);
+    }
+
+    /** 按钮的收纳身份：槽位条目键（含祖先包裹层）→ 列表 key → 业务组件名 → 显示名。 */
+    function buttonEntryIdOf(button, label) {
+      const identity = stableIdentityOf(button, { component: true });
+      if (identity.slotEntry !== '') return identity.slotEntry;
+      if (identity.fiberKey !== '') return `fiber:${identity.fiberKey}`;
+      if (identity.component !== '') return `comp:${identity.component}`;
+      return `label:${label}`;
+    }
+
+    /** 按钮类入口（会话头工具行 / 设置页页头操作）：容器里的按钮自动发现，身份不依赖显示名。 */
     function readButtonEntries(outletSelector) {
       const outlet = document.querySelector(outletSelector);
       const container = outlet === null ? null : outlet.parentElement;
@@ -3127,10 +3248,9 @@ window.__ModuleLoader__.load({
       const out = [];
       for (const button of container.querySelectorAll('button')) {
         if (button.hasAttribute('data-dshl-grant-anchor')) continue;
-        const label = (button.getAttribute('aria-label') ?? button.textContent ?? '').trim().slice(0, 60);
+        const label = buttonLabelOf(button);
         if (label === '') continue;
-        const slotEntry = button.getAttribute('data-dshl-slotentry');
-        const id = slotEntry !== null && slotEntry !== '' ? slotEntry : `label:${label}`;
+        const id = buttonEntryIdOf(button, label);
         if (out.some((entry) => entry.id === id)) continue;
         out.push({ id, label });
       }
@@ -3165,34 +3285,51 @@ window.__ModuleLoader__.load({
       };
     }
 
-    /** 收纳标记：视图标签与开始页卡片按「标签 + kind」匹配打属性，样式按属性收起；配置变少时撤掉旧标记。 */
+    /** 收纳条目的匹配：稳定身份优先；id 为空的早期条目退回显示名。 */
+    function findStoredFor(stored, identity, label) {
+      for (const entry of stored) {
+        if (entry.id !== '') {
+          if (identityMatches(entry.id, identity)) return entry;
+          continue;
+        }
+        if (entry.label === label) return entry;
+      }
+      return null;
+    }
+
+    /** 收纳标记：按宿主稳定身份匹配后打属性（显示名只兜底旧条目），样式按属性收起；配置变少时撤掉旧标记。 */
     const storedAnnotated = new Set();
     function annotateStored() {
       const config = snapshot.config;
       const done = new Set();
-      const viewLabels = new Map((config.storage?.views ?? []).map((entry) => [entry.label, entry.id]));
-      const guideKeys = new Map((config.storage?.guide ?? []).map((entry) => [`${entry.kind ?? ''}\u0000${entry.label}`, entry.id ?? '']));
+      const viewStored = config.storage?.views ?? [];
+      const guideStored = config.storage?.guide ?? [];
+      const sectionStored = config.storage?.settings ?? [];
       for (const node of document.querySelectorAll('[data-conversation-tabs] button')) {
-        const id = viewLabels.get((node.textContent ?? '').trim());
-        if (id === undefined) continue;
-        mark(node, STORED_VIEW_ATTR, id);
+        const hit = findStoredFor(viewStored, stableIdentityOf(node, null), (node.textContent ?? '').trim());
+        if (hit === null) continue;
+        mark(node, STORED_VIEW_ATTR, hit.id);
         done.add(node);
       }
-      for (const node of document.querySelectorAll('[data-sidebar-right-guide-entry]')) {
-        const kind = node.getAttribute('data-sidebar-right-guide-entry') ?? '';
-        const id = guideKeys.get(`${kind}\u0000${guideLabelOf(node)}`);
-        if (id === undefined) continue;
-        mark(node, STORED_GUIDE_ATTR, id);
+      for (const node of document.querySelectorAll(`[${GUIDE_ENTRY_ATTR}]`)) {
+        const kind = node.getAttribute(GUIDE_ENTRY_ATTR) ?? '';
+        const label = guideLabelOf(node);
+        const hit = guideStored.find((entry) => {
+          const key = entry.id !== '' ? entry.id : (entry.kind ?? '');
+          if (key !== '') return key === kind;
+          return entry.label === label;
+        });
+        if (hit === undefined) continue;
+        mark(node, STORED_GUIDE_ATTR, hit.id !== '' ? hit.id : (hit.kind ?? ''));
         done.add(node);
       }
-      const sectionLabels = new Map((config.storage?.settings ?? []).map((entry) => [entry.label, entry.id]));
       for (const cell of document.querySelectorAll('[data-dshl-unit="set-nav"] button')) {
-        const id = sectionLabels.get((cell.textContent ?? '').trim());
-        if (id === undefined) continue;
-        mark(cell, STORED_SECTION_ATTR, id);
+        const hit = findStoredFor(sectionStored, stableIdentityOf(cell, null), (cell.textContent ?? '').trim());
+        if (hit === null) continue;
+        mark(cell, STORED_SECTION_ATTR, hit.id);
         done.add(cell);
       }
-      // 按钮类入口：按槽位条目键或显示名匹配容器里的按钮
+      // 按钮类入口：按槽位条目键 / 列表 key / 组件名匹配容器里的按钮，旧 `label:` 键仍按显示名
       for (const zone of ['headerUtilities', 'settingsActions']) {
         const storedButtons = config.storage?.[zone] ?? [];
         if (storedButtons.length === 0) continue;
@@ -3200,9 +3337,13 @@ window.__ModuleLoader__.load({
         if (container === null) continue;
         for (const button of container.querySelectorAll('button')) {
           if (button.hasAttribute('data-dshl-grant-anchor')) continue;
-          const label = (button.getAttribute('aria-label') ?? button.textContent ?? '').trim().slice(0, 60);
-          const slotEntry = button.getAttribute('data-dshl-slotentry') ?? '';
-          const hit = storedButtons.find((entry) => entry.id === slotEntry || entry.label === label);
+          const label = buttonLabelOf(button);
+          const identity = stableIdentityOf(button, { component: true });
+          const hit = storedButtons.find((entry) => {
+            if (entry.id === '') return entry.label === label;
+            if (entry.id.startsWith('label:')) return entry.id === `label:${label}`;
+            return identityMatches(entry.id, identity);
+          });
           if (hit === undefined) continue;
           mark(button, STORED_BUTTON_ATTR, `${zone}:${hit.id}`);
           done.add(button);
@@ -3427,9 +3568,10 @@ window.__ModuleLoader__.load({
     }
 
     function refresh() {
+      // 槽位条目先打标记：收纳发现与插件来源都按 `data-dshl-slotentry` 读取，晚一步会拿到上一轮的旧标记
+      annotateSlotEntries();
       const targets = readTargets();
       annotate(targets);
-      annotateSlotEntries();
       setTargets(targets);
       // 识别结果可能没变（签名相同、不重绘），但联动条件可能变了（页面、折叠、条目在场），样式与投影每轮重算一次
       applyDynamicCss();
@@ -5196,7 +5338,7 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       ];
       const toggle = (zone, entry, on) => updateConfig((draft) => {
         const list = draft.storage[zone];
-        const others = list.filter((item) => !(item.id === entry.id && item.label === entry.label));
+        const others = list.filter((item) => !sameStorageEntry(item, entry));
         draft.storage[zone] = on ? [...others, { id: entry.id ?? '', label: entry.label, ...(entry.kind === undefined ? {} : { kind: entry.kind }) }] : others;
       });
       const hiddenLabels = config.sidebar.panelHidden;
@@ -5204,7 +5346,7 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
         const stored = config.storage[section.id] ?? [];
         const rows = section.found.map((entry) => ({ ...entry, offline: false }));
         for (const entry of stored) {
-          if (rows.some((row) => row.id === entry.id && row.label === entry.label)) continue;
+          if (rows.some((row) => sameStorageEntry(row, entry))) continue;
           rows.push({ ...entry, offline: true });
         }
         return h('div', { key: section.id, className: 'dshl-surfaceGroup' },
@@ -5212,8 +5354,8 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
           rows.length === 0
             ? h('p', { className: 'dshl-hint' }, t(section.emptyKey))
             : h('div', { className: 'dshl-listScroll' }, h('div', { className: 'dshl-list' }, ...rows.map((entry) => {
-              const storedEntry = stored.find((item) => item.id === entry.id && item.label === entry.label);
-              return h('div', { key: `${entry.id}:${entry.label}`, className: 'dshl-row' },
+              const storedEntry = stored.find((item) => sameStorageEntry(item, entry));
+              return h('div', { key: storageKeyOf(entry), className: 'dshl-row' },
                 h('span', { className: 'dshl-rowLabel' }, entry.label),
                 section.id === 'sidebar' && hiddenLabels.includes(entry.label) ? h('span', { className: 'dshl-itemSub' }, t('storageHiddenHint')) : null,
                 entry.offline ? h('span', { className: 'dshl-itemSub' }, t('storageZoneOffline')) : null,
@@ -5293,7 +5435,7 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       return h(React.Fragment, null, ...rows.map((row) => h(StorageRow, { key: row.id, label: row.label, current: currentIds.has(row.id), onSelect: () => open(row.id) })));
     }
 
-    /** 右栏开始页的「更多工具」收纳行：owner 提供 onOpen(id)，id 形如 `kind:id`，按标签 + kind 反查。 */
+    /** 右栏开始页的「更多工具」收纳行：owner 提供 onOpen(id)，id 形如 `kind:id`；按 kind 反查，不再比标题。 */
     function GuideStorageMenu({ entries, onOpen, onDismiss }) {
       const { config } = useStoreSnapshot();
       if (config.enabled !== true) return null;
@@ -5302,7 +5444,10 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       const owners = Array.isArray(entries) ? entries : [];
       const rows = [];
       for (const entry of stored) {
-        const hit = owners.find((item) => item.label === entry.label && (entry.kind === undefined || entry.kind === '' || String(item.id).startsWith(`${entry.kind}:`)));
+        const key = entry.id !== '' ? entry.id : (entry.kind ?? '');
+        const hit = key !== ''
+          ? owners.find((item) => String(item.id) === key || String(item.id).startsWith(`${key}:`))
+          : owners.find((item) => item.label === entry.label);
         if (hit === undefined) continue;
         rows.push({ id: String(hit.id), label: entry.label });
       }
@@ -5358,9 +5503,10 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       return native === null ? { className: 'dshl-grantFallback', children } : { className: native.className, children };
     }
 
-    function pickSettingsSection(label) {
+    /** 设置页导航的收纳行：按分区 id 找导航按钮（与收起时的身份一致），点它切分区。 */
+    function pickSettingsSection(id) {
       for (const cell of document.querySelectorAll('[data-dshl-unit="set-nav"] button')) {
-        if ((cell.textContent ?? '').trim() !== label) continue;
+        if (!identityMatches(id, stableIdentityOf(cell, null))) continue;
         cell.click();
         return true;
       }
@@ -5475,11 +5621,11 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       if (config.enabled !== true) return null;
       const settingsStored = config.storage.settings ?? [];
       const pluginsStored = config.storage.plugins ?? [];
-      const activeSectionLabel = (() => {
+      const activeSection = (() => {
         const active = document.querySelector('[data-dshl-unit="set-nav"] button[aria-current="true"]');
-        return active === null ? '' : (active.textContent ?? '').trim();
+        return active === null ? null : stableIdentityOf(active, null);
       })();
-      const settingsRows = settingsStored.map((entry) => ({ id: entry.id, label: entry.label, current: entry.label === activeSectionLabel }));
+      const settingsRows = settingsStored.map((entry) => ({ id: entry.id, label: entry.label, current: activeSection !== null && identityMatches(entry.id, activeSection) }));
       const pluginRows = pluginsStored.map((entry) => ({ id: entry.id, label: entry.label, current: false }));
       const headerStored = config.storage.headerUtilities ?? [];
       const settingsActionStored = config.storage.settingsActions ?? [];
@@ -5492,7 +5638,7 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
           chrome: () => settingsAnchorChrome(t),
           rows: settingsRows,
           onPick: (row) => {
-            if (!pickSettingsSection(row.label)) console.warn('[dsh-layout] 找不到收纳的设置项', row.label);
+            if (!pickSettingsSection(row.id)) console.warn('[dsh-layout] 找不到收纳的设置项', row.label);
           },
         }) : null,
         pluginRows.length > 0 ? h(GrantedMenu, {

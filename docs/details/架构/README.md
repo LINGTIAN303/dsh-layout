@@ -259,12 +259,14 @@ flowchart LR
 | 收纳域 | 入口自动发现 | 收起方式 | 菜单与打开方式 |
 | --- | --- | --- | --- |
 | 侧栏面板 | `sidebar.panellist` 槽位条目（面板 id + 显示名） | `[data-dshl-panel]` 生成 `display:none` | 原生 `sidebar.panellist.actions` 注册行 → `layout.selectPanel(panelId)` |
-| 会话视图标签 | `conversation.view` 槽位条目（id + 本地化标签；`chat` 不参与） | 注解层按标签匹配打 `data-dshl-stored-view` | 原生 `conversation.session.header.views.actions` → owner `onOpen(id)` |
-| 右栏开始页卡片 | DOM `[data-sidebar-right-guide-entry]`（kind + 标题；`文件` 不参与） | 按 kind + 标题打 `data-dshl-stored-guide` | 原生 `sidebar.right.tab.guide.actions` → owner `onOpen('kind:id')` |
-| 设置页导航（授予式） | `settings.section` 槽位条目（id + 显示名，当前约 22 项） | 注解层按显示名给导航行打 `data-dshl-stored-section` | 导航列表末尾插外来锚点（抄原生 navCell 类名）→ 宿主 `Menu` → 点原生导航行切 section |
+| 会话视图标签 | `conversation.view` 槽位条目（id + 本地化标签；`chat` 不参与） | 按列表 key（= 视图 id）打 `data-dshl-stored-view` | 原生 `conversation.session.header.views.actions` → owner `onOpen(id)` |
+| 右栏开始页卡片 | DOM `[data-sidebar-right-guide-entry]`（值 = 入口 kind，同一时刻唯一；`files` 不参与） | 按 kind 打 `data-dshl-stored-guide` | 原生 `sidebar.right.tab.guide.actions` → owner `onOpen('kind:id')` |
+| 设置页导航（授予式） | `settings.section` 槽位条目（id + 显示名，当前约 22 项） | 按列表 key（= 分区 id）给导航行打 `data-dshl-stored-section` | 导航列表末尾插外来锚点（抄原生 navCell 类名）→ 宿主 `Menu` → 按 id 点原生导航行切 section |
 | 插件页第三方插件（授予式） | DOM `[data-plugin-package]` 卡片（包名 + 标题） | `[data-plugin-package="<包名>"]` 直接 `display:none` | 「已安装插件」分组标题旁插外来锚点（抄原生 `groupMore` 类名）→ 宿主 `Menu` → 点卡片打开按钮进详情 |
-| 会话头工具按钮（授予式） | DOM 工具行里的 `button`（有槽位条目键的用条目键，否则 `label:<显示名>`） | 注解层打 `data-dshl-stored-button`，动态样式收起 | 工具行末尾插外来锚点（抄原生工具按钮类名，图标态）→ 宿主 `Menu` → `.click()` 原按钮 |
-| 设置页页头操作（授予式） | DOM `settings.action` 行里的 `button`（同上） | 同上 | 页头操作行末尾插外来锚点（抄原生按钮类名，带「更多」文字）→ 宿主 `Menu` → `.click()` 原按钮 |
+| 会话头工具按钮（授予式） | DOM 工具行里的 `button`（身份：槽位条目键 → 列表 key → 业务组件名 → 显示名） | 注解层打 `data-dshl-stored-button`，动态样式收起 | 工具行末尾插外来锚点（抄原生工具按钮类名，图标态）→ 宿主 `Menu` → `.click()` 原按钮 |
+| 设置页页头操作（授予式） | DOM `settings.action` 行里的 `button`（同一套身份规则） | 同上 | 页头操作行末尾插外来锚点（抄原生按钮类名，带「更多」文字）→ 宿主 `Menu` → `.click()` 原按钮 |
+
+**身份键**：四类需要「记住是哪一个入口」的区不再靠显示名匹配。DOM 侧按「槽位条目键（自身或向上 3 层祖先）→ React 列表 key（宿主渲染列表时用的条目 id）→ 最近业务组件名 → 显示名」取第一个可用值；配置里存稳定键（视图与设置导航直接存槽位 id，开始页存 kind，按钮存槽位键或 `comp:<组件名>`），匹配时任一键命中即算同一入口。显示名只用于展示，以及「早期只有名字的条目」和按钮旧 `label:` 键的兜底。宿主改文案不再影响收纳状态。
 
 - 收纳行用宿主 `@deepseek-ai/dsh-client-ui-primitives` 的 `MenuItemButton` 渲染；原生三区 order -100 排在各菜单最前，授予式四区自带 `Menu`。
 - 授予式的锚点由组件维护：容器出现/重建时自动重挂（900ms 轮询兜底），组件卸载时移除；配置为空或 primitives 缺失时锚点不出现。
