@@ -3,6 +3,14 @@ window.__ModuleLoader__.load({
   factory(require) {
     const React = require('react');
     const h = React.createElement;
+    // 面板要浮在设置弹层（body 下的 fixed 层）之上，只能渲染到 body；宿主没给 react-dom 时退回原位渲染。
+    let createPortal = null;
+    try {
+      const reactDom = require('react-dom');
+      createPortal = typeof reactDom.createPortal === 'function' ? reactDom.createPortal : null;
+    } catch (error) {
+      console.warn('[dsh-layout] 宿主未提供 react-dom，编辑面板只能渲染在浮层原位', error);
+    }
     const NS = 'dsh-layout';
 
     /* ============================== 文案 ============================== */
@@ -82,11 +90,13 @@ window.__ModuleLoader__.load({
       partTurnRail: '消息区 · 轮次导航',
       composerPartsMissing: '未识别输入区内部结构，拆解项暂不可用。',
       coverage: '拆解覆盖',
-      coverageHint: '声明表里每个拆解单元此刻的状态；「当前为空」表示区域已识别、但这个单元现在没渲染（例如没有待办、右栏未展开）。',
-      coverageSummary: (detected, empty, pending) => `已识别 ${detected} · 当前为空 ${empty} · 待识别 ${pending}`,
-      coverageDetected: '已识别',
-      coverageEmpty: '当前为空',
-      coveragePending: '待识别',
+      coverageHint: '「此刻在场」是这一秒 DOM 里真实命中的单元；「上次观测」来自上次打开该区域页面时的结构快照，带时间；「从未识别」表示还没打开过那个页面。',
+      coverageSummary: (detected, observed, never) => `此刻在场 ${detected} · 上次观测 ${observed} · 从未识别 ${never}`,
+      coverageDetected: '此刻在场',
+      coverageObserved: '上次观测',
+      coverageAbsent: '上次未出现',
+      coverageLegacy: '无快照',
+      coverageNever: '从未识别',
       externalTitle: '外部插件单元',
       externalHint: '自动扫描当前插件页面的结构；安全项可直接隐藏/排序，风险项（入口、含输入、唯一滚动、占满整页）保持只读。',
       externalEmpty: '当前页面没有可扫描的外部插件结构（会话页，或还没打开插件页）。',
@@ -173,7 +183,20 @@ window.__ModuleLoader__.load({
       recoveryShortcut: '布局：打开编辑浮层（恢复入口）',
       openPlugins: '插件页',
       riskyHint: '注意：侧栏或面板入口已被隐藏，界面上会留一个「布局」恢复按钮（位置随留白走）。快捷键也能打开编辑浮层。',
-      shortcutHint: '快捷键：Ctrl/⌘+Alt+L 打开编辑浮层；再加 Shift 直接恢复默认布局。',
+      shortcutHint: '快捷键：Ctrl/⌘+Alt+L 打开编辑面板；再加 Shift 直接恢复默认布局。',
+      panelTitle: '布局编辑面板',
+      panelOpen: '打开编辑面板',
+      panelClose: '关闭编辑面板',
+      panelSideLeft: '贴左侧',
+      panelSideRight: '贴右侧',
+      panelCurrentPage: (page) => `当前页面：${page}`,
+      panelEntryHint: '编辑面板是全局浮层：在哪个页面打开就停在哪个页面上，识别、预览、调整都对着当前界面。',
+      panelOpened: '编辑面板已打开；按 Esc 或右上角关闭。',
+      observedAt: (time) => `上次观测 ${time}`,
+      observedArea: (time, area) => `上次观测 ${time} · ${area}`,
+      observedUnknown: '曾识别过，但没有结构快照（升级前记录）。',
+      notOnPage: '此刻不在这个页面上，开关可调但看不到效果。',
+      surfaceOffline: '此刻不在场',
       offsetClamped: '偏移会自动限制，保证设置面板始终留在屏幕内。',
       blankHint: '点击恢复布局，或按 Ctrl/⌘+Alt+L',
       anchorHint: '依附位置',
@@ -289,11 +312,13 @@ window.__ModuleLoader__.load({
       partTurnRail: 'Messages · turn navigator',
       composerPartsMissing: 'The composer internals are not recognized; the split controls are unavailable.',
       coverage: 'Part coverage',
-      coverageHint: 'Status of every declared part right now; "Empty" means the area is recognized but the part is not rendered at the moment (no todo list, right column closed, ...).',
-      coverageSummary: (detected, empty, pending) => `Detected ${detected} · empty ${empty} · pending ${pending}`,
-      coverageDetected: 'Detected',
-      coverageEmpty: 'Empty',
-      coveragePending: 'Pending',
+      coverageHint: '"Live now" means the unit is in the DOM this second; "Last seen" comes from the structure snapshot taken the last time that page was open, with a timestamp; "Never seen" means that page has not been opened yet.',
+      coverageSummary: (detected, observed, never) => `Live ${detected} · last seen ${observed} · never ${never}`,
+      coverageDetected: 'Live now',
+      coverageObserved: 'Last seen',
+      coverageAbsent: 'Not in last scan',
+      coverageLegacy: 'No snapshot',
+      coverageNever: 'Never seen',
       externalTitle: 'External plugin units',
       externalHint: 'Auto-scans the current plugin page; safe units can be hidden or reordered, risky ones (entry, inputs, only scroll container, fills page) stay read-only.',
       externalEmpty: 'No external plugin structure to scan on this page (conversation page, or no plugin page open).',
@@ -380,7 +405,20 @@ window.__ModuleLoader__.load({
       recoveryShortcut: 'Layout: open the edit overlay (recovery)',
       openPlugins: 'Plugins page',
       riskyHint: 'Heads up: the sidebar or panel entry is hidden, so a "Layout" recovery button floats in a clear spot. The shortcut also opens the edit overlay.',
-      shortcutHint: 'Shortcuts: Ctrl/⌘+Alt+L opens the edit overlay; add Shift to restore the default layout.',
+      shortcutHint: 'Shortcuts: Ctrl/⌘+Alt+L opens the editor panel; add Shift to restore the default layout.',
+      panelTitle: 'Layout editor panel',
+      panelOpen: 'Open editor panel',
+      panelClose: 'Close editor panel',
+      panelSideLeft: 'Dock left',
+      panelSideRight: 'Dock right',
+      panelCurrentPage: (page) => `Page: ${page}`,
+      panelEntryHint: 'The editor is a global overlay: it stays on whatever page you opened it from, so recognition, preview and tweaks all see the live interface.',
+      panelOpened: 'Panel open; press Esc or the close button.',
+      observedAt: (time) => `Last seen ${time}`,
+      observedArea: (time, area) => `Last seen ${time} · ${area}`,
+      observedUnknown: 'Seen before, but no structure snapshot (legacy record).',
+      notOnPage: 'Not on this page now; toggles apply but the effect is not visible here.',
+      surfaceOffline: 'Not present',
       offsetClamped: 'Offsets are clipped so the settings panel always stays on screen.',
       blankHint: 'Click to restore the layout, or press Ctrl/⌘+Alt+L',
       anchorHint: 'Anchored to',
@@ -700,7 +738,16 @@ window.__ModuleLoader__.load({
     let snapshot = {
       config: readStoredConfig() ?? normalizeConfig(null),
       targets: ABSENT_TARGETS,
-      ui: { editing: false },
+      /** panel：编辑面板（全局浮层）是否打开；side：面板贴哪一侧。 */
+      ui: (() => {
+        try {
+          const raw = JSON.parse(window.localStorage.getItem('dsh-layout/ui/v1') ?? '{}');
+          return { editing: false, panel: false, side: raw !== null && raw.side === 'left' ? 'left' : 'right' };
+        } catch (error) {
+          console.warn('[dsh-layout] 读取界面记忆失败，使用默认值', error);
+          return { editing: false, panel: false, side: 'right' };
+        }
+      })(),
       /** 落点重算信号：界面变化（新插件出现、布局重排）导致按钮被遮挡时递增。 */
       reposition: 0,
     };
@@ -754,7 +801,7 @@ window.__ModuleLoader__.load({
         ? ''
         : `${value.pageKey}:${(value.units ?? []).map((unit) => unit.key).join(',')}:${value.iframe === null ? 'd' : 'i'}`);
       const buildSignature = (value) => (value.ok
-        ? `${Object.keys(value.regions).join(',')}|${value.panels.map((panel) => panel.label).join('\u0001')}|${value.settings ? 's' : ''}|${surfaceSignature(value.surfaces ?? [])}|${anomalySignature(value.anomalies ?? [])}|${externalSignature(value.external)}`
+        ? `${Object.keys(value.regions).join(',')}|${value.panels.map((panel) => panel.label).join('\u0001')}|${value.settings ? 's' : ''}|${surfaceSignature(value.surfaces ?? [])}|${anomalySignature(value.anomalies ?? [])}|${externalSignature(value.external)}|snap:${value.areaSnapshotVersion ?? 0}`
         : '');
       const signature = buildSignature(targets);
       const previousSignature = buildSignature(previous);
@@ -789,6 +836,30 @@ window.__ModuleLoader__.load({
       if (snapshot.ui.editing === editing) return;
       snapshot = { ...snapshot, ui: { ...snapshot.ui, editing } };
       notify();
+    }
+
+    /** 打开/关闭全局编辑面板；面板开着才能识别当前页面并就地调整。 */
+    function setPanel(panel) {
+      if (snapshot.ui.panel === panel) return;
+      snapshot = { ...snapshot, ui: { ...snapshot.ui, panel } };
+      notify();
+    }
+
+    function setPanelSide(side) {
+      if (snapshot.ui.side === side) return;
+      snapshot = { ...snapshot, ui: { ...snapshot.ui, side } };
+      try {
+        window.localStorage.setItem('dsh-layout/ui/v1', JSON.stringify({ ...readStoredUi(), side }));
+      } catch (error) {
+        console.warn('[dsh-layout] 保存面板位置失败', error);
+      }
+      notify();
+    }
+
+    /** 面板入口统一走这里：没启用就先启用，再打开面板。 */
+    function openPanel() {
+      if (!snapshot.config.enabled) updateConfig((draft) => { draft.enabled = true; }, { capture: true });
+      setPanel(true);
     }
 
     /**
@@ -1210,11 +1281,9 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 会话区结构「见过没有」的记忆。
-     * 编辑区挂在插件详情页上，此时主面板是插件页、会话区不在 DOM 里，
-     * 如果每次都按「当前 DOM 有没有」来判断，控制项会在插件页上永远显示不可用。
-     * 因此一旦在会话页识别成功过就记下来（跨会话持久化），让控制项始终可用——
-     * CSS 规则是常驻的，切回会话页自然生效。
+     * 会话区结构「见过没有」的记忆（升级前只有这一个布尔，现在由区域快照取代，保留用于迁移）。
+     * 识别层只能在目标页面渲染时看见它，因此一旦在会话页识别成功过就记下来，
+     * 让控制项在别的页面上仍然可用——CSS 规则是常驻的，切回会话页自然生效。
      */
     const CONV_PARTS_KEY = 'dsh-layout/conv-parts/v1';
     let convPartsSeen = (() => {
@@ -1239,8 +1308,9 @@ window.__ModuleLoader__.load({
     let settingsPartsSeen = auxPartsFlags.settings === true;
     let sidebarPartsSeen = auxPartsFlags.sidebar === true;
 
-    /** 区域是否识别过：拆解卡片与覆盖度都用它判断「待识别」还是「当前为空」。 */
+    /** 区域是否识别过：优先看结构快照，其次兼容升级前的「见过」布尔。 */
     function areaSeen(area) {
+      if (areaSnapshots[area] !== undefined) return true;
       if (area === 'sidebar') return sidebarPartsSeen;
       if (area === 'rightbar') return rightbarPartsSeen;
       if (area === 'settings') return settingsPartsSeen;
@@ -1251,6 +1321,82 @@ window.__ModuleLoader__.load({
       if (auxPartsFlags[key] === true) return;
       auxPartsFlags[key] = true;
       try { window.localStorage.setItem(AUX_PARTS_KEY, JSON.stringify(auxPartsFlags)); } catch (error) { console.warn('[dsh-layout] 保存拆解标记失败', error); }
+    }
+
+    /**
+     * 官方区域结构快照。
+     * 识别层只在目标页面渲染时看得见它（会话区、右栏、设置面板都不常驻 DOM），
+     * 所以每次「真正看见」就把这一刻可见的拆解单元存下来；卡片和覆盖度用
+     * 「上次观测 hh:mm」说明此刻不在场时看到的是什么时候的结构。
+     * 只存单元清单与时间，不存元素引用。
+     */
+    const AREA_SNAPSHOT_KEY = 'dsh-layout/area-snapshots/v1';
+    const AREA_IDS = ['sidebar', 'center', 'rightbar', 'settings'];
+    /** 区域名沿用已有词条，避免再维护一套同义词。 */
+    const AREA_LABEL_KEYS = { sidebar: 'sidebar', center: 'center', rightbar: 'rightbar', settings: 'settingsPanel' };
+    /** 长时间停在同一页时刷新观测时间，让「上次观测」接近离开时刻而不是进入时刻。 */
+    const AREA_OBSERVED_REFRESH_MS = 30000;
+    let areaSnapshots = (() => {
+      try {
+        const raw = JSON.parse(window.localStorage.getItem(AREA_SNAPSHOT_KEY) ?? '{}');
+        return raw !== null && typeof raw === 'object' ? raw : {};
+      } catch (error) {
+        console.warn('[dsh-layout] 读取区域结构快照失败', error);
+        return {};
+      }
+    })();
+    const areaLiveLast = { sidebar: false, center: false, rightbar: false, settings: false };
+    let areaSnapshotVersion = 0;
+
+    function areaParts(targets) {
+      return { sidebar: targets.sidebarParts, center: targets.convParts, rightbar: targets.rightbarParts, settings: targets.settingsParts };
+    }
+
+    /** 区域此刻是否在 DOM 里（有可解析的容器结构）。 */
+    function areaLive(targets, area) {
+      const parts = areaParts(targets)[area];
+      return parts !== null && parts !== undefined;
+    }
+
+    /** 观测时间：当天只显示时分，跨天带上月日。 */
+    function formatClock(at) {
+      const date = new Date(Number(at));
+      if (Number.isNaN(date.getTime())) return '—';
+      const pad = (value) => String(value).padStart(2, '0');
+      const clock = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+      return date.toDateString() === new Date().toDateString() ? clock : `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${clock}`;
+    }
+
+    function recordAreaSnapshots(targets) {
+      let changed = false;
+      const now = Date.now();
+      for (const area of AREA_IDS) {
+        const live = areaLive(targets, area);
+        const wasLive = areaLiveLast[area];
+        areaLiveLast[area] = live;
+        if (!live) continue;
+        // 与覆盖度同一套「在场」判定，快照里存声明表 id，回放时直接对得上
+        const ids = PART_UNITS
+          .filter((unit) => {
+            if (unit.area !== area) return false;
+            const present = (id) => (targets.units[id]?.length ?? 0) > 0;
+            if (unit.kind === 'order') return (unit.needs ?? []).length > 0 && unit.needs.every(present);
+            return present(unit.id) || (unit.targets ?? []).some(present);
+          })
+          .map((unit) => unit.id);
+        const previous = areaSnapshots[area];
+        const sameIds = previous !== undefined && Array.isArray(previous.ids) && previous.ids.join('|') === ids.join('|');
+        if (sameIds && wasLive && now - Number(previous.at ?? 0) < AREA_OBSERVED_REFRESH_MS) continue;
+        areaSnapshots = { ...areaSnapshots, [area]: { at: now, ids } };
+        changed = true;
+      }
+      if (!changed) return;
+      areaSnapshotVersion += 1;
+      try {
+        window.localStorage.setItem(AREA_SNAPSHOT_KEY, JSON.stringify(areaSnapshots));
+      } catch (error) {
+        console.warn('[dsh-layout] 保存区域结构快照失败', error);
+      }
     }
 
     /**
@@ -1924,8 +2070,11 @@ window.__ModuleLoader__.load({
       const ok = Boolean(sidebarCol && centerCol && rightbarCol);
       const externalPage = readExternalPage(centerCol);
       if (externalPage !== null) externalPage.units = scanExternalPageCached(externalPage);
-      const targets = { ok, frame, regions, sidebarRoot, blocks, sidebarParts, panels, conversation, convParts, headerParts, composerParts, messagesParts, rightbarParts, settingsParts, settings, external: externalPage, units: {}, surfaces: [], anomalies: [] };
+      const targets = { ok, frame, regions, sidebarRoot, blocks, sidebarParts, panels, conversation, convParts, headerParts, composerParts, messagesParts, rightbarParts, settingsParts, settings, external: externalPage, units: {}, surfaces: [], anomalies: [], areaSnapshots, areaSnapshotVersion: 0 };
       targets.units = collectPartUnits(targets);
+      recordAreaSnapshots(targets);
+      targets.areaSnapshots = areaSnapshots;
+      targets.areaSnapshotVersion = areaSnapshotVersion;
       targets.surfaces = readSurfaces(targets);
       targets.anomalies = Object.values(surfaceAnomalies).sort((a, b) => b.lastSeenAt - a.lastSeenAt);
       return targets;
@@ -2030,7 +2179,7 @@ window.__ModuleLoader__.load({
 .dshl-switch { position:relative; width:32px; height:18px; flex:none; border-radius:999px; border:1px solid var(--dsw-alias-border-l2); background:var(--dsw-alias-bg-layer-2); padding:0; cursor:pointer; transition:background .15s; }
 .dshl-switch:after { content:''; position:absolute; top:2px; left:2px; width:12px; height:12px; border-radius:50%; background:var(--dsw-alias-label-secondary); transition:transform .15s, background .15s; }
 .dshl-switch[aria-checked="true"] { background:var(--dsw-alias-brand-primary); border-color:var(--dsw-alias-brand-primary); }
-.dshl-switch[aria-checked="true"]:after { transform:translateX(14px); background:#fff; }
+.dshl-switch[aria-checked="true"]:after { transform:translateX(14px); background:var(--dsw-alias-bg-layer-1, #111); }
 .dshl-list { display:flex; flex-direction:column; gap:4px; }
 .dshl-listScroll { max-height:228px; overflow-y:auto; padding-right:2px; }
 .dshl-item { display:flex; align-items:center; gap:6px; padding:4px 6px; border-radius:var(--dsw-radius-md, 8px); background:var(--dsw-alias-bg-layer-2); border:1px solid transparent; }
@@ -2052,7 +2201,7 @@ window.__ModuleLoader__.load({
 .dshl-foot { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .dshl-btn { height:28px; padding:0 12px; border-radius:var(--dsw-radius-md, 8px); border:1px solid var(--dsw-alias-border-l1); background:transparent; color:var(--dsw-alias-label-primary); font-size:12px; font-family:inherit; cursor:pointer; }
 .dshl-btn:hover { background:var(--dsw-alias-interactive-bg-hover); }
-.dshl-btn[data-primary="true"] { background:var(--dsw-alias-brand-primary); border-color:var(--dsw-alias-brand-primary); color:#fff; }
+.dshl-btn[data-primary="true"] { background:var(--dsw-alias-brand-primary); border-color:var(--dsw-alias-brand-primary); color:var(--dsw-alias-bg-layer-1, #111); }
 .dshl-btn[data-primary="true"]:hover { filter:brightness(1.08); }
 .dshl-hint { font-size:11px; line-height:17px; color:var(--dsw-alias-label-secondary); }
 .dshl-message { font-size:11px; color:var(--dsw-alias-state-success-primary); }
@@ -2063,7 +2212,7 @@ window.__ModuleLoader__.load({
 .dshl-editLayer { position:absolute; inset:0; pointer-events:none; z-index:40; }
 .dshl-editBox { position:absolute; border:1px dashed color-mix(in srgb, var(--dsw-alias-brand-primary) 70%, transparent); border-radius:6px; pointer-events:none; }
 .dshl-editBox[data-dim="true"] { border-color:var(--dsw-alias-border-l2); }
-.dshl-editTag { position:absolute; top:5px; left:8px; font-size:11px; line-height:16px; padding:1px 7px; border-radius:999px; background:var(--dsw-alias-brand-primary); color:#fff; pointer-events:auto; cursor:pointer; user-select:none; }
+.dshl-editTag { position:absolute; top:5px; left:8px; font-size:11px; line-height:16px; padding:1px 7px; border-radius:999px; background:var(--dsw-alias-brand-primary); color:var(--dsw-alias-bg-layer-1, #111); pointer-events:auto; cursor:pointer; user-select:none; }
 .dshl-drag { position:absolute; top:0; bottom:0; width:12px; margin-left:-6px; pointer-events:auto; cursor:col-resize; touch-action:none; }
 .dshl-drag:after { content:''; position:absolute; top:0; bottom:0; left:5px; width:2px; background:var(--dsw-alias-brand-primary); opacity:0; transition:opacity .12s; }
 .dshl-drag:hover:after, .dshl-drag[data-active="true"]:after { opacity:.85; }
@@ -2082,6 +2231,20 @@ window.__ModuleLoader__.load({
 .dshl-launcher { display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 12px 0 9px; border-radius:999px; border:1px solid var(--dsw-alias-border-l2); background:var(--dsw-alias-bg-overlay); color:var(--dsw-alias-label-primary); font-size:12px; font-family:inherit; cursor:pointer; pointer-events:auto; box-shadow:var(--dsw-elevation-prominent, 0 6px 18px rgba(0,0,0,.25)); opacity:.72; transition:opacity .15s; }
 .dshl-launcher:hover { opacity:1; }
 .dshl-warn { margin:0; font-size:11px; line-height:17px; color:var(--dsw-alias-state-warn-primary); }
+.dshl-panel { position:fixed; top:52px; bottom:16px; z-index:1250; width:min(480px, calc(100vw - 32px)); display:flex; flex-direction:column; border-radius:14px; border:1px solid var(--dsw-alias-border-l2); background:var(--dsw-alias-bg-overlay); box-shadow:0 16px 40px rgba(0,0,0,.28); pointer-events:auto; color:var(--dsw-alias-label-primary); overflow:hidden; }
+.dshl-panel[data-side="right"] { right:16px; }
+.dshl-panel[data-side="left"] { left:16px; }
+.dshl-panelHead { display:flex; align-items:center; gap:6px; padding:9px 10px 9px 12px; border-bottom:1px solid var(--dsw-alias-border-l1); flex:none; }
+.dshl-panelTitle { font-size:13px; font-weight:600; white-space:nowrap; }
+.dshl-panelPage { flex:1; min-width:0; font-size:11px; line-height:16px; color:var(--dsw-alias-label-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right; }
+.dshl-panelBody { flex:1; min-height:0; overflow-y:auto; padding:12px; }
+.dshl-panel .dshl-cards { grid-template-columns:minmax(0,1fr); }
+.dshl-panel .dshl-tab { padding:8px 9px 9px; font-size:12px; }
+.dshl-panel .dshl-presets { gap:6px; }
+.dshl-panel .dshl-listScroll { max-height:200px; }
+@media (max-width: 900px) {
+  .dshl-panel { left:12px !important; right:12px !important; width:auto; top:auto; bottom:12px; max-height:66vh; }
+}
 `;
 
     let baseStyle = null;
@@ -2322,6 +2485,8 @@ window.__ModuleLoader__.load({
     const ICON_LAYOUT = ['M2.8 3.2h3v9.6h-3zM8.2 3.2h3v4.8h-3zM8.2 9.6h3v3.2h-3z'];
     const ICON_UP = ['M8 12.5v-9', 'M4.6 7.6 8 4.2l3.4 3.4'];
     const ICON_DOWN = ['M8 3.5v9', 'M4.6 8.4 8 11.8l3.4-3.4'];
+    const ICON_SWAP = ['M3 5.5h7', 'M7.5 3 10 5.5 7.5 8', 'M13 10.5H6', 'M8.5 8 6 10.5 8.5 13'];
+    const ICON_CLOSE = ['M4.5 4.5l7 7', 'M11.5 4.5l-7 7'];
 
     function Switch({ checked, onChange, label }) {
       return h('button', {
@@ -2720,7 +2885,7 @@ window.__ModuleLoader__.load({
       return { mode: 'free', x: pick.x, y: pick.y, region: pick.region, clearance: pick.clearance };
     }
 
-    /* ============================== 编辑面板（插件详情页内） ============================== */
+    /* ============================== 编辑面板（全局浮层） ============================== */
     const BLOCK_LABEL_KEYS = { brand: 'blockBrand', 'new-session': 'blockNewSession', panels: 'blockPanels', workspaces: 'blockWorkspaces', footer: 'blockFooter' };
 
     /**
@@ -2739,14 +2904,18 @@ window.__ModuleLoader__.load({
     ];
     const UI_STORE_KEY = 'dsh-layout/ui/v1';
 
+    function readStoredUi() {
+      return readJsonStore(UI_STORE_KEY);
+    }
+
     function readStoredEditorTab() {
-      const store = readJsonStore(UI_STORE_KEY);
+      const store = readStoredUi();
       const tab = store.tab;
       return typeof tab === 'string' && EDITOR_TABS.some((item) => item.id === tab) ? tab : EDITOR_TABS[0].id;
     }
 
     function writeStoredEditorTab(tab) {
-      const store = readJsonStore(UI_STORE_KEY);
+      const store = readStoredUi();
       if (store.tab === tab) return;
       store.tab = tab;
       writeJsonStore(UI_STORE_KEY, store);
@@ -2794,7 +2963,7 @@ window.__ModuleLoader__.load({
       );
     }
 
-    function BlocksCard({ config, t }) {
+    function BlocksCard({ config, targets, t }) {
       const items = config.sidebar.order.map((block) => ({ key: block, block }));
       return h(Card, { title: t('sidebarBlocks'), desc: t('sidebarBlocksHint') },
         h(SortableList, {
@@ -2818,7 +2987,8 @@ window.__ModuleLoader__.load({
             }),
           }),
         }),
-        h(PartSection, { sectionId: 'sidebarParts', config, t }));
+        h(ObservationNote, { area: 'sidebar', targets, t }),
+        h(PartSection, { sectionId: 'sidebarParts', config, targets, t }));
     }
 
     function PanelsCard({ config, targets, t }) {
@@ -2876,6 +3046,14 @@ window.__ModuleLoader__.load({
       const thirdCount = pluginPages.filter((surface) => surface.tier === 'third').length;
       const autoCount = pluginPages.filter((surface) => surface.tier === 'auto' || surface.tier === 'pending').length;
       const anomalies = targets.anomalies ?? [];
+      // 官方页面不在场时用区域快照补上「上次观测」：会话页/设置面板的结构不会常驻 DOM。
+      const areaOfSurface = (surface) => (surface.id === 'page.conversation' ? 'center' : surface.id === 'dialog.settings' ? 'settings' : null);
+      const hostStatus = (surface) => {
+        if (surface.present) return t('surfaceRecognized');
+        const area = areaOfSurface(surface);
+        const snapshot = area === null ? null : (targets.areaSnapshots ?? {})[area];
+        return snapshot === undefined || snapshot === null ? t('surfaceOffline') : t('observedAt')(formatClock(snapshot.at));
+      };
       const anomalyLabel = (item) => (item.kind === 'drift' ? t('anomalyDrift') : t('anomalyUnregistered'));
       const exportReview = () => {
         const payload = {
@@ -2921,7 +3099,7 @@ window.__ModuleLoader__.load({
           h('div', { className: 'dshl-list' }, regions.map((surface) => renderRow(surface, t('ownerNative'))))),
         h('div', { className: 'dshl-surfaceGroup' },
           h('div', { className: 'dshl-surfaceGroupTitle' }, t('surfacePages')),
-          h('div', { className: 'dshl-list' }, hostPages.map((surface) => renderRow(surface, surface.present ? t('surfaceRecognized') : '—')))),
+          h('div', { className: 'dshl-list' }, hostPages.map((surface) => renderRow(surface, hostStatus(surface))))),
         h('div', { className: 'dshl-surfaceGroup' },
           h('div', { className: 'dshl-surfaceGroupTitle' }, `${t('surfacePlugins')} · ${t('surfacesCount')(pluginPages.length)}`),
           h('div', { className: 'dshl-hint' }, `${t('ownerOfficial')} ${officialCount} · ${t('ownerThird')} ${thirdCount} · ${t('ownerAuto')} ${autoCount}`),
@@ -2987,11 +3165,22 @@ window.__ModuleLoader__.load({
         }));
     }
 
-    /** 一组拆解项：分隔线 + 说明 + 该组单元；区域还没识别过时只显示说明（不摆无效开关）。 */
-    function PartSection({ sectionId, config, t }) {
+    /**
+     * 区域观测说明：区域此刻不在场时，说明卡片上的控制项对应的是哪一次快照。
+     * 放在卡片层（而不是每组拆解项各来一行），避免同一句话重复四遍。
+     */
+    function ObservationNote({ area, targets, t }) {
+      const observed = targets?.areaSnapshots?.[area] ?? null;
+      if (areaLive(targets, area)) return null;
+      if (observed === null) return areaSeen(area) ? h('p', { className: 'dshl-hint' }, t('observedUnknown')) : null;
+      return h('p', { className: 'dshl-hint' }, `${t('observedArea')(formatClock(observed.at), t(AREA_LABEL_KEYS[area]))} · ${t('notOnPage')}`);
+    }
+
+    /** 一组拆解项：分隔线 + 说明 + 该组单元；区域还没观测过时只显示说明（不摆无效开关）。 */
+    function PartSection({ sectionId, config, targets, t }) {
       const section = PART_SECTIONS.find((item) => item.id === sectionId);
       const units = PART_UNITS.filter((unit) => unit.section === sectionId);
-      const seen = areaSeen(section.area);
+      const seen = (targets?.areaSnapshots?.[section.area] ?? null) !== null || areaSeen(section.area);
       return h(React.Fragment, null,
         h('div', { className: 'dshl-divider' }),
         h('div', { className: 'dshl-cardDesc' }, seen ? t(section.hintKey) : t(section.missingKey)),
@@ -3000,24 +3189,36 @@ window.__ModuleLoader__.load({
 
     /**
      * 拆解覆盖卡片：把声明表里的单元逐个列出状态。
-     * 三种状态：已识别（此刻 DOM 里有）/ 当前为空（区域识别过，但该单元此刻没渲染，例如没有待办、右栏未展开）/ 待识别（区域还没识别过）。
+     * 此刻在场 = 这一秒 DOM 里命中；上次观测 = 上次打开该区域页面时的结构快照（带时间）；
+     * 从未识别 = 还没打开过那个页面。不再用「当前为空」混指两种情况。
      */
     function CoverageCard({ config, targets, t }) {
       const units = targets.units ?? {};
+      const snapshots = targets.areaSnapshots ?? {};
       const present = (id) => (units[id]?.length ?? 0) > 0;
+      const snapshotFor = (area) => snapshots[area] ?? null;
       const statusOf = (spec) => {
+        const snapshot = snapshotFor(spec.area);
         if (spec.kind === 'order') {
           const needs = spec.needs ?? [];
           if (needs.length > 0 && needs.every(present)) return 'detected';
         } else if (present(spec.id) || (spec.targets ?? []).some(present)) {
           return 'detected';
         }
-        return areaSeen(spec.area) ? 'empty' : 'pending';
+        if (snapshot !== null) return snapshot.ids.includes(spec.id) ? 'observed' : 'absent';
+        return areaSeen(spec.area) ? 'legacy' : 'never';
       };
-      const rows = PART_UNITS.map((spec) => ({ spec, status: statusOf(spec) }));
+      const rows = PART_UNITS.map((spec) => ({ spec, status: statusOf(spec), snapshot: snapshotFor(spec.area) }));
       const detected = rows.filter((row) => row.status === 'detected').length;
-      const empty = rows.filter((row) => row.status === 'empty').length;
-      const pending = rows.length - detected - empty;
+      const observed = rows.length - detected - rows.filter((row) => row.status === 'never').length;
+      const never = rows.filter((row) => row.status === 'never').length;
+      const rowStatusText = (row) => {
+        if (row.status === 'detected') return t('coverageDetected');
+        if (row.status === 'observed') return `${t('coverageObserved')} ${formatClock(row.snapshot.at)}`;
+        if (row.status === 'absent') return t('coverageAbsent');
+        if (row.status === 'legacy') return t('coverageLegacy');
+        return t('coverageNever');
+      };
       const areas = [
         ['sidebar', t('sidebar')],
         ['center', t('center')],
@@ -3027,9 +3228,9 @@ window.__ModuleLoader__.load({
       const unitRow = (row) => h('div', { key: row.spec.id, className: 'dshl-item' },
         h('span', { className: 'dshl-surfaceDot', 'data-on': row.status === 'detected' ? 'true' : 'false', 'data-source': 'official', 'aria-hidden': true }),
         h('span', { className: 'dshl-itemLabel' }, t(row.spec.labelKey)),
-        h('span', { className: 'dshl-itemSub' }, row.status === 'detected' ? t('coverageDetected') : row.status === 'empty' ? t('coverageEmpty') : t('coveragePending')));
+        h('span', { className: 'dshl-itemSub' }, rowStatusText(row)));
       // 外部插件页面：只读候选清单 + 导出。
-      // 编辑区在插件详情页上，此刻不在插件页里，所以拿不到实时扫描；此时回退显示最近一次扫描结果。
+      // 编辑面板是浮层，切到哪个页面就扫哪个页面；不是插件页时回退显示最近一次扫描结果。
       const liveExternal = targets.external ?? null;
       const lastScan = (() => {
         if (liveExternal !== null) return null;
@@ -3173,7 +3374,7 @@ window.__ModuleLoader__.load({
                   }) : null));
             });
       return h(Card, { title: t('coverage'), desc: t('coverageHint') },
-        h('div', { className: 'dshl-hint' }, t('coverageSummary')(detected, empty, pending)),
+        h('div', { className: 'dshl-hint' }, t('coverageSummary')(detected, observed, never)),
         ...areas.map(([area, label]) => h('div', { key: area, className: 'dshl-surfaceGroup' },
           h('div', { className: 'dshl-surfaceGroupTitle' }, label),
           h('div', { className: 'dshl-list' }, rows.filter((row) => row.spec.area === area).map(unitRow)))),
@@ -3219,7 +3420,7 @@ window.__ModuleLoader__.load({
      * 会话区卡片：内容宽度 + 四组拆解（基础三块与换序、会话头内部、消息区、输入区）。
      * 拆解项的开关由 PART_UNITS 声明表生成，卡片只负责摆位置。
      */
-    function ConversationCard({ config, t }) {
+    function ConversationCard({ config, targets, t }) {
       return h(Card, { title: t('conversation'), desc: t('conversationHint') },
         h(FollowField, {
           label: t('contentWidth'),
@@ -3231,19 +3432,21 @@ window.__ModuleLoader__.load({
           t,
           onChange: (value) => updateConfig((draft) => { draft.center.contentWidth = value; }),
         }),
-        h(PartSection, { sectionId: 'convBase', config, t }),
-        h(PartSection, { sectionId: 'convHeader', config, t }),
-        h(PartSection, { sectionId: 'messagesParts', config, t }),
-        h(PartSection, { sectionId: 'composerParts', config, t }));
+        h(ObservationNote, { area: 'center', targets, t }),
+        h(PartSection, { sectionId: 'convBase', config, targets, t }),
+        h(PartSection, { sectionId: 'convHeader', config, targets, t }),
+        h(PartSection, { sectionId: 'messagesParts', config, targets, t }),
+        h(PartSection, { sectionId: 'composerParts', config, targets, t }));
     }
 
     /** 右栏卡片：标签栏/内容区拆解（宽度在「区域结构」里调）。 */
-    function RightbarCard({ config, t }) {
+    function RightbarCard({ config, targets, t }) {
       return h(Card, { title: t('rightbarPanel'), desc: t('rightbarPanelHint') },
-        h(PartSection, { sectionId: 'rightbarParts', config, t }));
+        h(ObservationNote, { area: 'rightbar', targets, t }),
+        h(PartSection, { sectionId: 'rightbarParts', config, targets, t }));
     }
 
-    function SettingsCard({ config, t }) {
+    function SettingsCard({ config, targets, t }) {
       const settings = config.settings;
       const num = (label, key, fallback, min, max) => h(FollowField, {
         key,
@@ -3265,10 +3468,15 @@ window.__ModuleLoader__.load({
         offset(t('offsetX'), 'offsetX', -600, 600),
         offset(t('offsetY'), 'offsetY', -500, 500),
         h('p', { className: 'dshl-hint' }, t('offsetClamped')),
-        h(PartSection, { sectionId: 'settingsParts', config, t }));
+        h(ObservationNote, { area: 'settings', targets, t }),
+        h(PartSection, { sectionId: 'settingsParts', config, targets, t }));
     }
 
-    function Editor({ t }) {
+    /**
+     * 面板正文：开关、预设、四类分页与卡片。
+     * 浮层面板与详情页入口分开渲染，正文只留一份，避免两处各写一套卡片。
+     */
+    function EditorBody({ t }) {
       const { config, targets, ui } = useStoreSnapshot();
       const [message, setMessage] = React.useState(null);
       const [activeTab, setActiveTab] = React.useState(readStoredEditorTab);
@@ -3280,13 +3488,13 @@ window.__ModuleLoader__.load({
       };
       const cardRenderers = {
         structure: () => h(StructureCard, { config, t }),
-        blocks: () => h(BlocksCard, { config, t }),
+        blocks: () => h(BlocksCard, { config, targets, t }),
         panels: () => h(PanelsCard, { config, targets, t }),
         surfaces: () => h(SurfacesCard, { targets, t }),
         coverage: () => h(CoverageCard, { config, targets, t }),
-        conversation: () => h(ConversationCard, { config, t }),
-        rightbar: () => h(RightbarCard, { config, t }),
-        settings: () => h(SettingsCard, { config, t }),
+        conversation: () => h(ConversationCard, { config, targets, t }),
+        rightbar: () => h(RightbarCard, { config, targets, t }),
+        settings: () => h(SettingsCard, { config, targets, t }),
       };
 
       const exportFile = () => {
@@ -3325,17 +3533,11 @@ window.__ModuleLoader__.load({
       ];
       const risky = config.enabled
         && (config.columns.hideSidebar
+          || config.columns.hideCenter
           || config.sidebar.panelHidden.length > 0
           || config.sidebar.hidden.length >= BLOCKS.length);
 
       return h('div', { className: 'dshl-root' },
-        h('div', { className: 'dshl-head' },
-          h('div', { className: 'dshl-headText' },
-            h('h3', { className: 'dshl-title' }, t('title')),
-            h('p', { className: 'dshl-desc' }, t('desc'))),
-          h('span', { className: 'dshl-status' },
-            h('span', { className: 'dshl-dot', 'data-ok': targets.ok ? 'true' : 'false' }),
-            targets.ok ? t('detected') : t('notDetected'))),
         h('div', { className: 'dshl-controlRow' },
           h('div', { className: 'dshl-control' },
             h('span', { className: 'dshl-rowLabel' }, t('enable')),
@@ -3354,8 +3556,6 @@ window.__ModuleLoader__.load({
                 setEditing(on);
               },
             }))),
-        h('p', { className: 'dshl-hint' }, `${t('enableHint')} ${t('editingHint')}`),
-        h('p', { className: 'dshl-hint' }, t('shortcutHint')),
         risky ? h('p', { className: 'dshl-warn' }, t('riskyHint')) : null,
         h('div', { className: 'dshl-presets' },
           h('span', { className: 'dshl-presetsLabel' }, t('presets')),
@@ -3405,6 +3605,80 @@ window.__ModuleLoader__.load({
           h('button', { type: 'button', className: 'dshl-btn', onClick: () => fileRef.current !== null && fileRef.current.click() }, t('importData')),
           h('input', { ref: fileRef, type: 'file', accept: 'application/json,.json', style: { display: 'none' }, onChange: importFile }),
           message === null ? null : h('span', { className: 'dshl-message', 'data-error': message.ok ? 'false' : 'true' }, message.text)),
+        h('p', { className: 'dshl-hint' }, `${t('enableHint')} ${t('editingHint')}`));
+    }
+
+    /** 面板标题上的当前页面：设置浮层 > 会话页 > 插件详情页 > 外部插件页 > 侧栏面板名。 */
+    function currentPageLabel(targets, t) {
+      if (areaLive(targets, 'settings')) return t('surfaceSettingsDialog');
+      if (areaLive(targets, 'center')) return t('surfaceConversation');
+      if (document.querySelector('[data-plugin-detail]') !== null) return t('surfacePluginDetail');
+      const external = targets.external;
+      if (external !== null && external !== undefined) return external.pageKey;
+      const panel = activePageKey();
+      return panel === '(unknown)' ? t('surfacePluginsManager') : panel;
+    }
+
+    /** 全局编辑面板：任意页面都能打开，开着时识别与预览都对着当前界面。 */
+    function EditorPanel({ t }) {
+      const { targets, ui } = useStoreSnapshot();
+      const page = currentPageLabel(targets, t);
+      return h('div', {
+        className: 'dshl-panel',
+        'data-dshl-layer': '',
+        'data-side': ui.side ?? 'right',
+        role: 'dialog',
+        'aria-label': t('panelTitle'),
+      },
+      h('div', { className: 'dshl-panelHead' },
+        h('span', { className: 'dshl-panelTitle' }, t('panelTitle')),
+        h('span', { className: 'dshl-panelPage', title: page }, t('panelCurrentPage')(page)),
+        h('button', {
+          type: 'button',
+          className: 'dshl-iconBtn',
+          title: ui.side === 'left' ? t('panelSideRight') : t('panelSideLeft'),
+          'aria-label': ui.side === 'left' ? t('panelSideRight') : t('panelSideLeft'),
+          onClick: () => setPanelSide(ui.side === 'left' ? 'right' : 'left'),
+        }, icon(ICON_SWAP, 14)),
+        h('button', {
+          type: 'button',
+          className: 'dshl-iconBtn',
+          title: t('panelClose'),
+          'aria-label': t('panelClose'),
+          onClick: () => setPanel(false),
+        }, icon(ICON_CLOSE, 14))),
+      h('div', { className: 'dshl-panelBody' }, h(EditorBody, { t })));
+    }
+
+    /** 插件详情页入口：编辑器搬进全局浮层后，这里只留开关、入口与约束说明。 */
+    function PluginEntry({ t }) {
+      const { config, targets, ui } = useStoreSnapshot();
+      const risky = config.enabled
+        && (config.columns.hideSidebar
+          || config.columns.hideCenter
+          || config.sidebar.panelHidden.length > 0
+          || config.sidebar.hidden.length >= BLOCKS.length);
+      return h('div', { className: 'dshl-root dshl-entry' },
+        h('div', { className: 'dshl-head' },
+          h('div', { className: 'dshl-headText' },
+            h('h3', { className: 'dshl-title' }, t('title')),
+            h('p', { className: 'dshl-desc' }, t('desc'))),
+          h('span', { className: 'dshl-status' },
+            h('span', { className: 'dshl-dot', 'data-ok': targets.ok ? 'true' : 'false' }),
+            targets.ok ? t('detected') : t('notDetected'))),
+        h('div', { className: 'dshl-controlRow' },
+          h('button', { type: 'button', className: 'dshl-btn', 'data-primary': 'true', onClick: openPanel }, t('panelOpen')),
+          h('div', { className: 'dshl-control' },
+            h('span', { className: 'dshl-rowLabel' }, t('enable')),
+            h(Switch, {
+              checked: config.enabled,
+              label: t('enable'),
+              onChange: (on) => updateConfig((draft) => { draft.enabled = on; }, { capture: on }),
+            }))),
+        h('p', { className: 'dshl-hint' }, t('panelEntryHint')),
+        ui.panel ? h('p', { className: 'dshl-hint' }, t('panelOpened')) : null,
+        risky ? h('p', { className: 'dshl-warn' }, t('riskyHint')) : null,
+        h('p', { className: 'dshl-hint' }, t('shortcutHint')),
         h('p', { className: 'dshl-hint' }, t('disabledHint')));
     }
 
@@ -3464,16 +3738,22 @@ window.__ModuleLoader__.load({
         };
       }, []);
 
+      // 面板与编辑模式都能用 Esc 退出：先退编辑模式，再关面板；设置浮层在场时交给它自己处理。
+      // 排除本插件自己的 dialog，否则打开面板后 Esc 永远被自己拦掉。
       React.useEffect(() => {
-        if (!ui.editing) return undefined;
+        if (!ui.editing && !ui.panel) return undefined;
         const onKeyDown = (event) => {
           if (event.key !== 'Escape' || event.defaultPrevented) return;
-          if (document.querySelector('[role="dialog"]') !== null) return;
-          setEditing(false);
+          if (document.querySelector('[role="dialog"]:not(.dshl-panel)') !== null) return;
+          if (snapshot.ui.editing) {
+            setEditing(false);
+            return;
+          }
+          setPanel(false);
         };
         window.addEventListener('keydown', onKeyDown, true);
         return () => window.removeEventListener('keydown', onKeyDown, true);
-      }, [ui.editing]);
+      }, [ui.editing, ui.panel]);
 
       // 兜底点击通道：即使按钮被 pointer-events/遮挡问题吃掉，按坐标命中同样能触发
       React.useEffect(() => {
@@ -3554,7 +3834,11 @@ window.__ModuleLoader__.load({
         };
       }, [placement]);
 
-      if (!active) return null;
+      const panelNode = ui.panel ? h(EditorPanel, { t }) : null;
+      // 设置弹层是 body 下的 fixed 层（z-index 1000）：留在 shell.overlay 里会被整层盖住，所以渲染到 body。
+      const panel = panelNode === null || createPortal === null ? panelNode : createPortal(panelNode, document.body);
+      // 面板不依赖三栏骨架：没有可拖区域时也能开，用于识别与调整
+      if (!active) return panel;
       // 打开插件页：中栏被藏起来时先放出来，否则切过去也是空白
       const openPlugins = () => {
         if (snapshot.config.columns.hideCenter) {
@@ -3662,9 +3946,9 @@ window.__ModuleLoader__.load({
           ? [
             { key: 'reset', label: t('reset'), iconSize: 17, primary: true, run: () => { replaceConfig(null); setEditing(false); } },
             { key: 'plugins', label: t('openPlugins'), primary: false, run: openPlugins },
-            { key: 'edit', label: t('editing'), primary: false, run: () => setEditing(true) },
+            { key: 'edit', label: t('editing'), primary: false, run: () => { openPanel(); setEditing(true); } },
           ]
-          : [{ key: 'edit', label: t('title'), iconSize: 14, primary: false, run: () => setEditing(true) }];
+          : [{ key: 'edit', label: t('title'), iconSize: 14, primary: false, run: () => { openPanel(); setEditing(true); } }];
       const floating = placement !== null && (placement.mode === 'free' || placement.mode === 'anchor');
       const launcher = risk && placement !== null
         ? h('div', {
@@ -3692,7 +3976,9 @@ window.__ModuleLoader__.load({
             h('span', null, action.label)))),
         placement.mode === 'blank' ? h('span', { className: 'dshl-launcherHint' }, t('blankHint')) : null)
         : null;
-      return h('div', { className: 'dshl-editLayer' }, boxes, handles, launcher, toolbar);
+      return h(React.Fragment, null,
+        h('div', { className: 'dshl-editLayer', 'data-dshl-layer': '' }, boxes, handles, launcher, toolbar),
+        panel);
     }
 
     /* ============================== 插件装配 ============================== */
@@ -3792,7 +4078,7 @@ window.__ModuleLoader__.load({
 
       ctx.effect(() => {
         const activate = () => {
-          if (!snapshot.config.enabled) updateConfig((draft) => { draft.enabled = true; }, { capture: true });
+          openPanel();
           setEditing(true);
         };
         const shortcuts = typeof ctx.get === 'function' ? ctx.get('shortcuts') : undefined;
@@ -3840,7 +4126,7 @@ window.__ModuleLoader__.load({
           && (subject.kind === 'bundle' || subject.kind === 'row')
           && pkg !== null && pkg !== undefined && pkg.name === 'dsh-layout';
         if (!mine) return null;
-        return h(Boundary, null, h(Editor, { t }));
+        return h(Boundary, null, h(PluginEntry, { t }));
       })), 'dsh-layout: plugin detail section');
 
       ctx.effect(() => ctx.slots.inject('shell.overlay', () => ctx.slots.register({
