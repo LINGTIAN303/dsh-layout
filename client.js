@@ -146,6 +146,21 @@ window.__ModuleLoader__.load({
       externalClearRegistry: '清除登记',
       externalRegistered: '已登记',
       externalDeclareHint: '插件自声明：在节点上写 data-dshl-declare="header"（可选 data-dshl-declare-label、data-dshl-declare-guard），拆解层会优先采用。',
+      pluginSources: '插件来源',
+      pluginSourcesHint: '宿主 slots 注册表的权威清单：哪个插件在哪个槽位注册了什么，以及此刻是否渲染。列表类槽位可精确隐藏/排序；入口类只排序，页面主体与单槽只读。',
+      pluginSourcesUnavailable: '宿主未提供 slots 注册表接口，暂时列不出组件来源；页面内部的几何拆解仍然可用。',
+      pluginSourcesCount: (slots, items, rendered) => `槽位 ${slots} · 条目 ${items} · 已渲染 ${rendered}`,
+      slotShowAll: '显示全部槽位',
+      slotNothingRendered: '当前页面还没有已渲染的插件条目。',
+      slotNotRendered: '未渲染',
+      slotEntryOnly: '入口 · 只排序',
+      slotPageOnly: '页面主体 · 只读',
+      slotSingleOnly: '单槽 · 只读',
+      slotOverlayOnly: '弹层 · 只读',
+      slotKindList: '列表',
+      slotKindKeyed: '按 key',
+      slotKindSingle: '单槽',
+      slotKindChain: '链式',
       rightbarPanel: '右栏',
       rightbarPanelHint: '右栏内部的标签栏与内容区；宽度在「区域结构」里调。',
       rightbarPartsHint: '右栏拆解：标签栏与内容区可各自隐藏，标签栏也可放到内容区下方。',
@@ -368,6 +383,21 @@ window.__ModuleLoader__.load({
       externalClearRegistry: 'Clear registration',
       externalRegistered: 'Registered',
       externalDeclareHint: 'Plugin self-declaration: add data-dshl-declare="header" (optional data-dshl-declare-label, data-dshl-declare-guard) on a node; the decomposer prefers it.',
+      pluginSources: 'Plugin sources',
+      pluginSourcesHint: 'Authoritative list from the host slots registry: which plugin registered what in which slot, and whether it is rendered right now. List slots can be hidden/reordered precisely; entry slots are reorder-only, page bodies and single slots stay read-only.',
+      pluginSourcesUnavailable: 'The host exposes no slots registry here, so component sources cannot be listed; in-page geometric decomposition still works.',
+      pluginSourcesCount: (slots, items, rendered) => `${slots} slots · ${items} items · ${rendered} rendered`,
+      slotShowAll: 'Show all slots',
+      slotNothingRendered: 'No plugin entry is rendered on this page yet.',
+      slotNotRendered: 'not rendered',
+      slotEntryOnly: 'entry · reorder only',
+      slotPageOnly: 'page body · read-only',
+      slotSingleOnly: 'single slot · read-only',
+      slotOverlayOnly: 'overlay · read-only',
+      slotKindList: 'list',
+      slotKindKeyed: 'keyed',
+      slotKindSingle: 'single',
+      slotKindChain: 'chain',
       rightbarPanel: 'Right column',
       rightbarPanelHint: 'The tab strip and content area inside the right column; width is set in region structure.',
       rightbarPartsHint: 'Right column parts: the tab strip and content can each be hidden, and the tab strip can move below the content.',
@@ -564,6 +594,8 @@ window.__ModuleLoader__.load({
       },
       // 外部插件单元：key 形如 `任务看板::L1.1.0`；hide 为键列表，order 为键到顺序的映射
       external: { hide: [], order: {} },
+      // 插件来源（slots 注册表）：key 形如 `sidebar.panellist::task-board`；语义同上
+      slots: { hide: [], order: {} },
     };
 
     const ABSENT_TARGETS = {
@@ -720,6 +752,22 @@ window.__ModuleLoader__.load({
         hide: [...new Set(hideList)].slice(0, 200),
         order: Object.fromEntries(Object.entries(orderMap).slice(0, 200)),
       };
+      // 插件来源（slots 条目）：键更长，上限放到 160；其余同外部插件单元
+      const slotsRaw = raw.slots && typeof raw.slots === 'object' ? raw.slots : {};
+      const slotHide = Array.isArray(slotsRaw.hide) ? slotsRaw.hide.filter((item) => typeof item === 'string' && item.length > 0 && item.length <= 160) : [];
+      const slotOrder = {};
+      if (slotsRaw.order !== null && typeof slotsRaw.order === 'object') {
+        for (const [key, value] of Object.entries(slotsRaw.order)) {
+          if (typeof key !== 'string' || key.length === 0 || key.length > 160) continue;
+          const num = Number(value);
+          if (!Number.isFinite(num)) continue;
+          slotOrder[key] = Math.min(50, Math.max(-50, Math.round(num)));
+        }
+      }
+      out.slots = {
+        hide: [...new Set(slotHide)].slice(0, 200),
+        order: Object.fromEntries(Object.entries(slotOrder).slice(0, 200)),
+      };
       return out;
     }
 
@@ -801,7 +849,7 @@ window.__ModuleLoader__.load({
         ? ''
         : `${value.pageKey}:${(value.units ?? []).map((unit) => unit.key).join(',')}:${value.iframe === null ? 'd' : 'i'}`);
       const buildSignature = (value) => (value.ok
-        ? `${Object.keys(value.regions).join(',')}|${value.panels.map((panel) => panel.label).join('\u0001')}|${value.settings ? 's' : ''}|${surfaceSignature(value.surfaces ?? [])}|${anomalySignature(value.anomalies ?? [])}|${externalSignature(value.external)}|snap:${value.areaSnapshotVersion ?? 0}`
+        ? `${Object.keys(value.regions).join(',')}|${value.panels.map((panel) => panel.label).join('\u0001')}|${value.settings ? 's' : ''}|${surfaceSignature(value.surfaces ?? [])}|${anomalySignature(value.anomalies ?? [])}|${externalSignature(value.external)}|snap:${value.areaSnapshotVersion ?? 0}|slots:${value.slotSources?.version ?? 0}`
         : '');
       const signature = buildSignature(targets);
       const previousSignature = buildSignature(previous);
@@ -1963,6 +2011,248 @@ window.__ModuleLoader__.load({
       return units;
     }
 
+    /* ============================== 插件来源（slots 注册表） ============================== */
+    /**
+     * 组件来源的权威数据：宿主 slots 服务能列出「谁在哪个槽位注册了什么」，
+     * 再用 React fiber 的组件引用同一性把已渲染条目映射到真实 DOM。
+     * 服务不可用或 fiber 失效时整块降级为不可用（页面内部的几何拆解继续工作）。
+     */
+    let slotsService = null;
+    const SLOT_SCAN_MS = 1500;
+    const SLOT_ENTRY_ATTR = 'data-dshl-slotentry';
+    /** 条目渲染结果若是纯图标，向上找可操作的行：按钮 / 链接 / 菜单项 / 列表项。 */
+    const SLOT_ROW_SELECTOR = 'button, a[href], [role="button"], [role="tab"], [role="menuitem"], [role="switch"], label, li';
+    /** 入口类槽位：只允许排序，不允许隐藏（隐藏会切断回到页面的路径）。 */
+    const SLOT_ENTRY_LIKE = /(panellist|\.tab\b|\.tab\.|menu|\.item\b|\.view\b|section\.icon|right\.pane\.tab)/;
+    let slotScan = { at: 0, graph: [], version: 0 };
+
+    function bindSlotsService(ctx) {
+      try {
+        const service = typeof ctx.get === 'function' ? ctx.get('slots') : undefined;
+        slotsService = service !== null && service !== undefined && typeof service.entries === 'function' && typeof service.snapshot === 'function' ? service : null;
+      } catch (error) {
+        console.warn('[dsh-layout] 无法读取 slots 服务，插件来源面板降级', error);
+        slotsService = null;
+      }
+    }
+
+    /** 槽位可操作级别：列表里的普通条目可隐藏+排序；入口类只排序；页面主体与单槽/keyed/chain 只读。 */
+    function slotCapabilities(slot, kind) {
+      if (slot === 'main' || slot === 'main.conversation' || slot === 'root') return { hide: false, order: false, reason: 'page' };
+      if (kind !== 'list') return { hide: false, order: false, reason: 'single' };
+      if (SLOT_ENTRY_LIKE.test(slot)) return { hide: false, order: true, reason: 'entry' };
+      return { hide: true, order: true, reason: null };
+    }
+
+    /**
+     * 找到所有 React 树的顶端。
+     * 宿主可能有多个 React 根（例如设置弹层单独挂到 body），只走 #root 会漏掉弹层里的组件；
+     * 这里扫 body 的直接子级找 __reactContainer$，再回退到 #root 子节点的 fiber。
+     */
+    function reactTopFibers() {
+      const containers = [];
+      const rootEl = document.getElementById('root');
+      if (rootEl !== null) containers.push(rootEl);
+      for (const child of document.body.children) {
+        if (child !== rootEl) containers.push(child);
+      }
+      const tops = [];
+      for (const container of containers) {
+        const containerKey = Object.keys(container).find((name) => name.startsWith('__reactContainer$'));
+        if (containerKey === undefined) continue;
+        let top = container[containerKey];
+        let guard = 0;
+        while (top !== null && top.return !== null && guard < 400) {
+          top = top.return;
+          guard += 1;
+        }
+        if (top !== null) tops.push(top);
+      }
+      if (tops.length > 0) return tops;
+      if (rootEl === null) return tops;
+      const child = rootEl.firstElementChild;
+      const fiberKey = child === null ? undefined : Object.keys(child).find((name) => name.startsWith('__reactFiber$'));
+      if (fiberKey === undefined) return tops;
+      let top = child[fiberKey];
+      let guard = 0;
+      while (top !== null && top.return !== null && guard < 400) {
+        top = top.return;
+        guard += 1;
+      }
+      if (top !== null) tops.push(top);
+      return tops;
+    }
+
+    /** 一个组件 fiber 子树里渲染出的所有宿主节点。 */
+    function hostNodesOf(fiber) {
+      const nodes = [];
+      const walk = (node) => {
+        if (node === null || node === undefined) return;
+        if (typeof node.type === 'string' && node.stateNode instanceof Element) nodes.push(node.stateNode);
+        walk(node.child);
+        walk(node.sibling);
+      };
+      walk(fiber.child);
+      return nodes;
+    }
+
+    /** 只留组件自己的顶层渲染结果：被同组件其它节点包含的节点去掉。 */
+    function topHostNodes(nodes) {
+      const set = new Set(nodes);
+      return nodes.filter((node) => {
+        let parent = node.parentElement;
+        while (parent !== null) {
+          if (set.has(parent)) return false;
+          parent = parent.parentElement;
+        }
+        return true;
+      });
+    }
+
+    function slotRowOf(node) {
+      let current = node;
+      for (let depth = 0; depth < 5 && current !== null; depth += 1) {
+        if (typeof current.matches === 'function' && current.matches(SLOT_ROW_SELECTOR)) return current;
+        current = current.parentElement;
+      }
+      return node;
+    }
+
+    /** 条目的可操作目标：顶层节点；纯图标条目上探到按钮/菜单行；只有一个目标时才允许排序。 */
+    function operationTargetOf(nodes) {
+      const tops = [...new Set(topHostNodes(nodes).map(slotRowOf))];
+      // 弹层类条目（对话框 / 菜单 / 浮层）隐藏后可能让功能入口彻底消失，一律只读
+      const overlay = tops.some((node) => node.matches?.('[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], dialog') === true
+        || node.querySelector?.('[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], dialog') !== null);
+      return { tops, orderable: tops.length === 1 && !overlay, overlay };
+    }
+
+    function scanSlots() {
+      if (slotsService === null) return slotScan;
+      const now = Date.now();
+      if (slotScan.graph.length > 0 && now - slotScan.at < SLOT_SCAN_MS) return slotScan;
+      try {
+        const tree = slotsService.snapshot();
+        const nodeByName = new Map();
+        const walk = (node) => {
+          if (node === null || node === undefined) return;
+          if (node.type === 'slot' && !nodeByName.has(node.name)) nodeByName.set(node.name, node);
+          for (const child of node.children ?? []) walk(child);
+        };
+        for (const node of tree) walk(node);
+        const componentTargets = new Map();
+        const graph = [];
+        for (const [name, node] of nodeByName) {
+          const occupants = node.occupants ?? [];
+          if (occupants.length === 0) continue;
+          let entries = [];
+          try {
+            entries = slotsService.entries(name);
+          } catch (error) {
+            entries = [];
+          }
+          const usedEntries = new Set();
+          const capabilities = slotCapabilities(name, node.kind);
+          const items = occupants.map((occupant, index) => {
+            const id = occupant.id ?? occupant.key;
+            let entry = entries.find((candidate, entryIndex) => {
+              if (usedEntries.has(entryIndex)) return false;
+              if (id === undefined) return false;
+              return candidate.options?.id === id || candidate.options?.key === id;
+            });
+            if (entry === undefined) entry = entries[index] ?? null;
+            else usedEntries.add(entries.indexOf(entry));
+            const entryKey = id === undefined ? `${name}::#${index}` : `${name}::${id}`;
+            return {
+              slot: name,
+              kind: node.kind,
+              entryKey,
+              id: id === undefined ? `#${index}` : String(id),
+              order: occupant.order,
+              active: occupant.active !== false,
+              registrant: occupant.registrant ?? entry?.registrant ?? '',
+              componentName: entry?.component?.name ?? '',
+              component: entry?.component,
+              rendered: false,
+              hideable: capabilities.hide,
+              orderable: capabilities.order,
+              reason: capabilities.reason,
+              tops: [],
+            };
+          }).filter((item) => !item.id.startsWith('dsh-layout'));
+          // 组件引用只在内存里用于 fiber 匹配，卡片不读它
+          for (const item of items) {
+            if (typeof item.component !== 'function') continue;
+            const list = componentTargets.get(item.component);
+            if (list === undefined) componentTargets.set(item.component, [item]);
+            else list.push(item);
+          }
+          graph.push({ slot: name, kind: node.kind, scope: node.scope, rendered: 0, items });
+        }
+        // fiber 定位：用注册表里的组件函数引用做同一性匹配，不依赖组件名（生产构建可能压缩或为空）
+        const topFibers = reactTopFibers();
+        if (topFibers.length > 0 && componentTargets.size > 0) {
+          const seen = new Set();
+          const visit = (fiber) => {
+            if (fiber === null || fiber === undefined || seen.has(fiber)) return;
+            seen.add(fiber);
+            if (typeof fiber.type === 'function' && componentTargets.has(fiber.type)) {
+              const nodes = hostNodesOf(fiber);
+              if (nodes.length > 0) {
+                const target = operationTargetOf(nodes);
+                for (const item of componentTargets.get(fiber.type)) {
+                  if (item.rendered) continue;
+                  item.rendered = true;
+                  item.tops = target.tops;
+                  if (target.overlay) {
+                    item.hideable = false;
+                    item.orderable = false;
+                    item.reason = 'overlay';
+                  } else if (!target.orderable) {
+                    item.orderable = false;
+                  }
+                }
+              }
+            }
+            visit(fiber.child);
+            visit(fiber.sibling);
+          };
+          for (const topFiber of topFibers) visit(topFiber);
+        }
+        for (const group of graph) group.rendered = group.items.filter((item) => item.rendered).length;
+        slotScan = { at: now, graph, version: slotScan.version + 1 };
+        return slotScan;
+      } catch (error) {
+        console.warn('[dsh-layout] 读取插件来源失败，本次跳过', error);
+        return slotScan;
+      }
+    }
+
+    /** 把已渲染条目标记到 DOM：样式与卡片都按 `槽位::条目id` 定位。 */
+    const slotAnnotated = new Set();
+    function annotateSlotEntries() {
+      const scan = scanSlots();
+      if (slotsService === null || scan.graph.length === 0) return;
+      const done = new Set();
+      for (const group of scan.graph) {
+        for (const item of group.items) {
+          if (!item.rendered) continue;
+          // 只标记可操作条目：页面主体、单槽与只读项不打标记，避免整页/整栏被挂上属性
+          if (!item.hideable && !item.orderable) continue;
+          for (const node of item.tops) {
+            if (node === null || node === undefined || !node.isConnected) continue;
+            if (node.getAttribute(SLOT_ENTRY_ATTR) !== item.entryKey) node.setAttribute(SLOT_ENTRY_ATTR, item.entryKey);
+            done.add(node);
+          }
+        }
+      }
+      for (const node of slotAnnotated) {
+        if (!done.has(node) && node.isConnected) node.removeAttribute(SLOT_ENTRY_ATTR);
+      }
+      slotAnnotated.clear();
+      for (const node of done) slotAnnotated.add(node);
+    }
+
 
     /**
      * 把各区域识别结果收束成统一单元表：id → 元素数组（一个单元可能对应多个节点，例如设置页导航列含标题）。
@@ -2070,11 +2360,12 @@ window.__ModuleLoader__.load({
       const ok = Boolean(sidebarCol && centerCol && rightbarCol);
       const externalPage = readExternalPage(centerCol);
       if (externalPage !== null) externalPage.units = scanExternalPageCached(externalPage);
-      const targets = { ok, frame, regions, sidebarRoot, blocks, sidebarParts, panels, conversation, convParts, headerParts, composerParts, messagesParts, rightbarParts, settingsParts, settings, external: externalPage, units: {}, surfaces: [], anomalies: [], areaSnapshots, areaSnapshotVersion: 0 };
+      const targets = { ok, frame, regions, sidebarRoot, blocks, sidebarParts, panels, conversation, convParts, headerParts, composerParts, messagesParts, rightbarParts, settingsParts, settings, external: externalPage, units: {}, surfaces: [], anomalies: [], areaSnapshots, areaSnapshotVersion: 0, slotSources: null };
       targets.units = collectPartUnits(targets);
       recordAreaSnapshots(targets);
       targets.areaSnapshots = areaSnapshots;
       targets.areaSnapshotVersion = areaSnapshotVersion;
+      targets.slotSources = slotsService === null ? null : scanSlots();
       targets.surfaces = readSurfaces(targets);
       targets.anomalies = Object.values(surfaceAnomalies).sort((a, b) => b.lastSeenAt - a.lastSeenAt);
       return targets;
@@ -2133,6 +2424,7 @@ window.__ModuleLoader__.load({
     function refresh() {
       const targets = readTargets();
       annotate(targets);
+      annotateSlotEntries();
       setTargets(targets);
       return targets;
     }
@@ -2242,6 +2534,7 @@ window.__ModuleLoader__.load({
 .dshl-panel .dshl-tab { padding:8px 9px 9px; font-size:12px; }
 .dshl-panel .dshl-presets { gap:6px; }
 .dshl-panel .dshl-listScroll { max-height:200px; }
+.dshl-sourcesList { max-height:340px; overflow-y:auto; padding-right:2px; display:flex; flex-direction:column; gap:8px; }
 @media (max-width: 900px) {
   .dshl-panel { left:12px !important; right:12px !important; width:auto; top:auto; bottom:12px; max-height:66vh; }
 }
@@ -2359,6 +2652,13 @@ window.__ModuleLoader__.load({
       }
       for (const [key, order] of Object.entries(config.external.order)) {
         lines.push(`[data-dshl-xunit="${cssAttr(key)}"] { order: ${Math.round(order)} !important; }`);
+      }
+      // 插件来源条目：键是 slot::条目id；只对已渲染并打了标记的条目生效
+      for (const key of config.slots.hide) {
+        lines.push(`[${SLOT_ENTRY_ATTR}="${cssAttr(key)}"] { display: none !important; }`);
+      }
+      for (const [key, order] of Object.entries(config.slots.order)) {
+        lines.push(`[${SLOT_ENTRY_ATTR}="${cssAttr(key)}"] { order: ${Math.round(order)} !important; }`);
       }
       if (config.center.contentWidth !== null) {
         const width = Math.round(config.center.contentWidth);
@@ -2900,7 +3200,7 @@ window.__ModuleLoader__.load({
       { id: 'structure', labelKey: 'tabStructure', hintKey: 'tabStructureHint', cards: ['structure'] },
       { id: 'sidebar', labelKey: 'tabSidebar', hintKey: 'tabSidebarHint', cards: ['blocks', 'panels'] },
       { id: 'areas', labelKey: 'tabAreas', hintKey: 'tabAreasHint', cards: ['conversation', 'rightbar', 'settings'] },
-      { id: 'recognition', labelKey: 'tabRecognition', hintKey: 'tabRecognitionHint', cards: ['surfaces', 'coverage'] },
+      { id: 'recognition', labelKey: 'tabRecognition', hintKey: 'tabRecognitionHint', cards: ['surfaces', 'coverage', 'pluginSources'] },
     ];
     const UI_STORE_KEY = 'dsh-layout/ui/v1';
 
@@ -3417,6 +3717,90 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * 插件来源卡片：宿主 slots 注册表的权威清单。
+     * 按槽位分组列出条目的注册者、顺序与渲染状态；已渲染条目可按 `槽位::条目id` 精确隐藏/排序。
+     * 入口类只排序、页面主体与单槽只读——隐藏它们会切断回到页面的路径或直接白屏。
+     */
+    function PluginSourcesCard({ config, targets, t }) {
+      const [showAll, setShowAll] = React.useState(false);
+      const sources = targets.slotSources ?? null;
+      if (sources === null) {
+        return h(Card, { title: t('pluginSources'), desc: t('pluginSourcesHint') },
+          h('p', { className: 'dshl-hint' }, t('pluginSourcesUnavailable')));
+      }      // 默认可操作优先：只列出「有已渲染可操作条目」的槽位；打开开关才展示全部槽位与未渲染条目
+      const operable = (group) => group.items.some((item) => item.rendered && (item.hideable || item.orderable));
+      const groups = sources.graph
+        .filter((group) => group.items.length > 0 && (showAll || (group.rendered > 0 && operable(group))))
+        .sort((left, right) => ((operable(right) ? 1 : 0) - (operable(left) ? 1 : 0))
+          || (right.rendered - left.rendered)
+          || left.slot.localeCompare(right.slot));
+      const itemCount = groups.reduce((sum, group) => sum + (showAll ? group.items.length : group.rendered), 0);
+      const renderedCount = groups.reduce((sum, group) => sum + group.rendered, 0);
+      const kindLabel = (kind) => t({ list: 'slotKindList', keyed: 'slotKindKeyed', single: 'slotKindSingle', chain: 'slotKindChain' }[kind] ?? 'slotKindSingle');
+      const hidden = (key) => config.slots.hide.includes(key);
+      const toggleHide = (key, hide) => updateConfig((draft) => {
+        const set = new Set(draft.slots.hide);
+        if (hide) set.add(key);
+        else set.delete(key);
+        draft.slots.hide = [...set];
+      });
+      const shift = (key, delta) => updateConfig((draft) => {
+        const current = Object.hasOwn(draft.slots.order, key) ? draft.slots.order[key] : 0;
+        const next = Math.min(50, Math.max(-50, current + delta));
+        if (next === 0) delete draft.slots.order[key];
+        else draft.slots.order[key] = next;
+      });
+      const lockText = (item) => {
+        if (!item.rendered) return t('slotNotRendered');
+        if (item.reason === 'entry') return t('slotEntryOnly');
+        if (item.reason === 'page') return t('slotPageOnly');
+        if (item.reason === 'overlay') return t('slotOverlayOnly');
+        if (item.reason === 'single') return t('slotSingleOnly');
+        return item.registrant || t('ownerUnknown');
+      };
+      const itemRow = (item) => {
+        const orderValue = config.slots.order[item.entryKey];
+        return h('div', { key: item.entryKey, className: 'dshl-item', 'data-active': item.rendered ? 'true' : undefined },
+          h('span', { className: 'dshl-surfaceDot', 'data-on': item.rendered ? 'true' : 'false', 'data-source': 'third', 'aria-hidden': true }),
+          h('span', { className: 'dshl-itemLabel', title: `${item.entryKey} · ${item.componentName || item.registrant}` }, item.id),
+          h('span', { className: 'dshl-itemSub' }, lockText(item)),
+          h('span', { className: 'dshl-itemCtl' },
+            item.orderable && item.rendered ? h('button', {
+              type: 'button',
+              className: 'dshl-iconBtn',
+              title: t('externalOrderUp'),
+              'aria-label': t('externalOrderUp'),
+              onClick: () => shift(item.entryKey, -1),
+            }, icon(ICON_UP, 12)) : null,
+            item.orderable && item.rendered ? h('button', {
+              type: 'button',
+              className: 'dshl-iconBtn',
+              title: t('externalOrderDown'),
+              'aria-label': t('externalOrderDown'),
+              onClick: () => shift(item.entryKey, 1),
+            }, icon(ICON_DOWN, 12)) : null,
+            orderValue === undefined ? null : h('span', { className: 'dshl-num' }, String(orderValue)),
+            item.hideable && item.rendered ? h(Switch, {
+              checked: !hidden(item.entryKey),
+              label: `${t('hide')} ${item.id}`,
+              onChange: (on) => toggleHide(item.entryKey, !on),
+            }) : null));
+      };
+      return h(Card, { title: t('pluginSources'), desc: t('pluginSourcesHint') },
+        h('div', { className: 'dshl-row' },
+          h('span', { className: 'dshl-rowLabel' }, t('pluginSourcesCount')(groups.length, itemCount, renderedCount)),
+          h('span', { className: 'dshl-itemSub' }, t('slotShowAll')),
+          h(Switch, { checked: showAll, label: t('slotShowAll'), onChange: setShowAll })),
+        groups.length === 0
+          ? h('p', { className: 'dshl-hint' }, t('slotNothingRendered'))
+          : h('div', { className: 'dshl-sourcesList' },
+            ...groups.map((group) => h('div', { key: group.slot, className: 'dshl-surfaceGroup' },
+              h('div', { className: 'dshl-surfaceGroupTitle' }, `${group.slot} · ${kindLabel(group.kind)} · ${group.rendered}/${group.items.length}`),
+              h('div', { className: 'dshl-list' },
+                ...(showAll ? group.items : group.items.filter((item) => item.rendered)).map(itemRow))))));
+    }
+
+    /**
      * 会话区卡片：内容宽度 + 四组拆解（基础三块与换序、会话头内部、消息区、输入区）。
      * 拆解项的开关由 PART_UNITS 声明表生成，卡片只负责摆位置。
      */
@@ -3492,6 +3876,7 @@ window.__ModuleLoader__.load({
         panels: () => h(PanelsCard, { config, targets, t }),
         surfaces: () => h(SurfacesCard, { targets, t }),
         coverage: () => h(CoverageCard, { config, targets, t }),
+        pluginSources: () => h(PluginSourcesCard, { config, targets, t }),
         conversation: () => h(ConversationCard, { config, targets, t }),
         rightbar: () => h(RightbarCard, { config, targets, t }),
         settings: () => h(SettingsCard, { config, targets, t }),
@@ -3987,6 +4372,8 @@ window.__ModuleLoader__.load({
     function apply(ctx) {
       const t = ctx.locale.bind(NS);
       ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-layout: dictionaries');
+      // 插件来源面板依赖 slots 注册表；拿不到就整体降级，不影响几何拆解
+      bindSlotsService(ctx);
 
       let refreshTimer = null;
       const scheduleRefresh = () => {
