@@ -259,12 +259,19 @@ window.__ModuleLoader__.load({
       tabStorage: '入口收纳',
       tabStorageHint: '把不常用的侧栏入口收进「更多」菜单：侧栏只留常用的，收纳的入口在更多里点一下就能打开，再关开关就回到侧栏。',
       storage: '入口收纳',
-      storageHint: '开关打开 = 收进侧栏底部的「更多」菜单；关闭 = 回到侧栏列表。只改显示位置，入口本身与插件都不变。',
-      storageEmpty: '没有可收纳的入口：需要侧栏在界面上，且宿主 slots 注册表可用。',
+      storageHint: '开关打开 = 收进该区域的「更多」菜单；关闭 = 回到原列表。只改显示位置，入口本身与插件都不变。',
+      storageEmpty: '没有可收纳的入口：需要对应区域在界面上，且宿主 slots 注册表可用。',
       storageHostEntry: '宿主入口，始终显示',
       storageHiddenHint: '已在面板导航里隐藏',
       storageMenuLabel: '收纳的入口',
       storageMenuEmpty: '还没有收纳任何入口',
+      storageZoneSidebar: '侧栏入口',
+      storageZoneViews: '会话视图标签',
+      storageZoneGuide: '右栏开始页卡片',
+      storageZoneOffline: '此刻不在场',
+      storageZoneEmpty: '这个区域当前没有可收纳的入口。',
+      storageViewsUnavailable: '宿主槽位注册表不可用，列不出会话视图。',
+      storageGuideUnavailable: '右栏开始页不在场，或没有可收纳的卡片。',
       rightbarPanel: '右栏',
       rightbarPanelHint: '右栏内部的标签栏与内容区；宽度在「区域结构」里调。',
       rightbarPartsHint: '右栏拆解：标签栏与内容区可各自隐藏，标签栏也可放到内容区下方。',
@@ -589,12 +596,19 @@ window.__ModuleLoader__.load({
       tabStorage: 'Entry storage',
       tabStorageHint: 'Tuck rarely used sidebar entries into the More menu: keep the sidebar short, open tucked entries from More, and flip the switch back to restore them.',
       storage: 'Entry storage',
-      storageHint: 'On = tucked into the sidebar footer More menu; off = back in the sidebar list. Only the display location changes; the entry and its plugin stay as they are.',
-      storageEmpty: 'No storable entry right now: the sidebar must be visible and the host slots registry available.',
+      storageHint: 'On = tucked into that area\'s More menu; off = back in its list. Only the display location changes; the entry and its plugin stay as they are.',
+      storageEmpty: 'No storable entry right now: the area must be visible and the host slots registry available.',
       storageHostEntry: 'host entry, always shown',
       storageHiddenHint: 'hidden in the panel list',
       storageMenuLabel: 'Stored entries',
       storageMenuEmpty: 'Nothing stored yet',
+      storageZoneSidebar: 'Sidebar entries',
+      storageZoneViews: 'Session view tabs',
+      storageZoneGuide: 'Right column start cards',
+      storageZoneOffline: 'not present',
+      storageZoneEmpty: 'No storable entry in this area right now.',
+      storageViewsUnavailable: 'The host slots registry is unavailable, so session views cannot be listed.',
+      storageGuideUnavailable: 'The right column start page is not present, or has no storable card.',
       rightbarPanel: 'Right column',
       rightbarPanelHint: 'The tab strip and content area inside the right column; width is set in region structure.',
       rightbarPartsHint: 'Right column parts: the tab strip and content can each be hidden, and the tab strip can move below the content.',
@@ -801,8 +815,8 @@ window.__ModuleLoader__.load({
       rules: [],
       // 联动同步：面板导航与插件来源写同一份顺序/显隐
       sync: { panellistOrder: false, panellistHidden: false },
-      // 入口收纳：tucked 为收进「更多」菜单的侧栏面板显示名
-      storage: { tucked: [] },
+      // 入口收纳：三个收纳区各自的「收进更多」清单，条目存 { id, label }
+      storage: { sidebar: [], views: [], guide: [] },
     };
 
     /**
@@ -1078,12 +1092,31 @@ window.__ModuleLoader__.load({
         panellistOrder: syncRaw.panellistOrder === true,
         panellistHidden: syncRaw.panellistHidden === true,
       };
-      // 入口收纳：面板显示名列表，长度与数量都收一收
+      // 入口收纳：三个收纳区各自的条目清单；旧的 storage.tucked（纯标签）迁到 sidebar
       const storageRaw = raw.storage !== null && typeof raw.storage === 'object' ? raw.storage : {};
-      const tucked = Array.isArray(storageRaw.tucked)
-        ? storageRaw.tucked.filter((label) => typeof label === 'string' && label.length > 0 && label.length <= 60)
-        : [];
-      out.storage = { tucked: [...new Set(tucked)].slice(0, 40) };
+      const storageZone = (list) => {
+        const out = [];
+        for (const item of Array.isArray(list) ? list : []) {
+          if (out.length >= 40) break;
+          if (item === null || typeof item !== 'object') continue;
+          const id = typeof item.id === 'string' && item.id.length <= 160 ? item.id : '';
+          const kind = typeof item.kind === 'string' && item.kind.length <= 40 ? item.kind : '';
+          const label = typeof item.label === 'string' && item.label.length > 0 && item.label.length <= 60 ? item.label : '';
+          if (label === '') continue;
+          if (out.some((entry) => entry.label === label && entry.id === id && (entry.kind ?? '') === kind)) continue;
+          out.push(kind === '' ? { id, label } : { id, label, kind });
+        }
+        return out;
+      };
+      const storage = {
+        sidebar: storageZone(storageRaw.sidebar),
+        views: storageZone(storageRaw.views),
+        guide: storageZone(storageRaw.guide),
+      };
+      if (Array.isArray(storageRaw.tucked) && storage.sidebar.length === 0) {
+        storage.sidebar = storageZone(storageRaw.tucked.map((label) => ({ id: '', label })));
+      }
+      out.storage = storage;
       return out;
     }
 
@@ -1185,6 +1218,7 @@ window.__ModuleLoader__.load({
       if (options.capture === true) captureGeometry(draft);
       snapshot = { ...snapshot, config: normalizeConfig(draft) };
       schedulePersist();
+      annotateStored();
       applyDynamicCss();
       notify();
     }
@@ -1192,6 +1226,7 @@ window.__ModuleLoader__.load({
     function replaceConfig(next) {
       snapshot = { ...snapshot, config: normalizeConfig(next) };
       schedulePersist();
+      annotateStored();
       applyDynamicCss();
       notify();
     }
@@ -2964,6 +2999,106 @@ window.__ModuleLoader__.load({
       return map;
     }
 
+    /* ============================== 入口收纳（分区自动发现） ============================== */
+    /**
+     * 收纳域 = 一个能自动发现入口的列表 + 一个原生「更多」菜单。
+     * 目前三域：侧栏面板（slots: sidebar.panellist）、会话视图标签（slots: conversation.view）、
+     * 右栏开始页卡片（DOM: data-sidebar-right-guide-entry）。新插件/新视图自动出现在清单里，不需要登记。
+     */
+    const STORED_VIEW_ATTR = 'data-dshl-stored-view';
+    const STORED_GUIDE_ATTR = 'data-dshl-stored-guide';
+
+    function resolveLabelText(label) {
+      if (typeof label === 'function') {
+        try {
+          return String(label());
+        } catch (error) {
+          return null;
+        }
+      }
+      return typeof label === 'string' ? label : null;
+    }
+
+    /** 会话视图标签：从 conversation.view 槽位条目自动发现（宿主固定显示 chat，不参与收纳）。 */
+    function readViewEntries() {
+      if (slotsService === null) return [];
+      let entries = [];
+      try {
+        entries = slotsService.entries('conversation.view');
+      } catch (error) {
+        entries = [];
+      }
+      const out = [];
+      for (const entry of entries) {
+        const id = entry?.options?.id;
+        if (typeof id !== 'string' || id.length === 0 || id === 'chat') continue;
+        out.push({ id, label: resolveLabelText(entry.options?.label) ?? id });
+      }
+      return out;
+    }
+
+    /** 右栏开始页卡片：宿主不暴露条目列表，从 DOM 上自动发现（kind 属性 + 标题文本）。 */
+    function guideLabelOf(node) {
+      const title = node.querySelector('[class*="entryTitle"]');
+      return ((title === null ? node.textContent : title.textContent) ?? '').trim().slice(0, 60);
+    }
+
+    function readGuideEntries() {
+      const out = [];
+      for (const node of document.querySelectorAll('[data-sidebar-right-guide-entry]')) {
+        const kind = node.getAttribute('data-sidebar-right-guide-entry') ?? '';
+        const label = guideLabelOf(node);
+        if (kind === '' || label === '') continue;
+        if (out.some((entry) => entry.kind === kind && entry.label === label)) continue;
+        out.push({ kind, label, id: '' });
+      }
+      return out;
+    }
+
+    /** 当前三个收纳域可发现的入口清单。 */
+    function readStorageZones(targets) {
+      const sidebar = [];
+      const seen = new Set();
+      for (const link of panellistLinks(targets)) {
+        const at = link.key.indexOf('::');
+        const id = at === -1 ? '' : link.key.slice(at + 2);
+        if (id === '' || id === 'plugins' || seen.has(id)) continue;
+        seen.add(id);
+        sidebar.push({ id, label: link.label });
+      }
+      return { sidebar, views: readViewEntries(), guide: readGuideEntries() };
+    }
+
+    /** 收纳标记：视图标签与开始页卡片按「标签 + kind」匹配打属性，样式按属性收起；配置变少时撤掉旧标记。 */
+    const storedAnnotated = new Set();
+    function annotateStored() {
+      const config = snapshot.config;
+      const done = new Set();
+      const viewLabels = new Map((config.storage?.views ?? []).map((entry) => [entry.label, entry.id]));
+      const guideKeys = new Map((config.storage?.guide ?? []).map((entry) => [`${entry.kind ?? ''}\u0000${entry.label}`, entry.id ?? '']));
+      for (const node of document.querySelectorAll('[data-conversation-tabs] button')) {
+        const id = viewLabels.get((node.textContent ?? '').trim());
+        if (id === undefined) continue;
+        mark(node, STORED_VIEW_ATTR, id);
+        done.add(node);
+      }
+      for (const node of document.querySelectorAll('[data-sidebar-right-guide-entry]')) {
+        const kind = node.getAttribute('data-sidebar-right-guide-entry') ?? '';
+        const id = guideKeys.get(`${kind}\u0000${guideLabelOf(node)}`);
+        if (id === undefined) continue;
+        mark(node, STORED_GUIDE_ATTR, id);
+        done.add(node);
+      }
+      for (const node of storedAnnotated) {
+        if (done.has(node) || node.isConnected !== true) continue;
+        node.removeAttribute(STORED_VIEW_ATTR);
+        node.removeAttribute(STORED_GUIDE_ATTR);
+      }
+      storedAnnotated.clear();
+      for (const node of done) storedAnnotated.add(node);
+    }
+
+
     function syncSlotsFromPanelOrder(draft, links) {
       for (const link of links) delete draft.slots.order[link.key];
       for (const link of links) {
@@ -3112,6 +3247,7 @@ window.__ModuleLoader__.load({
       targets.areaSnapshotVersion = areaSnapshotVersion;
       targets.slotSources = slotsService === null ? null : scanSlots();
       targets.arrange = readArrangeContainers(targets);
+      targets.storageZones = readStorageZones(targets);
       targets.surfaces = readSurfaces(targets);
       targets.anomalies = Object.values(surfaceAnomalies).sort((a, b) => b.lastSeenAt - a.lastSeenAt);
       return targets;
@@ -3166,6 +3302,7 @@ window.__ModuleLoader__.load({
       externalAnnotated.clear();
       for (const node of externalDone) externalAnnotated.add(node);
       annotateArrange(targets);
+      annotateStored();
     }
 
     function refresh() {
@@ -3410,10 +3547,12 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       for (const label of config.sidebar.panelHidden) {
         lines.push(`[data-dshl-panel="${cssAttr(label)}"] { display: none !important; }`);
       }
-      // 入口收纳：收纳的入口从侧栏列表收起，改由「更多」菜单提供（菜单行在 apply 里注册）
-      for (const label of config.storage.tucked) {
-        lines.push(`[data-dshl-panel="${cssAttr(label)}"] { display: none !important; }`);
+      // 入口收纳：收纳的入口从原列表收起，改由各区的「更多」菜单提供（菜单行在 apply 里注册）
+      for (const entry of config.storage.sidebar) {
+        lines.push(`[data-dshl-panel="${cssAttr(entry.label)}"] { display: none !important; }`);
       }
+      if (config.storage.views.length > 0) lines.push(`[${STORED_VIEW_ATTR}] { display: none !important; }`);
+      if (config.storage.guide.length > 0) lines.push(`[${STORED_GUIDE_ATTR}] { display: none !important; }`);
       // 拆解单元显隐：统一由声明表生成，卡片与样式不再各写一套选择器
       for (const unit of PART_UNITS) {
         if (unit.kind !== 'hide') continue;
@@ -4910,59 +5049,80 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
             }, icon(ICON_CLOSE, 12))))));
     }
 
-    /** 入口收纳卡片：把侧栏入口收进「更多」菜单，或放回侧栏列表。 */
+    /**
+     * 入口收纳卡片：按收纳域列出可收纳入口（自动发现），开关 = 收进该区的「更多」菜单。
+     * 已配置但此刻不在场的入口也列出（标「此刻不在场」），方便放回。
+     */
     function StorageCard({ config, targets, t }) {
-      const panelIds = storagePanelIds(targets);
-      const tucked = config.storage.tucked;
-      const labels = (targets.panels ?? [])
-        .map((panel) => panel.label)
-        .filter((label) => panelIds.has(label));
-      for (const label of tucked) if (!labels.includes(label)) labels.push(label);
-      if (panelIds.size === 0) {
-        return h(Card, { title: t('storage'), desc: t('storageHint') },
-          h('p', { className: 'dshl-hint' }, t('storageEmpty')));
-      }
-      const setTucked = (label, on) => updateConfig((draft) => {
-        const set = new Set(draft.storage.tucked);
-        if (on) set.add(label);
-        else set.delete(label);
-        draft.storage.tucked = [...set];
+      const zones = targets.storageZones ?? { sidebar: [], views: [], guide: [] };
+      const sections = [
+        { id: 'sidebar', titleKey: 'storageZoneSidebar', found: zones.sidebar },
+        { id: 'views', titleKey: 'storageZoneViews', found: zones.views },
+        { id: 'guide', titleKey: 'storageZoneGuide', found: zones.guide },
+      ];
+      const toggle = (zone, entry, on) => updateConfig((draft) => {
+        const list = draft.storage[zone];
+        const others = list.filter((item) => !(item.id === entry.id && item.label === entry.label));
+        draft.storage[zone] = on ? [...others, { id: entry.id ?? '', label: entry.label, ...(entry.kind === undefined ? {} : { kind: entry.kind }) }] : others;
       });
+      const hiddenLabels = config.sidebar.panelHidden;
+      const renderZone = (section) => {
+        const stored = config.storage[section.id] ?? [];
+        const rows = section.found.map((entry) => ({ ...entry, offline: false }));
+        for (const entry of stored) {
+          if (rows.some((row) => row.id === entry.id && row.label === entry.label)) continue;
+          rows.push({ ...entry, offline: true });
+        }
+        return h('div', { key: section.id, className: 'dshl-surfaceGroup' },
+          h('div', { className: 'dshl-surfaceGroupTitle' }, t(section.titleKey)),
+          rows.length === 0
+            ? h('p', { className: 'dshl-hint' }, t(section.id === 'guide' ? 'storageGuideUnavailable' : 'storageZoneEmpty'))
+            : h('div', { className: 'dshl-listScroll' }, h('div', { className: 'dshl-list' }, ...rows.map((entry) => {
+              const storedEntry = stored.find((item) => item.id === entry.id && item.label === entry.label);
+              return h('div', { key: `${entry.id}:${entry.label}`, className: 'dshl-row' },
+                h('span', { className: 'dshl-rowLabel' }, entry.label),
+                section.id === 'sidebar' && hiddenLabels.includes(entry.label) ? h('span', { className: 'dshl-itemSub' }, t('storageHiddenHint')) : null,
+                entry.offline ? h('span', { className: 'dshl-itemSub' }, t('storageZoneOffline')) : null,
+                h(Switch, {
+                  checked: storedEntry !== undefined,
+                  label: entry.label,
+                  onChange: (on) => toggle(section.id, entry, on),
+                }));
+            }))));
+      };
       return h(Card, { title: t('storage'), desc: t('storageHint') },
-        labels.length === 0
-          ? h('p', { className: 'dshl-hint' }, t('storageMenuEmpty'))
-          : h('div', { className: 'dshl-listScroll' }, h('div', { className: 'dshl-list' }, ...labels.map((label) => {
-            const offline = !panelIds.has(label);
-            const hidden = config.sidebar.panelHidden.includes(label);
-            return h('div', { key: label, className: 'dshl-row' },
-              h('span', { className: 'dshl-rowLabel' }, label),
-              hidden ? h('span', { className: 'dshl-itemSub' }, t('storageHiddenHint')) : null,
-              offline && !hidden ? h('span', { className: 'dshl-itemSub' }, t('arrangeOffline')) : null,
-              h(Switch, {
-                checked: tucked.includes(label),
-                label: label,
-                onChange: (on) => setTucked(label, on),
-              }));
-          }))));
+        ...sections.map(renderZone));
+    }
+
+    /** 「更多」菜单行：宿主渲染菜单，我们只贡献行；样式优先用宿主 MenuItemButton，缺失时退化为普通按钮。 */
+    function StorageRow({ label, current, onSelect }) {
+      return MenuItemButton !== null
+        ? h(MenuItemButton, { current: current === true, onSelect }, label)
+        : h('button', {
+          type: 'button',
+          role: 'menuitem',
+          className: 'dshl-storageMenuItem',
+          'data-current': current === true ? 'true' : undefined,
+          onClick: onSelect,
+        }, label);
     }
 
     /**
-     * 「更多」菜单里的收纳行：宿主渲染菜单（sidebar.panellist.actions 槽位），我们只贡献行。
-     * 点一下先关菜单再切到对应面板；宿主 owner 回调缺失时保持静默，不影响菜单本身。
+     * 侧栏「更多」菜单里的收纳行：点一下先关菜单再切到对应面板。
+     * 面板 id 优先用配置里的 id，早期配置只有显示名时用 slots 反查。
      */
-    function StorageMenu({ entries, onDismiss, ctx }) {
+    function SidebarStorageMenu({ entries, onDismiss, ctx }) {
       const { config, targets } = useStoreSnapshot();
-      // 关闭「启用自定义布局」时侧栏不做任何收起，菜单里也不必重复列出
       if (config.enabled !== true) return null;
-      const tucked = config.storage?.tucked ?? [];
-      if (tucked.length === 0) return null;
+      const stored = config.storage?.sidebar ?? [];
+      if (stored.length === 0) return null;
       const panelIds = storagePanelIds(targets);
       const activeIds = new Set(Array.isArray(entries) ? entries.filter((entry) => entry.active === true).map((entry) => entry.id) : []);
       const rows = [];
-      for (const label of tucked) {
-        const panelId = panelIds.get(label);
-        if (panelId === undefined) continue;
-        rows.push({ label, panelId, active: activeIds.has(panelId) });
+      for (const entry of stored) {
+        const panelId = entry.id !== '' ? entry.id : panelIds.get(entry.label);
+        if (panelId === undefined || panelId === '') continue;
+        rows.push({ label: entry.label, panelId, active: activeIds.has(panelId) });
       }
       if (rows.length === 0) return null;
       const open = (panelId) => {
@@ -4975,16 +5135,54 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
           console.warn('[dsh-layout] 打开收纳入口失败，本次跳过', error);
         }
       };
-      return h(React.Fragment, null, ...rows.map((row) => (MenuItemButton !== null
-        ? h(MenuItemButton, { key: row.panelId, current: row.active, onSelect: () => open(row.panelId) }, row.label)
-        : h('button', {
-          key: row.panelId,
-          type: 'button',
-          role: 'menuitem',
-          className: 'dshl-storageMenuItem',
-          'data-current': row.active ? 'true' : undefined,
-          onClick: () => open(row.panelId),
-        }, row.label))));
+      return h(React.Fragment, null, ...rows.map((row) => h(StorageRow, { key: row.panelId, label: row.label, current: row.active, onSelect: () => open(row.panelId) })));
+    }
+
+    /** 会话视图标签的「更多」菜单收纳行：owner 提供 onOpen（selectView），直接用它切视图。 */
+    function ViewsStorageMenu({ entries, onOpen, onDismiss }) {
+      const { config } = useStoreSnapshot();
+      if (config.enabled !== true) return null;
+      const stored = config.storage?.views ?? [];
+      if (stored.length === 0) return null;
+      const currentIds = new Set(Array.isArray(entries) ? entries.filter((entry) => entry.active === true).map((entry) => entry.id) : []);
+      const rows = stored.filter((entry) => entry.id !== '');
+      if (rows.length === 0) return null;
+      const open = (id) => {
+        if (typeof onDismiss === 'function') onDismiss();
+        if (typeof onOpen !== 'function') return;
+        try {
+          onOpen(id);
+        } catch (error) {
+          console.warn('[dsh-layout] 打开收纳的会话视图失败，本次跳过', error);
+        }
+      };
+      return h(React.Fragment, null, ...rows.map((row) => h(StorageRow, { key: row.id, label: row.label, current: currentIds.has(row.id), onSelect: () => open(row.id) })));
+    }
+
+    /** 右栏开始页的「更多工具」收纳行：owner 提供 onOpen(id)，id 形如 `kind:id`，按标签 + kind 反查。 */
+    function GuideStorageMenu({ entries, onOpen, onDismiss }) {
+      const { config } = useStoreSnapshot();
+      if (config.enabled !== true) return null;
+      const stored = config.storage?.guide ?? [];
+      if (stored.length === 0) return null;
+      const owners = Array.isArray(entries) ? entries : [];
+      const rows = [];
+      for (const entry of stored) {
+        const hit = owners.find((item) => item.label === entry.label && (entry.kind === undefined || entry.kind === '' || String(item.id).startsWith(`${entry.kind}:`)));
+        if (hit === undefined) continue;
+        rows.push({ id: String(hit.id), label: entry.label });
+      }
+      if (rows.length === 0) return null;
+      const open = (id) => {
+        if (typeof onDismiss === 'function') onDismiss();
+        if (typeof onOpen !== 'function') return;
+        try {
+          onOpen(id);
+        } catch (error) {
+          console.warn('[dsh-layout] 打开收纳的右栏开始页卡片失败，本次跳过', error);
+        }
+      };
+      return h(React.Fragment, null, ...rows.map((row) => h(StorageRow, { key: row.id, label: row.label, onSelect: () => open(row.id) })));
     }
 
     /**
@@ -5732,14 +5930,30 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
         label: () => t('editLayer'),
       }, () => h(Boundary, null, h(EditOverlay, { t, ctx })))), 'dsh-layout: edit overlay');
 
-      // 入口收纳：把收纳的入口行挂到侧栏「更多」菜单里（宿主渲染菜单，我们只提供行）
+      // 入口收纳：把收纳的入口行挂到各区的原生「更多」菜单里（宿主渲染菜单，我们只提供行）
       ctx.effect(() => ctx.slots.inject('sidebar.panellist.actions', () => ctx.slots.register({
         name: 'sidebar.panellist.actions',
         id: 'dsh-layout-storage',
         order: -100,
         locale: NS,
         label: () => t('storageMenuLabel'),
-      }, (props) => h(Boundary, null, h(StorageMenu, { ...props, ctx })))), 'dsh-layout: storage menu');
+      }, (props) => h(Boundary, null, h(SidebarStorageMenu, { ...props, ctx })))), 'dsh-layout: sidebar storage menu');
+
+      ctx.effect(() => ctx.slots.inject('conversation.session.header.views.actions', () => ctx.slots.register({
+        name: 'conversation.session.header.views.actions',
+        id: 'dsh-layout-storage-views',
+        order: -100,
+        locale: NS,
+        label: () => t('storageMenuLabel'),
+      }, (props) => h(Boundary, null, h(ViewsStorageMenu, { ...props })))), 'dsh-layout: view storage menu');
+
+      ctx.effect(() => ctx.slots.inject('sidebar.right.tab.guide.actions', () => ctx.slots.register({
+        name: 'sidebar.right.tab.guide.actions',
+        id: 'dsh-layout-storage-guide',
+        order: -100,
+        locale: NS,
+        label: () => t('storageMenuLabel'),
+      }, (props) => h(Boundary, null, h(GuideStorageMenu, { ...props })))), 'dsh-layout: guide storage menu');
     }
 
     return { apply, inject };

@@ -14,7 +14,7 @@ bundle: dsh-layout（package.json 的 dsh.bundle.patch + dsh.client）
    ├─ 槽位编排                     可排列容器（宿主布局容器 + 列表槽位出口）与网格排列
    ├─ 区域搬移                     投影：源节点 fixed 定位 + 目标容器占位符 + 矩形差校准
    ├─ 联动                         条件规则叠加层（页面 / 折叠 / 区域 / 单元）+ 面板导航 ↔ 插件来源配置同步
-   ├─ 入口收纳                     收纳的侧栏入口收起 + 往宿主「更多」菜单注册可点击的菜单行
+   ├─ 入口收纳                     收纳域（侧栏面板 / 会话视图 / 右栏开始页）+ 往各区原生「更多」注册菜单行
    ├─ 样式引擎                     按配置生成 style[data-dsh-layout="dynamic"]
    ├─ plugins.detail.section 注册  插件详情页入口（开关 + 概览 + 打开面板）
    └─ shell.overlay 注册           全局编辑面板（四类分页）+ 编辑模式层（列分隔条、区域框、工具条）
@@ -252,17 +252,19 @@ flowchart LR
 
 配置同步解决一个真实冲突：面板导航按 `aria-label` 给 `[data-dshl-panel]` 写 `order`，插件来源按条目键给 `[data-dshl-slotentry]` 写 `order`，而这两个属性落在同一排图标上——两套配置不一致时谁后写谁赢。开启同步后，两侧的排序与隐藏写同一份配置（`panels ↔ sidebar.panellist` 按 DOM 里的一一对应映射），视觉与配置都不再互相覆盖。
 
-## 入口收纳（收起侧栏入口）
+## 入口收纳（收起入口到各区的「更多」）
 
-侧栏面板图标越装越多，常用的只有几个。收纳的做法是把不常用的入口从侧栏列表收起，改由宿主侧栏底部的「更多」菜单提供：
+侧栏面板图标越装越多，常用的只有几个。收纳按「收纳域」工作：一个能自动发现入口的列表 + 一个宿主原生的「更多」菜单，把不常用入口从列表收起、改由「更多」菜单提供。
 
-| 项 | 做法 |
-| --- | --- |
-| 宿主通道 | 往 `sidebar.panellist.actions` 槽位注册 `dsh-layout-storage`（order -100，排最前），与宿主的「浏览更多插件」「创建你的插件」同一条路；菜单行的样式用宿主 `@deepseek-ai/dsh-client-ui-primitives` 的 `MenuItemButton`，与宿主自己的行完全一致 |
-| 收起 | 配置里的显示名生成 `[data-dshl-panel] { display:none }`，与面板隐藏同一套标记；面板 id 从 slots 条目键 `sidebar.panellist::<panelId>` 反查 |
-| 打开 | 菜单行点击先调宿主 owner 的 `onDismiss` 关菜单，再 `ctx.layout.selectPanel(panelId)` 切面板；当前打开的面板行带 `current` 高亮 |
-| 边界 | 宿主保留的「插件」入口与「更多」伪行不参与收纳（保证收起后永远有路可回）；宿主 Pin 机制（`createPanelPins`）只存在内存且只经侧栏条目 inject 暴露，本插件不用它，收纳状态写自己的配置 |
-| 降级 | slots 注册表不可用 → 卡片说明不可用、菜单不生成行；`MenuItemButton` 拿不到 → 菜单行降级为普通按钮（功能不变） |
+| 收纳域 | 入口自动发现 | 收起方式 | 菜单与打开方式 |
+| --- | --- | --- | --- |
+| 侧栏面板 | `sidebar.panellist` 槽位条目（面板 id + 显示名） | `[data-dshl-panel]` 生成 `display:none` | `sidebar.panellist.actions` 注册行 → `layout.selectPanel(panelId)` |
+| 会话视图标签 | `conversation.view` 槽位条目（id + 本地化标签；`chat` 不参与） | 注解层按标签匹配打 `data-dshl-stored-view`，动态样式收起 | `conversation.session.header.views.actions` 注册行 → owner `onOpen(id)` |
+| 右栏开始页卡片 | DOM `[data-sidebar-right-guide-entry]`（kind + 标题；`文件` 不参与） | 按 kind + 标题打 `data-dshl-stored-guide`，动态样式收起 | `sidebar.right.tab.guide.actions` 注册行 → owner `onOpen('kind:id')` |
+
+- 三处菜单行都用宿主 `@deepseek-ai/dsh-client-ui-primitives` 的 `MenuItemButton` 渲染，order -100 排在各菜单最前；新装的插件 / 新注册的视图自动出现在清单与菜单里，不需要人工登记。
+- 宿主内部的三套 Pin 机制（侧栏面板 / 会话视图 / 开始页卡片）都只存在内存、刷新复位，且只经各自条目 inject 暴露，本插件不依赖它们；收纳状态写自己的配置。
+- 边界：宿主保留的入口（侧栏「插件」、`chat` 视图、开始页「文件」）不参与收纳，保证收起后永远有路可回；关闭「启用自定义布局」时菜单不出收纳行。
 
 ## 编辑面板（全局浮层）
 
