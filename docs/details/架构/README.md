@@ -148,12 +148,27 @@ flowchart LR
 | L1 区域 | 页面根的直接子级：`header / footer / aside / row / scroll / main`，装饰性覆盖层（绝对/固定定位、不可交互、无文字）直接跳过 |
 | L2 单元 | 区域里「成组」的直接子级：尺寸一致的重复结构、`role=tablist/toolbar/nav/list/grid`，或区域本身是 main/aside/scroll；普通页头里的零散按钮与标题不拆 |
 | 可拆性判定 | 四档输出：可隐藏 / 可排序 / 可调尺寸 / 只读。唯一滚动容器、含输入控件、入口类、占满整页都进「只读」；入口只给排序与尺寸，不给隐藏 |
-| 分级操作 | 安全项（区域带、重复组）接入配置：隐藏开关 + 上移/下移改 `order`；风险项只显示原因，不给隐藏开关。配置键 `pageKey::unitKey`，存 `config.external.hide` / `config.external.order`，生成 `[data-dshl-xunit]` 覆盖样式 |
+| 三档来源 | **声明（declared）**：插件在节点上写 `data-dshl-declare`，直接采用；**登记（registered）**：人工「登记此页结构」后，键匹配的单元升档；**自动（auto）**：通用启发式。声明优先于登记，登记优先于自动 |
+| 分类模板 | 按结构判页面类型：有分栏项→看板、有概览行→仪表盘、有标签项→标签页、只有滚动区→滚动页、有页头→列表页、其余通用；再归出语义组（声明单元 / 页头 / 概览行 / 标签组 / 分栏组 / 主体 / 侧栏 / 页底），支持整组隐藏 |
+| 分级操作 | 安全项（区域带、重复组、声明与登记项）接入配置：隐藏开关 + 上移/下移改 `order`；风险项只显示原因，不给隐藏开关。配置键 `pageKey::unitKey`，存 `config.external.hide` / `config.external.order` |
 | 失效清理 | 页面扫描成功后，删掉该页配置里已不存在的单元键；只在该页真的扫出单元时清理，避免加载中途的空扫描误删 |
+| 登记闭环 | 「登记此页结构」把当前扫描写入 `dsh-layout/plugin-units-registry/v1`，后续扫描该页时命中键升为登记档；「清除登记」可撤销 |
 | 持久化 | 扫描结果按 pageKey 存 `dsh-layout/plugin-units/v1`（最近 12 页），覆盖度面板展示；「导出候选清单」给出 JSON，供人工登记与模板化 |
 | 反馈 | 扫描结果纳入识别签名，页面切换即刷新卡片；编辑区在「插件」页时回退显示最近一次其他插件页的扫描结果 |
 
-扫描深度固定 2 层（区域 → 区域的直接子级），入口判定为「以导航/切换为主要目的的单元」，一个带标题与按钮的页头不算入口。操作只做 `display` 与 `order` 两类可逆覆盖，不注入交互。
+插件自声明契约（可选，给愿意配合的插件作者）：
+
+```html
+<div data-dshl-declare="header" data-dshl-declare-label="顶部栏">…</div>
+<div data-dshl-declare="main" data-dshl-declare-guard>…</div>
+```
+
+- `data-dshl-declare` 的值是单元类型（`header/main/aside/footer/toolbar/list/tab-bar` 等，仅作标签）；
+- `data-dshl-declare-label` 可选，作为显示名；
+- `data-dshl-declare-guard` 表示受保护单元：只给排序与尺寸，不给隐藏；
+- 声明单元不参与启发式扫描（避免重复），标记键为 `D<序号>`。
+
+扫描深度固定 2 层（区域 → 区域的直接子级），入口判定为「以导航/切换为主要目的的单元」，一个带标题与按钮的页头不算入口。操作只做 `display`、`order` 两类可逆覆盖，不注入交互。
 
 ## 恢复通道（不可恢复状态防护）
 

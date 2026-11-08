@@ -104,6 +104,30 @@ window.__ModuleLoader__.load({
       externalActionReorder: '可排序',
       externalOrderUp: '上移',
       externalOrderDown: '下移',
+      extTierDeclared: '声明',
+      extTierRegistered: '登记',
+      externalKind: '页面类型',
+      extKindBoard: '看板',
+      extKindDashboard: '仪表盘',
+      extKindTabbed: '标签页',
+      extKindScrollPage: '滚动页',
+      extKindList: '列表页',
+      extKindGeneric: '通用页面',
+      externalGroups: '语义组',
+      extGroupDeclared: '声明单元',
+      extGroupHeader: '页头',
+      extGroupOverview: '概览行',
+      extGroupTabs: '标签组',
+      extGroupColumns: '分栏组',
+      extGroupMain: '主体',
+      extGroupAside: '侧栏',
+      extGroupFooter: '页底',
+      externalGroupHint: '按结构归出的语义组，可整组隐藏；组内只读单元不受影响。',
+      externalHideGroup: '隐藏整组',
+      externalRegister: '登记此页结构',
+      externalClearRegistry: '清除登记',
+      externalRegistered: '已登记',
+      externalDeclareHint: '插件自声明：在节点上写 data-dshl-declare="header"（可选 data-dshl-declare-label、data-dshl-declare-guard），拆解层会优先采用。',
       rightbarPanel: '右栏',
       rightbarPanelHint: '右栏内部的标签栏与内容区；宽度在「区域结构」里调。',
       rightbarPartsHint: '右栏拆解：标签栏与内容区可各自隐藏，标签栏也可放到内容区下方。',
@@ -279,6 +303,30 @@ window.__ModuleLoader__.load({
       externalActionReorder: 'Reorderable',
       externalOrderUp: 'Move up',
       externalOrderDown: 'Move down',
+      extTierDeclared: 'Declared',
+      extTierRegistered: 'Registered',
+      externalKind: 'Page type',
+      extKindBoard: 'Board',
+      extKindDashboard: 'Dashboard',
+      extKindTabbed: 'Tabbed',
+      extKindScrollPage: 'Scroll page',
+      extKindList: 'List',
+      extKindGeneric: 'Generic',
+      externalGroups: 'Semantic groups',
+      extGroupDeclared: 'Declared units',
+      extGroupHeader: 'Header',
+      extGroupOverview: 'Overview rows',
+      extGroupTabs: 'Tabs',
+      extGroupColumns: 'Columns',
+      extGroupMain: 'Main',
+      extGroupAside: 'Aside',
+      extGroupFooter: 'Footer',
+      externalGroupHint: 'Groups inferred from structure; a group can be hidden at once. Read-only units in the group are unaffected.',
+      externalHideGroup: 'Hide group',
+      externalRegister: 'Register this page',
+      externalClearRegistry: 'Clear registration',
+      externalRegistered: 'Registered',
+      externalDeclareHint: 'Plugin self-declaration: add data-dshl-declare="header" (optional data-dshl-declare-label, data-dshl-declare-guard) on a node; the decomposer prefers it.',
       rightbarPanel: 'Right column',
       rightbarPanelHint: 'The tab strip and content area inside the right column; width is set in region structure.',
       rightbarPartsHint: 'Right column parts: the tab strip and content can each be hidden, and the tab strip can move below the content.',
@@ -1510,6 +1558,8 @@ window.__ModuleLoader__.load({
      * L1：页面根的直接子级（区域带，跳过装饰层）；
      * L2：区域里「成组」的直接子级（尺寸一致的重复结构，或 role 明确是 tablist/toolbar/nav/list/grid）；
      * 深度固定 2 层，再往下不扫。
+     * 插件自声明优先：页面里带 data-dshl-declare 的节点直接作为声明单元（tier=declared），
+     * 不再参与启发式，避免和自动结果重复。
      */
     function scanExternalUnits(root) {
       const rootRect = root.getBoundingClientRect();
@@ -1533,6 +1583,7 @@ window.__ModuleLoader__.load({
           classPrefix: classPrefixOf(node),
           role: node.getAttribute('role') ?? '',
           type,
+          tier: 'auto',
           label: (node.getAttribute('aria-label') ?? textFingerprintOf(node) ?? '').slice(0, 24),
           text: textFingerprintOf(node),
           rect: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
@@ -1541,8 +1592,52 @@ window.__ModuleLoader__.load({
           node,
         });
       };
+      // 自声明单元：插件作者用 data-dshl-declare 标出结构，带 guard 的只允许排序/尺寸
+      const declaredNodes = [...root.querySelectorAll('[data-dshl-declare]')].filter((node) => {
+        if (node.closest('[data-dshl-layer]') !== null || node.closest('[data-shortcut-modal]') !== null) return false;
+        const rect = node.getBoundingClientRect();
+        return rect.width >= 16 && rect.height >= 12;
+      });
+      const declaredSet = new Set(declaredNodes);
+      const inDeclared = (node) => declaredNodes.some((declared) => declared === node || declared.contains(node));
+      declaredNodes.forEach((node, index) => {
+        if (units.length >= EXTERNAL_MAX_UNITS) return;
+        const rect = node.getBoundingClientRect();
+        const guard = node.hasAttribute('data-dshl-declare-guard');
+        const declaredType = (node.getAttribute('data-dshl-declare') ?? '').trim();
+        const label = (node.getAttribute('data-dshl-declare-label') ?? declaredType).trim();
+        units.push({
+          key: `D${index}`,
+          depth: 1,
+          parentKey: null,
+          index,
+          tag: node.tagName,
+          classPrefix: classPrefixOf(node),
+          role: node.getAttribute('role') ?? '',
+          type: 'declared',
+          tier: 'declared',
+          label: label.slice(0, 24),
+          text: textFingerprintOf(node),
+          rect: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
+          confidence: 'high',
+          judge: {
+            interactive: node.querySelectorAll(XUNIT_INTERACTIVE).length,
+            inputs: node.querySelectorAll(XUNIT_TEXT_INPUT).length,
+            isScroll: false,
+            onlyScroll: false,
+            entry: guard,
+            ratio: Math.round(((rect.width * rect.height) / (rootArea || 1)) * 1000) / 1000,
+            actions: guard ? ['reorder', 'resize'] : ['hide', 'reorder', 'resize'],
+            blocked: guard ? ['entry'] : [],
+            position: getComputedStyle(node).position,
+          },
+          node,
+        });
+        seen.add(node);
+      });
       const l1Nodes = [...root.children].filter((node) => {
         if (node.tagName === 'STYLE' || node.tagName === 'SCRIPT') return false;
+        if (inDeclared(node)) return false;
         const rect = node.getBoundingClientRect();
         return rect.width >= 24 && rect.height >= 16;
       });
@@ -1560,6 +1655,7 @@ window.__ModuleLoader__.load({
         const parentKey = `L1.${l1Index}`;
         const kids = [...node.children].filter((child) => {
           if (['STYLE', 'SCRIPT', 'IFRAME'].includes(child.tagName)) return false;
+          if (inDeclared(child)) return false;
           const rect = child.getBoundingClientRect();
           return rect.width >= 24 && rect.height >= 16 && !isDecorativeNode(child);
         });
@@ -1582,6 +1678,62 @@ window.__ModuleLoader__.load({
         });
       });
       return units;
+    }
+
+    /** 人工登记表：登记过的页面，其单元在后续扫描里升为 registered 档（声明单元优先）。 */
+    function readExternalRegistry() {
+      const store = readJsonStore(EXTERNAL_REGISTRY_KEY);
+      return store !== null && typeof store === 'object' ? store : {};
+    }
+
+    function registerExternalPage(pageKey, units) {
+      const registry = readExternalRegistry();
+      registry[pageKey] = {
+        registeredAt: new Date().toISOString(),
+        units: units.map((unit) => ({ key: unit.key, type: unit.type, tier: unit.tier, label: unit.label, classPrefix: unit.classPrefix, tag: unit.tag })),
+      };
+      writeJsonStore(EXTERNAL_REGISTRY_KEY, registry);
+    }
+
+    function clearExternalPageRegistry(pageKey) {
+      const registry = readExternalRegistry();
+      if (registry[pageKey] === undefined) return;
+      delete registry[pageKey];
+      writeJsonStore(EXTERNAL_REGISTRY_KEY, registry);
+    }
+
+    /**
+     * 分类模板：把扫出来的单元归成语义组，并给出页面类型。
+     * 纯结构判定，不认识具体插件：有分栏项→看板，有概览行→仪表盘，有标签项→标签页，
+     * 只有滚动区→滚动页，有页头→列表页，其余为通用。
+     */
+    function inferExternalProfile(units) {
+      const l1 = units.filter((unit) => unit.depth === 1);
+      const hasType = (type) => units.some((unit) => unit.type === type);
+      const kind = hasType('group-item')
+        ? 'board'
+        : hasType('row')
+          ? 'dashboard'
+          : hasType('tab-item')
+            ? 'tabbed'
+            : l1.length <= 2 && hasType('scroll')
+              ? 'scrollPage'
+              : hasType('header')
+                ? 'list'
+                : 'generic';
+      const groups = [
+        { id: 'declared', nameKey: 'extGroupDeclared', types: ['declared'] },
+        { id: 'header', nameKey: 'extGroupHeader', types: ['header'] },
+        { id: 'overview', nameKey: 'extGroupOverview', types: ['row'] },
+        { id: 'tabs', nameKey: 'extGroupTabs', types: ['tab-item'] },
+        { id: 'columns', nameKey: 'extGroupColumns', types: ['group-item'] },
+        { id: 'main', nameKey: 'extGroupMain', types: ['main', 'scroll'] },
+        { id: 'aside', nameKey: 'extGroupAside', types: ['aside'] },
+        { id: 'footer', nameKey: 'extGroupFooter', types: ['footer'] },
+      ]
+        .map((group) => ({ ...group, unitKeys: units.filter((unit) => group.types.includes(unit.type)).map((unit) => unit.key) }))
+        .filter((group) => group.unitKeys.length > 0);
+      return { kind, groups };
     }
 
     /** 扫描缓存：同一页面同一根节点 1.5 秒内不重复扫，避免 MutationObserver 高频刷新时反复扫描。 */
@@ -1609,8 +1761,7 @@ window.__ModuleLoader__.load({
      * 签名失效自动清理：页面扫描成功后，删掉该页配置里已不存在的单元键。
      * 只在该页真的扫出单元时清理，避免页面加载中途的空扫描把配置清空；用 setTimeout 跳出识别循环。
      */
-    function requestExternalCleanup(pageKey, units) {
-      if (units.length === 0) return;
+    function requestExternalCleanup(pageKey, units) {      if (units.length === 0) return;
       const valid = new Set(units.map((unit) => externalUnitKey(pageKey, unit.key)));
       const current = snapshot.config.external;
       const stale = [
@@ -1635,6 +1786,14 @@ window.__ModuleLoader__.load({
         return externalScanCache.units;
       }
       const units = page.iframe === null ? scanExternalUnits(page.root) : [];
+      // 人工登记过的页面：登记过的单元升为 registered 档（声明单元优先保留 declared）
+      const registry = readExternalRegistry()[page.pageKey];
+      if (registry !== undefined && Array.isArray(registry.units)) {
+        const registered = new Set(registry.units.map((unit) => unit.key));
+        for (const unit of units) {
+          if (unit.tier !== 'declared' && registered.has(unit.key)) unit.tier = 'registered';
+        }
+      }
       externalScanCache = { pageKey: page.pageKey, root: page.root, at: now, units };
       if (page.iframe === null) persistExternalScan(page.pageKey, 'dom', units);
       else persistExternalScan(page.pageKey, 'iframe', []);
@@ -2850,6 +3009,9 @@ window.__ModuleLoader__.load({
         if (unit.judge.actions.includes('reorder')) parts.push(t('externalActionReorder'));
         return parts.length === 0 ? t('externalReadonly') : parts.join(' · ');
       };
+      const tierText = (unit) => (unit.tier === 'declared' ? t('extTierDeclared') : unit.tier === 'registered' ? t('extTierRegistered') : null);
+      const externalProfile = external !== null && !externalIframe && externalUnits.length > 0 ? inferExternalProfile(externalUnits) : null;
+      const registryEntry = external === null ? undefined : readExternalRegistry()[external.pageKey];
       const hideExternal = (key, hide) => updateConfig((draft) => {
         const set = new Set(draft.external.hide);
         if (hide) set.add(key);
@@ -2862,6 +3024,34 @@ window.__ModuleLoader__.load({
         if (next === 0) delete draft.external.order[key];
         else draft.external.order[key] = next;
       });
+      const groupStateOf = (group) => {
+        const keys = externalUnits
+          .filter((unit) => group.unitKeys.includes(unit.key) && unit.judge.actions.includes('hide'))
+          .map((unit) => externalUnitKey(external.pageKey, unit.key));
+        if (keys.length === 0) return null;
+        return { total: keys.length, hidden: keys.filter((key) => config.external.hide.includes(key)).length };
+      };
+      const toggleExternalGroup = (group, hide) => updateConfig((draft) => {
+        const set = new Set(draft.external.hide);
+        for (const unit of externalUnits) {
+          if (!group.unitKeys.includes(unit.key)) continue;
+          if (!unit.judge.actions.includes('hide')) continue;
+          const key = externalUnitKey(external.pageKey, unit.key);
+          if (hide) set.add(key);
+          else set.delete(key);
+        }
+        draft.external.hide = [...set];
+      });
+      const registerPage = () => {
+        if (external === null || externalUnits.length === 0) return;
+        registerExternalPage(external.pageKey, externalUnits);
+        refresh();
+      };
+      const clearRegistry = () => {
+        if (external === null) return;
+        clearExternalPageRegistry(external.pageKey);
+        refresh();
+      };
       const exportExternal = () => {
         const payload = {
           exportedAt: new Date().toISOString(),
@@ -2899,7 +3089,7 @@ window.__ModuleLoader__.load({
               return h('div', { key: unit.key, className: 'dshl-item' },
                 h('span', { className: 'dshl-surfaceDot', 'data-on': canHide ? 'true' : 'false', 'data-source': 'third', 'aria-hidden': true }),
                 h('span', { className: 'dshl-itemLabel', title: `${key} · ${unit.classPrefix}` }, `${typeLabel(unit.type)} · ${unit.label || unit.classPrefix || unit.tag}`),
-                h('span', { className: 'dshl-itemSub' }, blockedLabel(unit.judge.blocked).length > 0 ? blockedLabel(unit.judge.blocked) : externalActionText(unit)),
+                h('span', { className: 'dshl-itemSub' }, `${tierText(unit) === null ? '' : `${tierText(unit)} · `}${blockedLabel(unit.judge.blocked).length > 0 ? blockedLabel(unit.judge.blocked) : externalActionText(unit)}`),
                 h('span', { className: 'dshl-itemCtl' },
                   canOrder ? h('button', {
                     type: 'button',
@@ -2938,9 +3128,31 @@ window.__ModuleLoader__.load({
               externalUnits.filter((unit) => unit.judge.actions.includes('reorder')).length,
             ))
             : null,
+          externalProfile !== null
+            ? h('div', { className: 'dshl-hint' }, `${t('externalKind')}：${t(`extKind${externalProfile.kind[0].toUpperCase()}${externalProfile.kind.slice(1)}`)}${registryEntry === undefined ? '' : ` · ${t('externalRegistered')}`}`)
+            : null,
           h('div', { className: 'dshl-list dshl-listScroll' }, externalRows),
+          externalProfile !== null && externalProfile.groups.length > 0
+            ? h('div', { className: 'dshl-surfaceGroup' },
+              h('div', { className: 'dshl-surfaceGroupTitle' }, t('externalGroups')),
+              h('div', { className: 'dshl-hint' }, t('externalGroupHint')),
+              h('div', { className: 'dshl-list' }, externalProfile.groups.map((group) => {
+                const state = groupStateOf(group);
+                return h('div', { key: group.id, className: 'dshl-item' },
+                  h('span', { className: 'dshl-itemLabel' }, `${t(group.nameKey)} · ${group.unitKeys.length}`),
+                  h('span', { className: 'dshl-itemSub' }, state === null ? t('externalReadonly') : `${state.hidden}/${state.total}`),
+                  h('span', { className: 'dshl-itemCtl' },
+                    state === null ? null : h(Switch, {
+                      checked: state.hidden === state.total,
+                      label: `${t('externalHideGroup')} ${t(group.nameKey)}`,
+                      onChange: (on) => toggleExternalGroup(group, on),
+                    })));
+              })))
+            : null,
           h('div', { className: 'dshl-row' },
-            h('button', { type: 'button', className: 'dshl-btn', disabled: external === null || externalUnits.length === 0, onClick: exportExternal }, t('externalExport')))));
+            h('button', { type: 'button', className: 'dshl-btn', disabled: external === null || externalUnits.length === 0, onClick: exportExternal }, t('externalExport')),
+            h('button', { type: 'button', className: 'dshl-btn', disabled: external === null || externalIframe || externalUnits.length === 0, onClick: registerPage }, t('externalRegister')),
+            h('button', { type: 'button', className: 'dshl-btn', disabled: registryEntry === undefined, onClick: clearRegistry }, t('externalClearRegistry')))));
     }
 
     /**
