@@ -43,6 +43,21 @@ window.__ModuleLoader__.load({
       presetRightSide: '右栏左置',
       presetWide: '宽屏',
       reset: '恢复默认',
+      schemes: '布局方案',
+      schemesHint: '把整套配置存成命名方案，随时切换。切换是整套替换：三栏、侧栏、拆解、槽位、收纳、联动规则全部跟着换。',
+      schemesEmpty: '还没有保存的方案。调好布局后点「存为新方案」。',
+      schemesSaveNew: '存为新方案',
+      schemesNamePrefix: '方案',
+      schemesApply: '应用',
+      schemesUpdate: '用当前配置覆盖这套方案',
+      schemesRename: '重命名',
+      schemesDelete: '删除方案',
+      schemesActive: '当前方案',
+      schemesFull: '方案已满（上限 20 套），请先删掉不用的。',
+      schemesApplied: '已应用方案',
+      schemesSaved: '已保存',
+      schemesDeleted: '已删除',
+      schemesCount: (used) => `已存 ${used} / 20`,
       structure: '区域结构',
       structureHint: '拖动排序三栏、调整宽度、控制显隐。',
       tabStructure: '布局结构',
@@ -395,6 +410,21 @@ window.__ModuleLoader__.load({
       presetRightSide: 'Right column left',
       presetWide: 'Wide',
       reset: 'Reset',
+      schemes: 'Layout schemes',
+      schemesHint: 'Store the whole config as a named scheme and switch at will. Switching replaces everything: columns, sidebar, decomposition, slots, storage and linkage rules.',
+      schemesEmpty: 'No saved scheme yet. Tune the layout, then use "Save as new scheme".',
+      schemesSaveNew: 'Save as new scheme',
+      schemesNamePrefix: 'Scheme',
+      schemesApply: 'Apply',
+      schemesUpdate: 'Overwrite this scheme with the current config',
+      schemesRename: 'Rename',
+      schemesDelete: 'Delete scheme',
+      schemesActive: 'Current scheme',
+      schemesFull: 'Scheme limit reached (20); delete one first.',
+      schemesApplied: 'Applied scheme',
+      schemesSaved: 'Saved',
+      schemesDeleted: 'Deleted',
+      schemesCount: (used) => `${used} / 20 saved`,
       structure: 'Region structure',
       structureHint: 'Reorder the three columns, resize them, or hide them.',
       tabStructure: 'Layout',
@@ -1361,6 +1391,51 @@ window.__ModuleLoader__.load({
         if (patch.center !== undefined) Object.assign(draft.center, patch.center);
         if (patch.settings !== undefined) Object.assign(draft.settings, patch.settings);
       });
+    }
+
+    /* ============================== 布局方案 ============================== */
+    /**
+     * 方案 = 存下来的整套配置快照。切换就是 replaceConfig(整套配置)，
+     * 与「恢复默认 / 导入」走同一个入口，不需要第二套应用路径。
+     * 与写死的 PRESETS 的区别：预设是起点模板（不落库），方案是用户自己的（落库、可改名可覆盖）。
+     */
+    const LAYOUTS_KEY = 'dsh-layout/layouts/v1';
+    const LAYOUTS_MAX = 20;
+
+    /** 方案表：只认结构完整的条目，name 去空白、config 走 normalizeConfig，上限 20 套。 */
+    function readLayouts() {
+      const raw = readJsonStore(LAYOUTS_KEY);
+      const list = [];
+      for (const item of Array.isArray(raw.list) ? raw.list : []) {
+        if (list.length >= LAYOUTS_MAX) break;
+        if (item === null || typeof item !== 'object') continue;
+        const id = typeof item.id === 'string' && item.id.length > 0 && item.id.length <= 64 ? item.id : '';
+        const name = typeof item.name === 'string' ? item.name.trim().slice(0, 40) : '';
+        if (id === '' || name === '' || item.config === null || typeof item.config !== 'object') continue;
+        if (list.some((entry) => entry.id === id)) continue;
+        list.push({ id, name, savedAt: Number.isFinite(Number(item.savedAt)) ? Number(item.savedAt) : 0, config: normalizeConfig(item.config) });
+      }
+      const active = typeof raw.active === 'string' && list.some((entry) => entry.id === raw.active) ? raw.active : '';
+      return { active, list };
+    }
+
+    function writeLayouts(state) {
+      writeJsonStore(LAYOUTS_KEY, { active: state.active, list: state.list });
+    }
+
+    /** 读取即规范：超上限的条目在第一次写回时裁掉，避免存储与界面长期不一致。 */
+    function readLayoutsNormalized() {
+      const state = readLayouts();
+      const raw = readJsonStore(LAYOUTS_KEY);
+      if (Array.isArray(raw.list) && raw.list.length > state.list.length) writeLayouts(state);
+      return state;
+    }
+
+    /** 方案 id 只需在本机唯一：时间戳 + 递增尾数，避免同一毫秒连点两次重号。 */
+    let layoutSeq = 0;
+    function nextLayoutId() {
+      layoutSeq += 1;
+      return `scheme-${Date.now().toString(36)}-${layoutSeq}`;
     }
 
     /* ============================== DOM 识别 ============================== */
@@ -3662,6 +3737,7 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
 .dshl-input::placeholder { color:var(--dsw-alias-label-secondary); }
 .dshl-input:focus { outline:none; border-color:var(--dsw-alias-brand-primary); }
 .dshl-input::-webkit-search-cancel-button { display:none; }
+.dshl-inputInline { flex:1; min-width:0; height:26px; }
 .dshl-moreDivider { flex:none; height:1px; margin:4px 8px; background:var(--dsw-alias-border-l1); }
 .dshl-grantFallback { display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 10px; border-radius:8px; border:1px solid var(--dsw-alias-border-l1); background:transparent; color:var(--dsw-alias-label-secondary); font:inherit; font-size:12px; cursor:pointer; }
 .dshl-grantFallback:hover { background:var(--dsw-alias-interactive-bg-hover); color:var(--dsw-alias-label-primary); }
@@ -4435,7 +4511,7 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
      * 分页状态记在 localStorage，刷新后停在原页。
      */
     const EDITOR_TABS = [
-      { id: 'structure', labelKey: 'tabStructure', hintKey: 'tabStructureHint', cards: ['structure'] },
+      { id: 'structure', labelKey: 'tabStructure', hintKey: 'tabStructureHint', cards: ['schemes', 'structure'] },
       { id: 'sidebar', labelKey: 'tabSidebar', hintKey: 'tabSidebarHint', cards: ['blocks', 'panels'] },
       { id: 'storage', labelKey: 'tabStorage', hintKey: 'tabStorageHint', cards: ['storage'] },
       { id: 'areas', labelKey: 'tabAreas', hintKey: 'tabAreasHint', cards: ['conversation', 'rightbar', 'settings'] },
@@ -4459,6 +4535,104 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       if (store.tab === tab) return;
       store.tab = tab;
       writeJsonStore(UI_STORE_KEY, store);
+    }
+
+    /**
+     * 布局方案卡片：当前配置存成命名方案、切换、覆盖、改名、删除。
+     * 切换用 replaceConfig（与导入/恢复默认同一入口），所以是「整套替换」而非字段合并。
+     */
+    function SchemesCard({ config, t }) {
+      const [state, setState] = React.useState(readLayoutsNormalized);
+      const [draftName, setDraftName] = React.useState('');
+      const [message, setMessage] = React.useState(null);
+      const commit = (next, text) => {
+        setState(next);
+        writeLayouts(next);
+        setMessage(text === undefined ? null : { ok: true, text });
+      };
+      const defaultName = () => `${t('schemesNamePrefix')} ${state.list.length + 1}`;
+      const saveNew = () => {
+        if (state.list.length >= LAYOUTS_MAX) {
+          setMessage({ ok: false, text: t('schemesFull') });
+          return;
+        }
+        const name = draftName.trim() === '' ? defaultName() : draftName.trim().slice(0, 40);
+        const id = nextLayoutId();
+        const entry = { id, name, savedAt: Date.now(), config: clone(snapshot.config) };
+        commit({ active: id, list: [...state.list, entry] }, `${t('schemesSaved')}：${name}`);
+        setDraftName('');
+      };
+      const apply = (entry) => {
+        replaceConfig(clone(entry.config));
+        commit({ ...state, active: entry.id }, `${t('schemesApplied')}：${entry.name}`);
+      };
+      const overwrite = (entry) => {
+        const next = state.list.map((item) => (item.id === entry.id ? { ...item, savedAt: Date.now(), config: clone(snapshot.config) } : item));
+        commit({ ...state, list: next }, `${t('schemesSaved')}：${entry.name}`);
+      };
+      const rename = (entry, name) => {
+        const trimmed = name.trim().slice(0, 40);
+        if (trimmed === '' || trimmed === entry.name) return;
+        commit({ ...state, list: state.list.map((item) => (item.id === entry.id ? { ...item, name: trimmed } : item)) });
+      };
+      const remove = (entry) => {
+        const list = state.list.filter((item) => item.id !== entry.id);
+        commit({ active: state.active === entry.id ? '' : state.active, list }, `${t('schemesDeleted')}：${entry.name}`);
+      };
+      return h(Card, { title: t('schemes'), desc: t('schemesHint') },
+        h('div', { className: 'dshl-row' },
+          h('input', {
+            type: 'text',
+            className: 'dshl-input',
+            value: draftName,
+            placeholder: defaultName(),
+            'aria-label': t('schemes'),
+            maxLength: 40,
+            onChange: (event) => setDraftName(event.target.value),
+          }),
+          h('button', {
+            type: 'button',
+            className: 'dshl-btn',
+            disabled: state.list.length >= LAYOUTS_MAX,
+            onClick: saveNew,
+          }, t('schemesSaveNew'))),
+        h('div', { className: 'dshl-row' },
+          h('span', { className: 'dshl-rowLabel' }, t('schemesCount')(state.list.length)),
+          message === null ? null : h('span', { className: 'dshl-message', 'data-error': message.ok ? 'false' : 'true' }, message.text)),
+        state.list.length === 0
+          ? h('p', { className: 'dshl-hint' }, t('schemesEmpty'))
+          : h('div', { className: 'dshl-listScroll' }, h('div', { className: 'dshl-list' },
+            ...state.list.map((entry) => h('div', {
+              key: entry.id,
+              className: 'dshl-item',
+              'data-active': state.active === entry.id ? 'true' : undefined,
+            },
+              h('input', {
+                type: 'text',
+                className: 'dshl-input dshl-inputInline',
+                defaultValue: entry.name,
+                'aria-label': t('schemesRename'),
+                maxLength: 40,
+                onBlur: (event) => rename(entry, event.target.value),
+                onKeyDown: (event) => { if (event.key === 'Enter') event.target.blur(); },
+              }),
+              state.active === entry.id ? h('span', { className: 'dshl-itemSub' }, t('schemesActive')) : null,
+              h('span', { className: 'dshl-itemCtl' },
+                h('button', { type: 'button', className: 'dshl-btn', onClick: () => apply(entry) }, t('schemesApply')),
+                h('button', {
+                  type: 'button',
+                  className: 'dshl-iconBtn',
+                  title: t('schemesUpdate'),
+                  'aria-label': t('schemesUpdate'),
+                  onClick: () => overwrite(entry),
+                }, icon(ICON_DOWN, 12)),
+                h('button', {
+                  type: 'button',
+                  className: 'dshl-iconBtn',
+                  title: t('schemesDelete'),
+                  'aria-label': t('schemesDelete'),
+                  onClick: () => remove(entry),
+                }, icon(ICON_CLOSE, 12))))))));
     }
 
     function StructureCard({ config, t }) {
@@ -5998,6 +6172,7 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
         writeStoredEditorTab(tabId);
       };
       const cardRenderers = {
+        schemes: () => h(SchemesCard, { config, t }),
         structure: () => h(StructureCard, { config, t }),
         blocks: () => h(BlocksCard, { config, targets, t }),
         panels: () => h(PanelsCard, { config, targets, t }),
