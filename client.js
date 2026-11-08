@@ -3240,7 +3240,7 @@ window.__ModuleLoader__.load({
       return `label:${label}`;
     }
 
-    /** 按钮类入口（会话头工具行 / 设置页页头操作）：容器里的按钮自动发现，身份不依赖显示名。 */
+    /** 按钮类入口（会话头工具行 / 设置页页头操作）：容器里的按钮自动发现，身份不依赖显示名；宿主「更多操作」是收纳入口本身，不参与。 */
     function readButtonEntries(outletSelector) {
       const outlet = document.querySelector(outletSelector);
       const container = outlet === null ? null : outlet.parentElement;
@@ -3248,6 +3248,7 @@ window.__ModuleLoader__.load({
       const out = [];
       for (const button of container.querySelectorAll('button')) {
         if (button.hasAttribute('data-dshl-grant-anchor')) continue;
+        if (isHostMoreButton(button)) continue;
         const label = buttonLabelOf(button);
         if (label === '') continue;
         const id = buttonEntryIdOf(button, label);
@@ -3337,6 +3338,7 @@ window.__ModuleLoader__.load({
         if (container === null) continue;
         for (const button of container.querySelectorAll('button')) {
           if (button.hasAttribute('data-dshl-grant-anchor')) continue;
+          if (isHostMoreButton(button)) continue;
           const label = buttonLabelOf(button);
           const identity = stableIdentityOf(button, { component: true });
           const hit = storedButtons.find((entry) => {
@@ -3358,6 +3360,22 @@ window.__ModuleLoader__.load({
       }
       storedAnnotated.clear();
       for (const node of done) storedAnnotated.add(node);
+    }
+
+    /** 「更多操作」按钮打标记：全局捕获监听靠它认出锚点，宿主重建元素后由每轮注解补上。 */
+    const hostMoreMarked = new Set();
+    function annotateHostMore() {
+      const button = hostMoreButtonOf();
+      const done = new Set();
+      if (button !== null) {
+        mark(button, 'data-dshl-morehost', '1');
+        done.add(button);
+      }
+      for (const node of hostMoreMarked) {
+        if (!done.has(node) && node.isConnected) node.removeAttribute('data-dshl-morehost');
+      }
+      hostMoreMarked.clear();
+      for (const node of done) hostMoreMarked.add(node);
     }
 
 
@@ -3565,6 +3583,7 @@ window.__ModuleLoader__.load({
       for (const node of externalDone) externalAnnotated.add(node);
       annotateArrange(targets);
       annotateStored();
+      annotateHostMore();
     }
 
     function refresh() {
@@ -3630,6 +3649,7 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
 .dshl-storageMenuItem { display:flex; align-items:center; gap:8px; width:100%; padding:8px 12px; border:none; background:transparent; color:var(--dsw-alias-label-primary); font:inherit; font-size:13px; line-height:20px; text-align:left; border-radius:var(--dsw-radius-md, 8px); cursor:pointer; }
 .dshl-storageMenuItem:hover { background:var(--dsw-alias-interactive-bg-hover); }
 .dshl-storageMenuItem[data-current="true"] { color:var(--dsw-alias-brand-primary); }
+.dshl-moreDivider { flex:none; height:1px; margin:4px 8px; background:var(--dsw-alias-border-l1); }
 .dshl-grantFallback { display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 10px; border-radius:8px; border:1px solid var(--dsw-alias-border-l1); background:transparent; color:var(--dsw-alias-label-secondary); font:inherit; font-size:12px; cursor:pointer; }
 .dshl-grantFallback:hover { background:var(--dsw-alias-interactive-bg-hover); color:var(--dsw-alias-label-primary); }
 .dshl-card { border:1px solid var(--dsw-alias-border-l1); border-radius:var(--dsw-radius-lg, 12px); background:var(--dsw-alias-bg-layer-1); padding:12px; display:flex; flex-direction:column; gap:10px; min-width:0; }
@@ -5546,6 +5566,121 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       return true;
     }
 
+    /* ============================== 会话头「更多操作」菜单承接收纳 ============================== */
+    /**
+     * 会话头工具行自带宿主「更多操作」按钮，收纳的按钮直接追加进这个菜单，
+     * 按钮区不再出现第二个「更多」（docs/plans/2026-11-08-更多操作接管收纳.md）。
+     * 注入是纯 DOM：宿主每次打开菜单都重建 DOM（实测注入节点随之清空），所以每次打开都重新注入。
+     */
+    const HOST_MORE_COMPONENT = 'SessionLogDownloadHeaderAction';
+    const HOST_MORE_SLOT_ID = 'session-log-download';
+    const HOST_MORE_ICON = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M2.8 3.2h3v9.6h-3zM8.2 3.2h3v4.8h-3zM8.2 9.6h3v3.2h-3z"/></svg>';
+    let hostMoreWatchTimer = null;
+
+    /** 会话头工具行里的宿主「更多操作」按钮：按业务组件名与槽位后段识别，不依赖文案。 */
+    function isHostMoreButton(button) {
+      const identity = stableIdentityOf(button, { component: true });
+      if (identity.component === HOST_MORE_COMPONENT) return true;
+      const at = identity.slotEntry.indexOf('::');
+      return at !== -1 && identity.slotEntry.slice(at + 2) === HOST_MORE_SLOT_ID;
+    }
+
+    function hostMoreButtonOf() {
+      const container = headerUtilitiesContainer();
+      if (container === null) return null;
+      for (const button of container.querySelectorAll('button')) {
+        if (button.hasAttribute('data-dshl-grant-anchor')) continue;
+        if (isHostMoreButton(button)) return button;
+      }
+      return null;
+    }
+
+    /** 菜单里建一行：className 与内部结构抄宿主菜单现有行；图标用自绘 SVG（宿主图标名不对外保证）。 */
+    function hostMenuRow(template, label, onClick) {
+      const wrap = document.createElement('div');
+      wrap.className = template.wrap;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.setAttribute('role', 'menuitem');
+      button.className = template.row;
+      if (template.icon !== '') {
+        const iconSpan = document.createElement('span');
+        iconSpan.className = template.icon;
+        iconSpan.setAttribute('aria-hidden', 'true');
+        iconSpan.innerHTML = HOST_MORE_ICON;
+        button.appendChild(iconSpan);
+      }
+      const text = document.createElement('span');
+      if (template.label !== '') text.className = template.label;
+      text.textContent = label;
+      button.appendChild(text);
+      button.addEventListener('click', onClick);
+      wrap.appendChild(button);
+      return wrap;
+    }
+
+    /** 往宿主「更多操作」菜单末尾追加收纳行；菜单结构不符时什么都不做。 */
+    function injectHostStorageRows(menu) {
+      const stored = snapshot.config.storage?.headerUtilities ?? [];
+      if (stored.length === 0) return;
+      if (menu.hasAttribute('data-dshl-more-injected')) return;
+      const viewport = menu.querySelector('[role="presentation"]');
+      const source = viewport === null ? null : viewport.querySelector('button[role="menuitem"]');
+      const sourceWrap = source === null ? null : source.parentElement;
+      if (viewport === null || source === null || sourceWrap === null) return;
+      const iconSpan = source.querySelector('span[class*="itemIcon"]');
+      const labelSpan = source.querySelector('span[class*="itemLabel"]');
+      const template = {
+        wrap: sourceWrap.className,
+        row: source.className,
+        icon: iconSpan === null ? '' : iconSpan.className,
+        label: labelSpan === null ? '' : labelSpan.className,
+      };
+      menu.setAttribute('data-dshl-more-injected', String(stored.length));
+      const divider = document.createElement('div');
+      divider.className = 'dshl-moreDivider';
+      viewport.appendChild(divider);
+      for (const entry of stored) {
+        const target = document.querySelector(`[${STORED_BUTTON_ATTR}="${CSS.escape(`headerUtilities:${entry.id}`)}"]`);
+        const label = target === null ? entry.label : buttonLabelOf(target);
+        viewport.appendChild(hostMenuRow(template, label, () => {
+          clickStoredButton('headerUtilities', entry.id);
+          closeHostMoreMenu();
+        }));
+      }
+    }
+
+    /** 关闭宿主菜单：Escape 交给宿主菜单自己处理（实测有效）。 */
+    function closeHostMoreMenu() {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    }
+
+    /** 点「更多操作」后等菜单出现（宿主异步开菜单），出现后注入。 */
+    function watchHostMoreMenu() {
+      if (hostMoreWatchTimer !== null) window.clearTimeout(hostMoreWatchTimer);
+      const before = new Set(document.querySelectorAll('[role="menu"]'));
+      const started = performance.now();
+      const tick = () => {
+        hostMoreWatchTimer = null;
+        const menu = [...document.querySelectorAll('[role="menu"]')].find((node) => !before.has(node));
+        if (menu !== undefined) {
+          injectHostStorageRows(menu);
+          return;
+        }
+        if (performance.now() - started > 900) return;
+        hostMoreWatchTimer = window.setTimeout(tick, 40);
+      };
+      hostMoreWatchTimer = window.setTimeout(tick, 40);
+    }
+
+    /** 捕获阶段监听：只处理打了 data-dshl-morehost 的「更多操作」按钮。 */
+    function onHostMorePointer(event) {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest('[data-dshl-morehost]') === null) return;
+      watchHostMoreMenu();
+    }
+
     function openPluginCard(packageName) {
       const card = document.querySelector(`[data-plugin-package="${CSS.escape(packageName)}"]`);
       if (card === null) return false;
@@ -5629,6 +5764,8 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       const pluginRows = pluginsStored.map((entry) => ({ id: entry.id, label: entry.label, current: false }));
       const headerStored = config.storage.headerUtilities ?? [];
       const settingsActionStored = config.storage.settingsActions ?? [];
+      // 会话头有宿主「更多操作」时，收纳行注入那个菜单（不再多一个「更多」）；只有宿主按钮不在场才退回授予式锚点
+      const hostMore = hostMoreButtonOf();
       return h(React.Fragment, null,
         settingsRows.length > 0 ? h(GrantedMenu, {
           key: 'settings',
@@ -5652,7 +5789,7 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
             if (!openPluginCard(row.id)) console.warn('[dsh-layout] 找不到收纳的插件卡片', row.id);
           },
         }) : null,
-        headerStored.length > 0 ? h(GrantedMenu, {
+        headerStored.length > 0 && hostMore === null ? h(GrantedMenu, {
           key: 'headerUtilities',
           zone: 'headerUtilities',
           t,
@@ -6363,6 +6500,16 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
         window.addEventListener('hashchange', consumeHash);
         return () => window.removeEventListener('hashchange', consumeHash);
       }, 'dsh-layout: url reset');
+
+      // 会话头「更多操作」菜单：点击锚点后等菜单出现，把收纳行注入进去（纯 DOM，卸载时摘监听即可）
+      ctx.effect(() => {
+        document.addEventListener('click', onHostMorePointer, true);
+        return () => {
+          document.removeEventListener('click', onHostMorePointer, true);
+          if (hostMoreWatchTimer !== null) window.clearTimeout(hostMoreWatchTimer);
+          hostMoreWatchTimer = null;
+        };
+      }, 'dsh-layout: host more menu');
 
       ctx.effect(() => {
         const activate = () => {
