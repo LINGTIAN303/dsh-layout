@@ -65,8 +65,11 @@ window.__ModuleLoader__.load({
       partHeaderTabs: '会话头 · 视图标签行',
       partHeaderCrumbs: '会话头 · 会话名',
       partHeaderActions: '会话头 · 操作组',
-      composerPartsHint: '输入区拆解：输入框上方的任务面板可单独隐藏。',
+      composerPartsHint: '输入区拆解：上方的任务面板与输入卡下方的状态条可各自隐藏。',
       partTodoPanel: '输入区 · 任务面板',
+      partComposerDock: '输入区 · 状态条',
+      messagesPartsHint: '消息区拆解：右侧的轮次导航条可单独隐藏。',
+      partTurnRail: '消息区 · 轮次导航',
       rightbarPanel: '右栏',
       rightbarPanelHint: '右栏内部的标签栏与内容区；宽度在「区域结构」里调。',
       rightbarPartsHint: '右栏拆解：标签栏与内容区可各自隐藏，标签栏也可放到内容区下方。',
@@ -201,8 +204,11 @@ window.__ModuleLoader__.load({
       partHeaderTabs: 'Header · view tabs row',
       partHeaderCrumbs: 'Header · session name',
       partHeaderActions: 'Header · action group',
-      composerPartsHint: 'Composer parts: the task panel above the input can be hidden separately.',
+      composerPartsHint: 'Composer parts: the task panel above and the status bar below the input card can each be hidden.',
       partTodoPanel: 'Composer · task panel',
+      partComposerDock: 'Composer · status bar',
+      messagesPartsHint: 'Messages parts: the turn navigator rail on the right can be hidden separately.',
+      partTurnRail: 'Messages · turn navigator',
       rightbarPanel: 'Right column',
       rightbarPanelHint: 'The tab strip and content area inside the right column; width is set in region structure.',
       rightbarPartsHint: 'Right column parts: the tab strip and content can each be hidden, and the tab strip can move below the content.',
@@ -308,7 +314,7 @@ window.__ModuleLoader__.load({
       },
       center: {
         contentWidth: null,
-        parts: { hideHeader: false, hideMessages: false, hideComposer: false, headerBottom: false, composerTop: false, hideTitleRow: false, hideViewTabs: false, hideTitleCrumbs: false, hideHeaderActions: false, hideTodoPanel: false },
+        parts: { hideHeader: false, hideMessages: false, hideComposer: false, headerBottom: false, composerTop: false, hideTitleRow: false, hideViewTabs: false, hideTitleCrumbs: false, hideHeaderActions: false, hideTodoPanel: false, hideComposerDock: false, hideTurnRail: false },
       },
       rightbar: {
         parts: { hideTabs: false, hideContent: false, tabsBottom: false },
@@ -335,6 +341,7 @@ window.__ModuleLoader__.load({
       convParts: null,
       headerParts: null,
       composerParts: null,
+      messagesParts: null,
       settings: null,
       surfaces: [],
       anomalies: [],
@@ -411,6 +418,8 @@ window.__ModuleLoader__.load({
           hideTitleCrumbs: parts.hideTitleCrumbs === true,
           hideHeaderActions: parts.hideHeaderActions === true,
           hideTodoPanel: parts.hideTodoPanel === true,
+          hideComposerDock: parts.hideComposerDock === true,
+          hideTurnRail: parts.hideTurnRail === true,
         },
       };
       const settings = raw.settings && typeof raw.settings === 'object' ? raw.settings : {};
@@ -1103,16 +1112,40 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 输入区拆解：输入框上方的任务面板（待办清单）。
-     * 面板用宿主写死的 data-testid="todo-panel" 认；没有待办时这块本来就不渲染，
-     * 此时返回 null，样式中也没有可隐藏的对象。
+     * 输入区拆解：输入框上方的任务面板（待办清单）与输入卡下方的状态条。
+     * 任务面板用宿主写死的 data-testid="todo-panel" 认；状态条用 conversation.composer.dock 槽位认。
+     * 两者都只在有内容时渲染，没有时返回 null，样式中也就没有可隐藏的对象。
      */
     function readComposerParts(convParts) {
       const composer = convParts === null || convParts === undefined ? null : convParts.composerItem;
       if (composer === null) return null;
       const todo = composer.querySelector('[data-testid="todo-panel"]');
-      if (todo === null) return null;
-      return { composer, todo };
+      const dockSlot = composer.querySelector('[data-slot="conversation.composer.dock"]');
+      // 槽位本身是 display:contents，真正占位的是它的父级
+      const dock = dockSlot === null ? null : (getComputedStyle(dockSlot).display === 'contents' ? dockSlot.parentElement : dockSlot);
+      if (todo === null && dock === null) return null;
+      return { composer, todo, dock };
+    }
+
+    /**
+     * 消息区拆解：右侧的轮次导航条。
+     * 结构：消息区（会话槽位）→ viewArea → conversation.view 槽位 → frame
+     *       frame 的两个直接子级：含 conversation.chat.flow 的是消息流，另一个是轮次导航槽。
+     * 校验方式：导航槽必须真的含一个 nav 元素，否则不认（避免把别的覆盖层当导航）。
+     */
+    function readMessagesParts(convParts) {
+      const messages = convParts === null || convParts === undefined ? null : convParts.messagesItem;
+      if (messages === null) return null;
+      const viewArea = messages.firstElementChild ?? null;
+      if (viewArea === null) return null;
+      const viewSlot = viewArea.querySelector('[data-slot="conversation.view"]');
+      if (viewSlot === null) return null;
+      const frame = viewSlot.firstElementChild ?? null;
+      if (frame === null) return null;
+      const flow = branchOf(frame, '[data-slot="conversation.chat.flow"]');
+      const rail = [...frame.children].find((node) => node !== flow && node.querySelector('nav') !== null) ?? null;
+      if (rail === null) return null;
+      return { messages, viewArea, frame, flow, rail };
     }
 
     function readTargets() {
@@ -1154,6 +1187,7 @@ window.__ModuleLoader__.load({
       }
       const headerParts = readHeaderParts(convParts);
       const composerParts = readComposerParts(convParts);
+      const messagesParts = readMessagesParts(convParts);
       const settings = document.querySelector('[data-shortcut-modal="settings"]');
       const rightbarParts = readRightbarParts();
       if (rightbarParts !== null && !rightbarPartsSeen) {
@@ -1166,7 +1200,7 @@ window.__ModuleLoader__.load({
         markAuxPartsSeen('settings');
       }
       const ok = Boolean(sidebarCol && centerCol && rightbarCol);
-      const targets = { ok, frame, regions, sidebarRoot, blocks, sidebarParts, panels, conversation, convParts, headerParts, composerParts, rightbarParts, settingsParts, settings, surfaces: [], anomalies: [] };
+      const targets = { ok, frame, regions, sidebarRoot, blocks, sidebarParts, panels, conversation, convParts, headerParts, composerParts, messagesParts, rightbarParts, settingsParts, settings, surfaces: [], anomalies: [] };
       targets.surfaces = readSurfaces(targets);
       targets.anomalies = Object.values(surfaceAnomalies).sort((a, b) => b.lastSeenAt - a.lastSeenAt);
       return targets;
@@ -1226,7 +1260,12 @@ window.__ModuleLoader__.load({
         mark(hp.headerActions, 'data-dshl-hpart', 'actions');
       }
       const cp = targets.composerParts;
-      if (cp !== null && cp !== undefined) mark(cp.todo, 'data-dshl-cpart', 'todo');
+      if (cp !== null && cp !== undefined) {
+        mark(cp.todo, 'data-dshl-cpart', 'todo');
+        mark(cp.dock, 'data-dshl-cpart', 'dock');
+      }
+      const mp = targets.messagesParts;
+      if (mp !== null && mp !== undefined) mark(mp.rail, 'data-dshl-mpart', 'rail');
     }
 
     function refresh() {
@@ -1454,8 +1493,11 @@ window.__ModuleLoader__.load({
       }
       if (parts.hideTitleCrumbs) lines.push('[data-dshl-hpart="crumbs"] { display: none !important; }');
       if (parts.hideHeaderActions) lines.push('[data-dshl-hpart="actions"] { display: none !important; }');
-      // 输入区拆解：任务面板（待办清单）独立隐藏
+      // 输入区拆解：任务面板（待办清单）与状态条独立隐藏
       if (parts.hideTodoPanel) lines.push('[data-dshl-cpart="todo"] { display: none !important; }');
+      if (parts.hideComposerDock) lines.push('[data-dshl-cpart="dock"] { display: none !important; }');
+      // 消息区拆解：右侧轮次导航条
+      if (parts.hideTurnRail) lines.push('[data-dshl-mpart="rail"] { display: none !important; }');
       // 右栏拆解：标签栏 / 内容区（同在 tabHost 这个 flex column 里）
       const rbParts = config.rightbar.parts;
       if (rbParts.hideTabs) lines.push('[data-dshl-rbpart="tabs"] { display: none !important; }');
@@ -2168,7 +2210,7 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 会话区卡片：内容宽度 + 三块拆解 + 会话头内部行/段 + 输入区任务面板。
+     * 会话区卡片：内容宽度 + 三块拆解 + 会话头内部行/段 + 消息区轮次导航 + 输入区任务面板与状态条。
      * 拆解提供「独立显隐」与「位置互换」：会话头可以与正文换前后，输入区可以提到消息区上方。
      * 每块都是宿主真实参与布局的元素，改动只走 CSS，不改 React 树。
      */
@@ -2219,8 +2261,12 @@ window.__ModuleLoader__.load({
         detected ? toggle('hideTitleCrumbs', t('partHeaderCrumbs')) : null,
         detected ? toggle('hideHeaderActions', t('partHeaderActions')) : null,
         h('div', { className: 'dshl-divider' }),
+        detected ? h('div', { className: 'dshl-cardDesc' }, t('messagesPartsHint')) : null,
+        detected ? toggle('hideTurnRail', t('partTurnRail')) : null,
+        h('div', { className: 'dshl-divider' }),
         detected ? h('div', { className: 'dshl-cardDesc' }, t('composerPartsHint')) : null,
-        detected ? toggle('hideTodoPanel', t('partTodoPanel')) : null);
+        detected ? toggle('hideTodoPanel', t('partTodoPanel')) : null,
+        detected ? toggle('hideComposerDock', t('partComposerDock')) : null);
     }
 
     /** 右栏卡片：宽度 + 标签栏/内容区拆解。 */
