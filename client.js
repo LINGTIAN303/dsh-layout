@@ -24,6 +24,14 @@ window.__ModuleLoader__.load({
       reset: '恢复默认',
       structure: '区域结构',
       structureHint: '拖动排序三栏、调整宽度、控制显隐。',
+      tabStructure: '布局结构',
+      tabSidebar: '侧栏',
+      tabAreas: '区域拆解',
+      tabRecognition: '识别与外部',
+      tabStructureHint: '三栏顺序、宽度、显隐，以及底部条与拖动分隔条。',
+      tabSidebarHint: '侧栏内部区块、面板导航的排序与显隐。',
+      tabAreasHint: '会话区 / 右栏 / 设置页内部的拆解与尺寸。',
+      tabRecognitionHint: '界面结构识别、拆解覆盖，以及外部插件页面的自动拆解。',
       sidebar: '左侧栏',
       center: '会话区',
       rightbar: '右栏',
@@ -223,6 +231,14 @@ window.__ModuleLoader__.load({
       reset: 'Reset',
       structure: 'Region structure',
       structureHint: 'Reorder the three columns, resize them, or hide them.',
+      tabStructure: 'Layout',
+      tabSidebar: 'Sidebar',
+      tabAreas: 'Area parts',
+      tabRecognition: 'Recognition & external',
+      tabStructureHint: 'Column order, width, visibility, the bottom bar and the resize handles.',
+      tabSidebarHint: 'Order and visibility of sidebar blocks and panel navigation.',
+      tabAreasHint: 'Parts and sizes inside the conversation, right column and settings panel.',
+      tabRecognitionHint: 'Interface surfaces, part coverage, and automatic decomposition of external plugin pages.',
       sidebar: 'Sidebar',
       center: 'Conversation',
       rightbar: 'Right column',
@@ -1988,6 +2004,21 @@ window.__ModuleLoader__.load({
 .dshl-chip:hover { background:var(--dsw-alias-interactive-bg-hover); }
 .dshl-chip[data-active="true"] { border-color:var(--dsw-alias-brand-primary); color:var(--dsw-alias-brand-primary); background:color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent); }
 .dshl-cards { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:12px; align-items:start; }
+.dshl-tabs { display:flex; gap:2px; flex-wrap:wrap; border-bottom:1px solid var(--dsw-alias-border-l2); }
+.dshl-tab { appearance:none; border:none; background:transparent; color:var(--dsw-alias-label-secondary); font:inherit; font-size:13px; line-height:20px; padding:8px 12px 9px; border-radius:8px 8px 0 0; cursor:pointer; position:relative; display:inline-flex; align-items:center; gap:4px; }
+.dshl-tab:hover { background:var(--dsw-alias-interactive-bg-hover); color:var(--dsw-alias-label-primary); }
+.dshl-tab[data-active="true"] { color:var(--dsw-alias-brand-primary); font-weight:600; }
+.dshl-tab[data-active="true"]:after { content:''; position:absolute; left:8px; right:8px; bottom:-1px; height:2px; border-radius:2px 2px 0 0; background:var(--dsw-alias-brand-primary); }
+.dshl-tabBadge { font-size:10px; line-height:16px; min-width:16px; padding:0 4px; border-radius:999px; text-align:center; background:var(--dsw-alias-state-error-secondary, rgba(229,72,77,.16)); color:var(--dsw-alias-state-error-primary, #e5484d); }
+.dshl-tabPanel { padding-top:12px; }
+.dshl-tabHint { margin-top:-4px; }
+.dshl-controlRow { display:flex; flex-wrap:wrap; gap:10px 28px; align-items:center; }
+.dshl-control { display:flex; align-items:center; gap:8px; }
+.dshl-control .dshl-rowLabel { font-size:13px; }
+.dshl-tabPanel[data-tab="structure"] .dshl-cards { grid-template-columns:minmax(0, 640px); justify-content:center; }
+.dshl-tabPanel[data-tab="sidebar"] .dshl-cards { grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); }
+.dshl-tabPanel[data-tab="areas"] .dshl-cards { grid-template-columns:repeat(auto-fit, minmax(340px, 1fr)); }
+.dshl-tabPanel[data-tab="recognition"] .dshl-cards { grid-template-columns:minmax(0, 1fr); }
 .dshl-card { border:1px solid var(--dsw-alias-border-l1); border-radius:var(--dsw-radius-lg, 12px); background:var(--dsw-alias-bg-layer-1); padding:12px; display:flex; flex-direction:column; gap:10px; min-width:0; }
 .dshl-cardHead { display:flex; flex-direction:column; gap:2px; }
 .dshl-cardTitle { font-size:13px; font-weight:600; }
@@ -2692,6 +2723,35 @@ window.__ModuleLoader__.load({
     /* ============================== 编辑面板（插件详情页内） ============================== */
     const BLOCK_LABEL_KEYS = { brand: 'blockBrand', 'new-session': 'blockNewSession', panels: 'blockPanels', workspaces: 'blockWorkspaces', footer: 'blockFooter' };
 
+    /**
+     * 编辑区分页：把原来平铺的卡片按「类型」分成四页。
+     * - 布局结构（结构类）：三栏骨架与底部条
+     * - 侧栏（容器类）：侧栏内部区块与面板导航
+     * - 区域拆解（区域类）：会话区 / 右栏 / 设置页的拆解与尺寸
+     * - 识别与外部（观测类）：界面结构、拆解覆盖、外部插件单元
+     * 分页状态记在 localStorage，刷新后停在原页。
+     */
+    const EDITOR_TABS = [
+      { id: 'structure', labelKey: 'tabStructure', hintKey: 'tabStructureHint', cards: ['structure'] },
+      { id: 'sidebar', labelKey: 'tabSidebar', hintKey: 'tabSidebarHint', cards: ['blocks', 'panels'] },
+      { id: 'areas', labelKey: 'tabAreas', hintKey: 'tabAreasHint', cards: ['conversation', 'rightbar', 'settings'] },
+      { id: 'recognition', labelKey: 'tabRecognition', hintKey: 'tabRecognitionHint', cards: ['surfaces', 'coverage'] },
+    ];
+    const UI_STORE_KEY = 'dsh-layout/ui/v1';
+
+    function readStoredEditorTab() {
+      const store = readJsonStore(UI_STORE_KEY);
+      const tab = store.tab;
+      return typeof tab === 'string' && EDITOR_TABS.some((item) => item.id === tab) ? tab : EDITOR_TABS[0].id;
+    }
+
+    function writeStoredEditorTab(tab) {
+      const store = readJsonStore(UI_STORE_KEY);
+      if (store.tab === tab) return;
+      store.tab = tab;
+      writeJsonStore(UI_STORE_KEY, store);
+    }
+
     function StructureCard({ config, t }) {
       const col = config.columns;
       const labels = { sidebar: t('sidebar'), center: t('center'), rightbar: t('rightbar') };
@@ -3211,7 +3271,23 @@ window.__ModuleLoader__.load({
     function Editor({ t }) {
       const { config, targets, ui } = useStoreSnapshot();
       const [message, setMessage] = React.useState(null);
+      const [activeTab, setActiveTab] = React.useState(readStoredEditorTab);
       const fileRef = React.useRef(null);
+      const activeTabSpec = EDITOR_TABS.find((item) => item.id === activeTab) ?? EDITOR_TABS[0];
+      const selectTab = (tabId) => {
+        setActiveTab(tabId);
+        writeStoredEditorTab(tabId);
+      };
+      const cardRenderers = {
+        structure: () => h(StructureCard, { config, t }),
+        blocks: () => h(BlocksCard, { config, t }),
+        panels: () => h(PanelsCard, { config, targets, t }),
+        surfaces: () => h(SurfacesCard, { targets, t }),
+        coverage: () => h(CoverageCard, { config, targets, t }),
+        conversation: () => h(ConversationCard, { config, t }),
+        rightbar: () => h(RightbarCard, { config, t }),
+        settings: () => h(SettingsCard, { config, t }),
+      };
 
       const exportFile = () => {
         try {
@@ -3260,14 +3336,26 @@ window.__ModuleLoader__.load({
           h('span', { className: 'dshl-status' },
             h('span', { className: 'dshl-dot', 'data-ok': targets.ok ? 'true' : 'false' }),
             targets.ok ? t('detected') : t('notDetected'))),
-        h('div', { className: 'dshl-row' },
-          h('span', { className: 'dshl-rowLabel' }, t('enable')),
-          h(Switch, {
-            checked: config.enabled,
-            label: t('enable'),
-            onChange: (on) => updateConfig((draft) => { draft.enabled = on; }, { capture: on }),
-          })),
-        h('p', { className: 'dshl-hint' }, t('enableHint')),
+        h('div', { className: 'dshl-controlRow' },
+          h('div', { className: 'dshl-control' },
+            h('span', { className: 'dshl-rowLabel' }, t('enable')),
+            h(Switch, {
+              checked: config.enabled,
+              label: t('enable'),
+              onChange: (on) => updateConfig((draft) => { draft.enabled = on; }, { capture: on }),
+            })),
+          h('div', { className: 'dshl-control' },
+            h('span', { className: 'dshl-rowLabel' }, t('editing')),
+            h(Switch, {
+              checked: ui.editing,
+              label: t('editing'),
+              onChange: (on) => {
+                if (on && !snapshot.config.enabled) updateConfig((draft) => { draft.enabled = true; }, { capture: true });
+                setEditing(on);
+              },
+            }))),
+        h('p', { className: 'dshl-hint' }, `${t('enableHint')} ${t('editingHint')}`),
+        h('p', { className: 'dshl-hint' }, t('shortcutHint')),
         risky ? h('p', { className: 'dshl-warn' }, t('riskyHint')) : null,
         h('div', { className: 'dshl-presets' },
           h('span', { className: 'dshl-presetsLabel' }, t('presets')),
@@ -3286,27 +3374,31 @@ window.__ModuleLoader__.load({
               setMessage(null);
             },
           }, t('reset'))),
-        h('div', { className: 'dshl-row' },
-          h('span', { className: 'dshl-rowLabel' }, t('editing')),
-          h(Switch, {
-            checked: ui.editing,
-            label: t('editing'),
-            onChange: (on) => {
-              if (on && !snapshot.config.enabled) updateConfig((draft) => { draft.enabled = true; }, { capture: true });
-              setEditing(on);
-            },
-          })),
-        h('p', { className: 'dshl-hint' }, t('editingHint')),
-        h('p', { className: 'dshl-hint' }, t('shortcutHint')),
-        h('div', { className: 'dshl-cards' },
-          h(StructureCard, { config, t }),
-          h(BlocksCard, { config, t }),
-          h(PanelsCard, { config, targets, t }),
-          h(SurfacesCard, { targets, t }),
-          h(CoverageCard, { config, targets, t }),
-          h(ConversationCard, { config, t }),
-          h(RightbarCard, { config, t }),
-          h(SettingsCard, { config, t })),
+        h('div', { className: 'dshl-tabs', role: 'tablist', 'aria-label': t('title') },
+          ...EDITOR_TABS.map((tabSpec) => h('button', {
+            key: tabSpec.id,
+            type: 'button',
+            role: 'tab',
+            id: `dshl-tab-${tabSpec.id}`,
+            className: 'dshl-tab',
+            'data-active': activeTab === tabSpec.id ? 'true' : undefined,
+            'aria-selected': activeTab === tabSpec.id ? 'true' : 'false',
+            'aria-controls': `dshl-tabpanel-${tabSpec.id}`,
+            onClick: () => selectTab(tabSpec.id),
+          },
+          h('span', { className: 'dshl-tabLabel' }, t(tabSpec.labelKey)),
+          tabSpec.id === 'recognition' && (targets.anomalies?.length ?? 0) > 0
+            ? h('span', { className: 'dshl-tabBadge' }, String(targets.anomalies.length))
+            : null))),
+        h('div', {
+          className: 'dshl-tabPanel',
+          role: 'tabpanel',
+          id: `dshl-tabpanel-${activeTab}`,
+          'aria-labelledby': `dshl-tab-${activeTab}`,
+          'data-tab': activeTab,
+        },
+        h('p', { className: 'dshl-hint dshl-tabHint' }, t(activeTabSpec.hintKey)),
+        h('div', { className: 'dshl-cards' }, activeTabSpec.cards.map((cardId) => cardRenderers[cardId]()))),
         h('div', { className: 'dshl-divider' }),
         h('div', { className: 'dshl-foot' },
           h('button', { type: 'button', className: 'dshl-btn', onClick: exportFile }, t('exportData')),
