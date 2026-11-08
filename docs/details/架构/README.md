@@ -87,6 +87,7 @@ flowchart LR
 - 输入区内部再拆两段：**任务面板**（待办清单，宿主写死的 `data-testid="todo-panel"`）与**状态条**（输入卡下方 `conversation.composer.dock` 槽位所在行，第三方插件塞的轮数 / token / 人设胶囊都在这里）。两者都只在有内容时渲染；实测隐藏状态条后输入区 170 → 144。
 - 消息区内部再拆一段：**轮次导航**（右侧竖排轮次标记）。结构是消息区 → viewArea → `conversation.view` 槽位 → frame，frame 的两个直接子级里含 `conversation.chat.flow` 的是消息流，另一个就是导航槽；额外校验导航槽里真的含 `nav`，避免把别的覆盖层当成导航。隐藏后导航尺寸归零、消息流布局不变。
 - 排版坑：会话头是 grid，宿主写死了 `grid-template-rows: 32px 35px` 与 `min-height: 76px`。只给一行 `display:none` 高度不会变，必须同时把行高交还 `auto` 并撤掉 `min-height`（实测隐藏标题行 78→46，隐藏标签行 78→43）；两行都隐藏时会话头整体 `display:none`。
+- 视图标签行可以**放到标题行上方**。这里不能用 `order`：会话头是两列网格（第一列是 0px 的 leading），`order` 会让标签行落进 0px 列。正确做法是显式指定行列——行高交还 `auto auto`，标签行写 `grid-column:2; grid-row:1`、标题行写 `grid-column:2; grid-row:2`（实测标签行 y=20、标题行 y=45）。
 - 拆解结果全部是 CSS `order` / `display` 覆盖，不改 React 树、不移动 DOM，宿主自身的滚动与粘贴行为不受影响。
 
 ### 右栏
@@ -102,13 +103,17 @@ flowchart LR
 
 | 单元 | 判定方式 |
 | --- | --- |
-| 导航列 | 标题行（含 `settings.header` 的子级）+ `NAV` 元素 |
-| 内容列 | 页头（含 `settings.action` / `settings.close`）+ 选项区（含 `settings.section`） |
+| 导航列 | 标题行（含 `settings.header` 的子级）+ `NAV` 元素，作为一个整体显隐 |
+| 页头 | 含 `settings.action` / `settings.close` 的子级 |
+| 选项区 | 含 `settings.section` 的子级 |
 
-设置面板是**命名网格区域**（`grid-template-areas: "title header" "nav options"`），所以不能只改列宽——隐藏导航后左侧会留一条空轨道。正确做法是**重写区域名并给子级重新指派 `grid-area`**：
+四个子级（标题、导航、页头、选项区）落在命名网格区域 `"title header" / "nav options"` 上，所以不能只改列宽——隐藏导航后左侧会留一条空轨道。正确做法是**重写区域名并给子级重新指派 `grid-area`**：
 
-- 隐藏导航：`grid-template-columns: minmax(0,1fr)`，区域改为单列，子级改挂 `dshlHeader` / `dshlOptions`。
-- 导航右置：`grid-template-columns: minmax(0,1fr) <导航宽度>`，区域改为 `"dshlHeader dshlTitle" "dshlOptions dshlNav"`。导航宽度用户没设过时现场量一次真实值。
+- 隐藏导航：`grid-template-columns: minmax(0,1fr)`，区域改为单列 `"dshlHeader" "dshlOptions"`（页头也在时）；只剩一块时再收成单行。
+- 导航右置：`grid-template-columns: minmax(0,1fr) <导航宽度>`，区域改为 `"dshlHeader dshlTitle" "dshlOptions dshlNav"`。导航宽度优先用配置值，用户没设过时现场量一次真实值。
+- 隐藏页头：选项区跨两行上移（`"dshlTitle dshlOptions" "dshlNav dshlOptions"`），内容对齐面板顶部；实测选项区从 y=78 上移到 y=24、高度 588→642。
+- 折叠成单行时**必须同时把 `grid-template-rows` 交还 `minmax(0,1fr)`**：宿主留的是两条轨道（54px + 剩余），只改列会让内容只占上半截。实测「只剩页头」「只剩选项区」两种情况都铺满整个面板。
+- 导航与内容侧都隐藏时不再重写网格，只让四块 `display:none`。
 
 ### 共同约定
 

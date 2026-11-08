@@ -65,6 +65,7 @@ window.__ModuleLoader__.load({
       partHeaderTabs: '会话头 · 视图标签行',
       partHeaderCrumbs: '会话头 · 会话名',
       partHeaderActions: '会话头 · 操作组',
+      partTabsTop: '视图标签行放到标题行上方',
       composerPartsHint: '输入区拆解：上方的任务面板与输入卡下方的状态条可各自隐藏。',
       partTodoPanel: '输入区 · 任务面板',
       partComposerDock: '输入区 · 状态条',
@@ -77,10 +78,12 @@ window.__ModuleLoader__.load({
       partTabs: '标签栏',
       partContent: '内容区',
       partTabsBottom: '标签栏放到内容区下方',
-      settingsPartsHint: '设置页拆解：导航列可隐藏或移到右侧。',
+      settingsPartsHint: '设置页拆解：导航列、页头、选项区可各自隐藏，导航列还能移到右侧。',
       settingsPartsMissing: '尚未打开过设置面板，拆解项待识别（打开一次设置即可）。',
       partNavHidden: '显示导航列',
       partNavRight: '导航列放右侧',
+      partSetHeader: '设置页 · 页头',
+      partSetOptions: '设置页 · 选项区',
       contentWidth: '内容宽度',
       followDefault: '跟随默认',
       settingsPanel: '设置页',
@@ -204,6 +207,7 @@ window.__ModuleLoader__.load({
       partHeaderTabs: 'Header · view tabs row',
       partHeaderCrumbs: 'Header · session name',
       partHeaderActions: 'Header · action group',
+      partTabsTop: 'View tabs above the title row',
       composerPartsHint: 'Composer parts: the task panel above and the status bar below the input card can each be hidden.',
       partTodoPanel: 'Composer · task panel',
       partComposerDock: 'Composer · status bar',
@@ -216,10 +220,12 @@ window.__ModuleLoader__.load({
       partTabs: 'Tab strip',
       partContent: 'Content',
       partTabsBottom: 'Tab strip below the content',
-      settingsPartsHint: 'Settings parts: the navigation column can be hidden or moved to the right.',
+      settingsPartsHint: 'Settings parts: the navigation column, the header and the options area can each be hidden; the navigation column can move to the right.',
       settingsPartsMissing: 'The settings panel has not been opened yet; open it once to enable these controls.',
       partNavHidden: 'Show navigation',
       partNavRight: 'Navigation on the right',
+      partSetHeader: 'Settings · header',
+      partSetOptions: 'Settings · options area',
       contentWidth: 'Content width',
       followDefault: 'Default',
       settingsPanel: 'Settings page',
@@ -314,7 +320,7 @@ window.__ModuleLoader__.load({
       },
       center: {
         contentWidth: null,
-        parts: { hideHeader: false, hideMessages: false, hideComposer: false, headerBottom: false, composerTop: false, hideTitleRow: false, hideViewTabs: false, hideTitleCrumbs: false, hideHeaderActions: false, hideTodoPanel: false, hideComposerDock: false, hideTurnRail: false },
+        parts: { hideHeader: false, hideMessages: false, hideComposer: false, headerBottom: false, composerTop: false, hideTitleRow: false, hideViewTabs: false, hideTitleCrumbs: false, hideHeaderActions: false, hideTodoPanel: false, hideComposerDock: false, hideTurnRail: false, tabsTop: false },
       },
       rightbar: {
         parts: { hideTabs: false, hideContent: false, tabsBottom: false },
@@ -325,7 +331,7 @@ window.__ModuleLoader__.load({
         navWidth: null,
         offsetX: 0,
         offsetY: 0,
-        parts: { hideNav: false, navRight: false },
+        parts: { hideNav: false, navRight: false, hideHeader: false, hideOptions: false },
       },
     };
 
@@ -420,6 +426,7 @@ window.__ModuleLoader__.load({
           hideTodoPanel: parts.hideTodoPanel === true,
           hideComposerDock: parts.hideComposerDock === true,
           hideTurnRail: parts.hideTurnRail === true,
+          tabsTop: parts.tabsTop === true,
         },
       };
       const settings = raw.settings && typeof raw.settings === 'object' ? raw.settings : {};
@@ -430,10 +437,12 @@ window.__ModuleLoader__.load({
         navWidth: settings.navWidth == null ? null : clampInt(settings.navWidth, 120, 360, null),
         offsetX: clampInt(settings.offsetX, -600, 600, 0),
         offsetY: clampInt(settings.offsetY, -500, 500, 0),
-        // 设置页拆解：导航列与内容列
+        // 设置页拆解：导航列（含标题）、页头、选项区；导航列可换到右侧
         parts: {
           hideNav: settingsParts.hideNav === true,
           navRight: settingsParts.navRight === true,
+          hideHeader: settingsParts.hideHeader === true,
+          hideOptions: settingsParts.hideOptions === true,
         },
       };
       const rightbar = raw.rightbar && typeof raw.rightbar === 'object' ? raw.rightbar : {};
@@ -1493,6 +1502,12 @@ window.__ModuleLoader__.load({
       }
       if (parts.hideTitleCrumbs) lines.push('[data-dshl-hpart="crumbs"] { display: none !important; }');
       if (parts.hideHeaderActions) lines.push('[data-dshl-hpart="actions"] { display: none !important; }');
+      // 视图标签行放到标题行上方：网格按显式行列排，不能靠 order（受 0px 的 leading 列影响会错列）
+      if (parts.tabsTop && !parts.hideTitleRow && !parts.hideViewTabs) {
+        lines.push('[data-dshl-part="header"] { grid-template-rows: auto auto !important; min-height: auto !important; }');
+        lines.push('[data-dshl-hpart="tabs"] { grid-column: 2 !important; grid-row: 1 !important; }');
+        lines.push('[data-dshl-hpart="title"] { grid-column: 2 !important; grid-row: 2 !important; }');
+      }
       // 输入区拆解：任务面板（待办清单）与状态条独立隐藏
       if (parts.hideTodoPanel) lines.push('[data-dshl-cpart="todo"] { display: none !important; }');
       if (parts.hideComposerDock) lines.push('[data-dshl-cpart="dock"] { display: none !important; }');
@@ -1517,23 +1532,43 @@ window.__ModuleLoader__.load({
       if (settings.navWidth !== null) {
         lines.push(`[data-dshl-settings] { grid-template-columns: ${settings.navWidth}px minmax(0, 1fr) !important; }`);
       }
-      // 设置页拆解：导航列 / 内容列。
-      // 宿主用命名网格区域摆放四个子级，所以换边/隐藏要靠「重写区域名 + 给子级重新指派区域」，
-      // 不能只改列宽——否则隐藏导航后左侧会留一条空轨道。
+      // 设置页拆解：导航列 / 内容列，以及内容列里的页头与选项区。
+      // 宿主用命名网格区域摆放四个子级（"title header" / "nav options"），隐藏或换边必须成对重写
+      // 区域名并给子级重新指派 grid-area，只改列宽会留下空轨道。
+      // 折叠成单行时还要把 grid-template-rows 交还 1fr，否则宿主留下的两条轨道会让内容只占上半截。
       const setParts = settings.parts;
-      if (setParts.hideNav) {
-        lines.push('[data-dshl-setpart="navTitle"], [data-dshl-setpart="nav"] { display: none !important; }');
-        lines.push('[data-dshl-setpanel] { grid-template-columns: minmax(0, 1fr) !important; grid-template-areas: "dshlHeader" "dshlOptions" !important; }');
-        lines.push('[data-dshl-setpart="header"] { grid-area: dshlHeader !important; }');
-        lines.push('[data-dshl-setpart="options"] { grid-area: dshlOptions !important; }');
+      const navShown = !setParts.hideNav;
+      const headerShown = !setParts.hideHeader;
+      const optionsShown = !setParts.hideOptions;
+      const navTrack = settings.navWidth !== null ? `${Math.round(settings.navWidth)}px` : `${measuredSettingsNavWidth()}px`;
+      if (!navShown) lines.push('[data-dshl-setpart="navTitle"], [data-dshl-setpart="nav"] { display: none !important; }');
+      if (!headerShown) lines.push('[data-dshl-setpart="header"] { display: none !important; }');
+      if (!optionsShown) lines.push('[data-dshl-setpart="options"] { display: none !important; }');
+      const setGrid = (columns, rows, areas, assign) => {
+        const rowRule = rows === null ? '' : ` grid-template-rows: ${rows} !important;`;
+        lines.push(`[data-dshl-setpanel] { grid-template-columns: ${columns} !important;${rowRule} grid-template-areas: ${areas} !important; }`);
+        for (const [part, area] of Object.entries(assign)) lines.push(`[data-dshl-setpart="${part}"] { grid-area: ${area} !important; }`);
+      };
+      const assignAll = { navTitle: 'dshlTitle', nav: 'dshlNav', header: 'dshlHeader', options: 'dshlOptions' };
+      if (!navShown && !headerShown && !optionsShown) {
+        // 四块全隐：没有可排的内容，保持宿主网格
+      } else if (!navShown) {
+        // 只剩内容列
+        if (headerShown && optionsShown) setGrid('minmax(0, 1fr)', null, '"dshlHeader" "dshlOptions"', assignAll);
+        else if (optionsShown) setGrid('minmax(0, 1fr)', 'minmax(0, 1fr)', '"dshlOptions"', assignAll);
+        else setGrid('minmax(0, 1fr)', 'minmax(0, 1fr)', '"dshlHeader"', assignAll);
+      } else if (!headerShown && !optionsShown) {
+        // 只剩导航列：单列铺满
+        setGrid('minmax(0, 1fr)', null, '"dshlTitle" "dshlNav"', assignAll);
+      } else if (!headerShown) {
+        // 页头隐藏：选项区跨两行上移，对齐面板顶部
+        const columns = setParts.navRight ? `minmax(0, 1fr) ${navTrack}` : `${navTrack} minmax(0, 1fr)`;
+        const areas = setParts.navRight ? '"dshlOptions dshlTitle" "dshlOptions dshlNav"' : '"dshlTitle dshlOptions" "dshlNav dshlOptions"';
+        setGrid(columns, null, areas, assignAll);
       } else if (setParts.navRight) {
-        const navWidth = measuredSettingsNavWidth();
-        lines.push(`[data-dshl-setpanel] { grid-template-columns: minmax(0, 1fr) ${navWidth}px !important; grid-template-areas: "dshlHeader dshlTitle" "dshlOptions dshlNav" !important; }`);
-        lines.push('[data-dshl-setpart="navTitle"] { grid-area: dshlTitle !important; }');
-        lines.push('[data-dshl-setpart="nav"] { grid-area: dshlNav !important; }');
-        lines.push('[data-dshl-setpart="header"] { grid-area: dshlHeader !important; }');
-        lines.push('[data-dshl-setpart="options"] { grid-area: dshlOptions !important; }');
+        setGrid(`minmax(0, 1fr) ${navTrack}`, null, '"dshlHeader dshlTitle" "dshlOptions dshlNav"', assignAll);
       }
+      // 其余情况（全部显示、导航在左）保持宿主默认网格，不重写
       // 偏移只用来微调位置：夹取到「面板仍在屏幕内」的区间，避免把设置面板推到看不见的地方
       if (settings.offsetX !== 0 || settings.offsetY !== 0) {
         const viewportWidth = Math.max(360, window.innerWidth || 1280);
@@ -2260,6 +2295,13 @@ window.__ModuleLoader__.load({
         detected ? toggle('hideViewTabs', t('partHeaderTabs')) : null,
         detected ? toggle('hideTitleCrumbs', t('partHeaderCrumbs')) : null,
         detected ? toggle('hideHeaderActions', t('partHeaderActions')) : null,
+        detected ? h('div', { className: 'dshl-row' },
+          h('span', { className: 'dshl-rowLabel' }, t('partTabsTop')),
+          h(Switch, {
+            checked: parts.tabsTop,
+            label: t('partTabsTop'),
+            onChange: (on) => updateConfig((draft) => { draft.center.parts.tabsTop = on; }),
+          })) : null,
         h('div', { className: 'dshl-divider' }),
         detected ? h('div', { className: 'dshl-cardDesc' }, t('messagesPartsHint')) : null,
         detected ? toggle('hideTurnRail', t('partTurnRail')) : null,
@@ -2336,6 +2378,16 @@ window.__ModuleLoader__.load({
               if (on) draft.settings.parts.hideNav = false;
             });
           },
+        })) : null,
+        detected ? row(t('partSetHeader'), h(Switch, {
+          checked: !parts.hideHeader,
+          label: t('partSetHeader'),
+          onChange: (on) => updateConfig((draft) => { draft.settings.parts.hideHeader = !on; }),
+        })) : null,
+        detected ? row(t('partSetOptions'), h(Switch, {
+          checked: !parts.hideOptions,
+          label: t('partSetOptions'),
+          onChange: (on) => updateConfig((draft) => { draft.settings.parts.hideOptions = !on; }),
         })) : null);
     }
 
