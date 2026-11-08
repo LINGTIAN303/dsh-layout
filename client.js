@@ -209,6 +209,42 @@ window.__ModuleLoader__.load({
       relocateDestSettingsHeader: '设置页 · 页头',
       relocateDestSettingsNav: '设置页 · 导航列',
       relocateDestSettingsOptions: '设置页 · 选项区',
+      sync: '联动同步',
+      syncHint: '面板导航与插件来源描述的是同一排图标：开启后在一处排序或隐藏，另一处跟着写，不再互相覆盖。',
+      syncPanellistOrder: '排序同步',
+      syncPanellistOrderHint: '在面板导航里拖动排序后，插件来源里对应条目的顺序一并更新；反之亦然。',
+      syncPanellistHidden: '隐藏同步',
+      syncPanellistHiddenHint: '隐藏一个面板图标时，插件来源里对应条目也标记为隐藏；反之亦然。',
+      syncUnavailable: '宿主 slots 注册表不可用，联动同步暂不可用。',
+      rules: '联动规则',
+      rulesHint: '条件成立时叠加动作：条件只读当前界面状态（页面 / 折叠 / 区域在场 / 单元在场），动作只动显隐或容器排列；基础配置不受影响。',
+      ruleWhen: '条件',
+      ruleThen: '动作',
+      ruleAdd: '添加规则',
+      ruleNone: '还没有规则：选好条件与动作后点「添加规则」。',
+      ruleHit: '命中',
+      ruleMiss: '未命中',
+      ruleRemove: '移除规则',
+      ruleCondPage: '当前页面',
+      ruleCondCollapsed: '侧栏折叠',
+      ruleCondArea: '区域在场',
+      ruleCondPresent: '单元在场',
+      rulePageAny: '任意页面',
+      rulePageConversation: '会话页',
+      rulePagePlugins: '插件页',
+      rulePagePluginDetail: '插件详情页',
+      rulePageSettings: '设置页',
+      rulePageExternal: '外部插件页',
+      ruleCollapsedYes: '已折叠',
+      ruleCollapsedNo: '未折叠',
+      ruleAreaSidebar: '侧栏',
+      ruleAreaCenter: '会话区',
+      ruleAreaRightbar: '右栏',
+      ruleAreaSettings: '设置页',
+      ruleActionHide: '隐藏单元',
+      ruleActionArrange: '容器排列',
+      ruleColumns: '列数',
+      ruleEmptyValue: '当前没有可选项。',
       rightbarPanel: '右栏',
       rightbarPanelHint: '右栏内部的标签栏与内容区；宽度在「区域结构」里调。',
       rightbarPartsHint: '右栏拆解：标签栏与内容区可各自隐藏，标签栏也可放到内容区下方。',
@@ -494,6 +530,42 @@ window.__ModuleLoader__.load({
       relocateDestSettingsHeader: 'Settings · header',
       relocateDestSettingsNav: 'Settings · navigation column',
       relocateDestSettingsOptions: 'Settings · options',
+      sync: 'Linked state',
+      syncHint: 'The panel list and the slot registry describe the same icon row: with this on, ordering or hiding one side writes the other, so the two views no longer override each other.',
+      syncPanellistOrder: 'Sync order',
+      syncPanellistOrderHint: 'Reorder in the panel list also updates the matching slot entries, and the other way around.',
+      syncPanellistHidden: 'Sync visibility',
+      syncPanellistHiddenHint: 'Hiding one panel icon also hides its slot entry, and the other way around.',
+      syncUnavailable: 'The host slots registry is unavailable, so linked state is unavailable.',
+      rules: 'Link rules',
+      rulesHint: 'When a condition holds, an action is layered on top: conditions read the current UI state (page / collapsed / area present / unit present), actions only hide or arrange a container; the base configuration is untouched.',
+      ruleWhen: 'When',
+      ruleThen: 'Then',
+      ruleAdd: 'Add rule',
+      ruleNone: 'No rule yet: pick a condition and an action, then press "Add rule".',
+      ruleHit: 'matched',
+      ruleMiss: 'not matched',
+      ruleRemove: 'Remove rule',
+      ruleCondPage: 'Page',
+      ruleCondCollapsed: 'Sidebar collapsed',
+      ruleCondArea: 'Area present',
+      ruleCondPresent: 'Unit present',
+      rulePageAny: 'Any page',
+      rulePageConversation: 'Conversation',
+      rulePagePlugins: 'Plugins',
+      rulePagePluginDetail: 'Plugin detail',
+      rulePageSettings: 'Settings',
+      rulePageExternal: 'External plugin page',
+      ruleCollapsedYes: 'collapsed',
+      ruleCollapsedNo: 'expanded',
+      ruleAreaSidebar: 'Sidebar',
+      ruleAreaCenter: 'Conversation',
+      ruleAreaRightbar: 'Right column',
+      ruleAreaSettings: 'Settings',
+      ruleActionHide: 'Hide unit',
+      ruleActionArrange: 'Arrange container',
+      ruleColumns: 'Columns',
+      ruleEmptyValue: 'Nothing to pick right now.',
       rightbarPanel: 'Right column',
       rightbarPanelHint: 'The tab strip and content area inside the right column; width is set in region structure.',
       rightbarPartsHint: 'Right column parts: the tab strip and content can each be hidden, and the tab strip can move below the content.',
@@ -696,6 +768,10 @@ window.__ModuleLoader__.load({
       arrange: {},
       // 区域搬移：源单元 id → { to: 目标容器 id, place: 'start' | 'end' }
       relocate: {},
+      // 联动规则：条件（页面 / 折叠 / 区域在场 / 单元在场）→ 动作（隐藏 / 容器排列）
+      rules: [],
+      // 联动同步：面板导航与插件来源写同一份顺序/显隐
+      sync: { panellistOrder: false, panellistHidden: false },
     };
 
     /**
@@ -720,6 +796,12 @@ window.__ModuleLoader__.load({
       { id: 'unit:set-options', labelKey: 'relocateDestSettingsOptions' },
     ];
     const RELOCATE_DESTINATION_IDS = new Set(RELOCATE_DESTINATIONS.map((item) => item.id));
+
+    /** 联动规则的枚举：条件与动作都只认这几类，配置里出现的其它值一律丢掉。 */
+    const RULE_CONDITION_KINDS = new Set(['page', 'collapsed', 'area', 'present']);
+    const RULE_ACTION_KINDS = new Set(['hide', 'arrange']);
+    const RULE_PAGE_VALUES = new Set(['any', 'conversation', 'plugins', 'pluginDetail', 'settings', 'external']);
+    const RULE_AREA_VALUES = new Set(['sidebar', 'center', 'rightbar', 'settings']);
 
     const ABSENT_TARGETS = {
       ok: false,
@@ -920,6 +1002,51 @@ window.__ModuleLoader__.load({
         relocate[sourceId] = { to, place: value.place === 'end' ? 'end' : 'start' };
       }
       out.relocate = relocate;
+      // 联动规则：条件与动作都按枚举收束，非法规则直接丢弃（而不是留一条永远不生效的）
+      const rulesRaw = Array.isArray(raw.rules) ? raw.rules : [];
+      const rules = [];
+      for (const item of rulesRaw) {
+        if (rules.length >= 12) break;
+        if (item === null || typeof item !== 'object') continue;
+        const when = item.when !== null && typeof item.when === 'object' ? item.when : null;
+        const then = item.then !== null && typeof item.then === 'object' ? item.then : null;
+        if (when === null || then === null) continue;
+        if (!RULE_CONDITION_KINDS.has(when.kind) || !RULE_ACTION_KINDS.has(then.kind)) continue;
+        let whenValue;
+        if (when.kind === 'collapsed') whenValue = when.value === true;
+        else if (when.kind === 'page') {
+          if (!RULE_PAGE_VALUES.has(when.value)) continue;
+          whenValue = when.value;
+        } else if (when.kind === 'area') {
+          if (!RULE_AREA_VALUES.has(when.value)) continue;
+          whenValue = when.value;
+        } else {
+          if (typeof when.value !== 'string' || when.value.length === 0 || when.value.length > 160) continue;
+          whenValue = when.value;
+        }
+        const rule = {
+          id: typeof item.id === 'string' && item.id.length > 0 && item.id.length <= 40 ? item.id : `r${rules.length + 1}`,
+          when: { kind: when.kind, value: whenValue },
+          then: null,
+        };
+        if (then.kind === 'hide') {
+          if (typeof then.target !== 'string' || then.target.length === 0 || then.target.length > 160) continue;
+          rule.then = { kind: 'hide', target: then.target };
+        } else {
+          const columns = Math.round(Number(then.columns));
+          if (typeof then.container !== 'string' || then.container.length === 0 || then.container.length > 120) continue;
+          if (!Number.isFinite(columns) || columns < 2 || columns > 3) continue;
+          rule.then = { kind: 'arrange', container: then.container, columns };
+        }
+        rules.push(rule);
+      }
+      out.rules = rules;
+      // 联动同步：两个布尔开关
+      const syncRaw = raw.sync !== null && typeof raw.sync === 'object' ? raw.sync : {};
+      out.sync = {
+        panellistOrder: syncRaw.panellistOrder === true,
+        panellistHidden: syncRaw.panellistHidden === true,
+      };
       return out;
     }
 
@@ -2672,12 +2799,13 @@ window.__ModuleLoader__.load({
     }
 
     /** 按当前配置与识别结果同步投影：新增、变更、不再成立的搬移都在这里收敛。 */
-    function applyRelocations() {
-      if (snapshot.config.enabled !== true || Object.keys(snapshot.config.relocate ?? {}).length === 0) {
+    function applyRelocations(plan) {
+      const relocate = plan !== undefined ? plan.relocate : currentPlan().relocate;
+      if (snapshot.config.enabled !== true || Object.keys(relocate ?? {}).length === 0) {
         if (projection.entries.size > 0) projectionClear();
         return;
       }
-      const list = relocateActiveList(snapshot.targets, snapshot.config);
+      const list = relocateActiveList(snapshot.targets, { relocate });
       const next = new Map();
       for (const item of list) {
         const existing = projection.entries.get(item.sourceId);
@@ -2693,6 +2821,130 @@ window.__ModuleLoader__.load({
       }
       projection.entries = next;
       ensureProjectionLoop();
+    }
+
+    /* ============================== 联动（条件规则 + 配置同步） ============================== */
+    /**
+     * 联动不新增运行时机制，只是把已有能力按条件叠加：
+     * 条件读界面状态（页面 / 折叠 / 区域在场 / 单元在场），动作复用隐藏与容器排列，
+     * 通过 computePlan 合成「基础配置 + 命中规则的叠加层」，样式与投影都只认这份 plan。
+     */
+    function pageKindOf(targets) {
+      if (areaLive(targets, 'settings')) return 'settings';
+      if (areaLive(targets, 'center')) return 'conversation';
+      if (document.querySelector('[data-plugin-detail]') !== null) return 'pluginDetail';
+      if ((targets.external ?? null) !== null) return 'external';
+      return 'plugins';
+    }
+
+    function sidebarCollapsedNow() {
+      const frame = document.querySelector('[data-dshl-frame]');
+      return frame !== null && frame.hasAttribute('data-sidebar-collapsed');
+    }
+
+    /** 单元在场：侧栏块看 block 表，拆解单元看 target 表，槽位条目看注册表里的渲染状态。 */
+    function unitPresent(targets, key) {
+      if (typeof key !== 'string' || key.length === 0) return false;
+      if (key.startsWith('block:')) return (targets.blocks?.[key.slice(6)] ?? null) !== null;
+      if (key.startsWith('unit:')) return (targets.units?.[key.slice(5)] ?? []).length > 0;
+      const sources = targets.slotSources ?? null;
+      if (sources === null) return false;
+      for (const group of sources.graph) {
+        if (group.items.some((item) => item.entryKey === key && item.rendered)) return true;
+      }
+      return false;
+    }
+
+    function ruleMatches(when, targets) {
+      if (when.kind === 'page') return when.value === 'any' || pageKindOf(targets) === when.value;
+      if (when.kind === 'collapsed') return sidebarCollapsedNow() === when.value;
+      if (when.kind === 'area') return areaLive(targets, when.value);
+      if (when.kind === 'present') return unitPresent(targets, when.value);
+      return false;
+    }
+
+    /** 基础配置 + 命中规则的叠加层；matched 记录命中的规则 id 供卡片显示状态。 */
+    function computePlan(targets, config) {
+      const plan = {
+        hideKeys: new Set(),
+        arrange: { ...(config.arrange ?? {}) },
+        relocate: { ...(config.relocate ?? {}) },
+        matched: new Set(),
+      };
+      for (const rule of config.rules ?? []) {
+        if (!ruleMatches(rule.when, targets)) continue;
+        plan.matched.add(rule.id);
+        if (rule.then.kind === 'hide') plan.hideKeys.add(rule.then.target);
+        else {
+          const base = plan.arrange[rule.then.container];
+          plan.arrange[rule.then.container] = { columns: rule.then.columns, gap: base?.gap ?? 8, compact: base?.compact === true };
+        }
+      }
+      return plan;
+    }
+
+    /** plan 跟随 targets / config 的引用变化缓存：同一轮识别里样式与投影共用一份。 */
+    let planCache = { targets: null, config: null, value: null };
+    function currentPlan() {
+      if (planCache.targets === snapshot.targets && planCache.config === snapshot.config) return planCache.value;
+      const value = computePlan(snapshot.targets, snapshot.config);
+      planCache = { targets: snapshot.targets, config: snapshot.config, value };
+      return value;
+    }
+
+    /**
+     * 面板导航行与插件来源条目是同一排图标：从 DOM 里取两侧的一一对应（label ↔ 条目键），
+     * 开启同步后无论在哪一侧排序/隐藏，都把另一侧的配置写一致。
+     */
+    function panellistLinks(targets) {
+      const sources = targets.slotSources ?? null;
+      const out = [];
+      if (sources === null) return out;
+      const group = sources.graph.find((item) => item.slot === 'sidebar.panellist');
+      if (group === undefined) return out;
+      for (const item of group.items) {
+        if (!item.rendered || item.tops.length !== 1) continue;
+        const row = item.tops[0];
+        const label = row.getAttribute('data-dshl-panel') ?? row.getAttribute('aria-label') ?? '';
+        if (label === '') continue;
+        out.push({ key: item.entryKey, label });
+      }
+      return out;
+    }
+
+    function syncSlotsFromPanelOrder(draft, links) {
+      for (const link of links) delete draft.slots.order[link.key];
+      for (const link of links) {
+        const at = draft.sidebar.panelOrder.indexOf(link.label);
+        if (at >= 0) draft.slots.order[link.key] = at;
+      }
+    }
+
+    function syncPanelFromSlots(draft, links) {
+      const ordered = links
+        .filter((link) => Object.hasOwn(draft.slots.order, link.key))
+        .sort((left, right) => draft.slots.order[left.key] - draft.slots.order[right.key]);
+      if (ordered.length === 0) return;
+      const rest = draft.sidebar.panelOrder.filter((label) => !ordered.some((link) => link.label === label));
+      draft.sidebar.panelOrder = [...ordered.map((link) => link.label), ...rest];
+    }
+
+    function syncSlotsHidden(draft, links, label, hidden) {
+      const link = links.find((item) => item.label === label);
+      if (link === undefined) return;
+      const set = new Set(draft.slots.hide);
+      if (hidden) set.add(link.key);
+      else set.delete(link.key);
+      draft.slots.hide = [...set];
+    }
+
+    function syncPanelsHidden(draft, links, entryKey, hidden) {
+      const link = links.find((item) => item.key === entryKey);
+      if (link === undefined) return;
+      const set = new Set(draft.sidebar.panelHidden);
+      if (hidden) set.add(link.label);
+      else set.delete(link.label);
+      draft.sidebar.panelHidden = [...set];
     }
 
     /**
@@ -2869,7 +3121,8 @@ window.__ModuleLoader__.load({
       annotate(targets);
       annotateSlotEntries();
       setTargets(targets);
-      // 识别结果可能没变（签名相同、不重绘），但流式内容仍可能换掉节点，投影每轮都同步一次
+      // 识别结果可能没变（签名相同、不重绘），但联动条件可能变了（页面、折叠、条目在场），样式与投影每轮重算一次
+      applyDynamicCss();
       applyRelocations();
       return targets;
     }
@@ -3048,8 +3301,9 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       return width >= 80 ? Math.round(width) : 188;
     }
 
-    function buildDynamicCss(config) {
+    function buildDynamicCss(config, plan) {
       if (!config.enabled) return '';
+      const effective = plan !== undefined ? plan : { arrange: config.arrange ?? {}, hideKeys: new Set() };
       const col = config.columns;
       const lines = [];
       const order = col.order;
@@ -3122,7 +3376,7 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
         lines.push(`[${SLOT_ENTRY_ATTR}="${cssAttr(key)}"] { order: ${Math.round(order)} !important; }`);
       }
       // 槽位编排：容器改网格排列。只对配置过的容器生效，配置清空即恢复宿主布局
-      for (const [containerId, spec] of Object.entries(config.arrange ?? {})) {
+      for (const [containerId, spec] of Object.entries(effective.arrange ?? {})) {
         const selector = `[data-dshl-arrange="${cssAttr(containerId)}"]`;
         lines.push(`${selector} { display: grid !important; grid-template-columns: repeat(${Math.round(spec.columns)}, minmax(0, 1fr)) !important; gap: ${Math.round(spec.gap)}px !important; align-content: start !important; }`);
         lines.push(`${selector} > * { min-width: 0 !important; }`);
@@ -3131,6 +3385,12 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
           lines.push(`${selector} > * > *:nth-child(2) { display: none !important; }`);
           lines.push(`${selector} > * { justify-content: center !important; }`);
         }
+      }
+      // 联动规则的隐藏动作：叠加在基础配置之上，规则不命中就不生成
+      for (const key of effective.hideKeys ?? []) {
+        if (key.startsWith('unit:')) lines.push(`[data-dshl-unit="${cssAttr(key.slice(5))}"] { display: none !important; }`);
+        else if (key.startsWith('block:')) lines.push(`[data-dshl-block="${cssAttr(key.slice(6))}"] { display: none !important; }`);
+        else lines.push(`[${SLOT_ENTRY_ATTR}="${cssAttr(key)}"] { display: none !important; }`);
       }
       if (config.center.contentWidth !== null) {
         const width = Math.round(config.center.contentWidth);
@@ -3238,7 +3498,8 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
 
     function applyDynamicCss() {
       if (dynamicStyle === null) return;
-      const next = buildDynamicCss(snapshot.config);
+      const plan = currentPlan();
+      const next = buildDynamicCss(snapshot.config, plan);
       if (dynamicStyle.textContent !== next) dynamicStyle.textContent = next;
     }
 
@@ -3673,7 +3934,7 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       { id: 'structure', labelKey: 'tabStructure', hintKey: 'tabStructureHint', cards: ['structure'] },
       { id: 'sidebar', labelKey: 'tabSidebar', hintKey: 'tabSidebarHint', cards: ['blocks', 'panels'] },
       { id: 'areas', labelKey: 'tabAreas', hintKey: 'tabAreasHint', cards: ['conversation', 'rightbar', 'settings'] },
-      { id: 'arrange', labelKey: 'tabArrange', hintKey: 'tabArrangeHint', cards: ['arrange', 'relocate'] },
+      { id: 'arrange', labelKey: 'tabArrange', hintKey: 'tabArrangeHint', cards: ['arrange', 'relocate', 'sync', 'rules'] },
       { id: 'recognition', labelKey: 'tabRecognition', hintKey: 'tabRecognitionHint', cards: ['surfaces', 'coverage', 'pluginSources'] },
     ];
     const UI_STORE_KEY = 'dsh-layout/ui/v1';
@@ -3771,6 +4032,7 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       for (const label of config.sidebar.panelOrder) if (!labels.includes(label)) labels.push(label);
       for (const label of detected) if (!labels.includes(label)) labels.push(label);
       const items = labels.map((label) => ({ key: label, label }));
+      const links = panellistLinks(targets);
       return h(Card, { title: t('panels'), desc: t('panelsHint') },
         h('div', { className: 'dshl-listScroll' },
           h(SortableList, {
@@ -3781,6 +4043,7 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
               const [moved] = next.splice(from, 1);
               next.splice(to, 0, moved);
               draft.sidebar.panelOrder = next;
+              if (draft.sync.panellistOrder) syncSlotsFromPanelOrder(draft, links);
             }),
             renderLabel: (item) => item.label,
             renderTrailing: (item) => h(Switch, {
@@ -3791,6 +4054,7 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
                 if (on) hidden.delete(item.label);
                 else hidden.add(item.label);
                 draft.sidebar.panelHidden = [...hidden];
+                if (draft.sync.panellistHidden) syncSlotsHidden(draft, links, item.label, !on);
               }),
             }),
           })));
@@ -4212,17 +4476,20 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       const renderedCount = groups.reduce((sum, group) => sum + group.rendered, 0);
       const kindLabel = (kind) => t({ list: 'slotKindList', keyed: 'slotKindKeyed', single: 'slotKindSingle', chain: 'slotKindChain' }[kind] ?? 'slotKindSingle');
       const hidden = (key) => config.slots.hide.includes(key);
+      const links = panellistLinks(targets);
       const toggleHide = (key, hide) => updateConfig((draft) => {
         const set = new Set(draft.slots.hide);
         if (hide) set.add(key);
         else set.delete(key);
         draft.slots.hide = [...set];
+        if (draft.sync.panellistHidden && key.startsWith('sidebar.panellist::')) syncPanelsHidden(draft, links, key, hide);
       });
       const shift = (key, delta) => updateConfig((draft) => {
         const current = Object.hasOwn(draft.slots.order, key) ? draft.slots.order[key] : 0;
         const next = Math.min(50, Math.max(-50, current + delta));
         if (next === 0) delete draft.slots.order[key];
         else draft.slots.order[key] = next;
+        if (draft.sync.panellistOrder && key.startsWith('sidebar.panellist::')) syncPanelFromSlots(draft, links);
       });
       const lockText = (item) => {
         if (!item.rendered) return t('slotNotRendered');
@@ -4411,6 +4678,177 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
           })));
     }
 
+    /** 联动同步卡片：面板导航与插件来源写同一份顺序/显隐，避免两套配置互相覆盖。 */
+    function SyncCard({ config, targets, t }) {
+      const available = targets.slotSources !== null && targets.slotSources !== undefined;
+      const row = (key, labelKey, hintKey) => h('div', { className: 'dshl-row' },
+        h('span', { className: 'dshl-rowLabel', title: t(hintKey) }, t(labelKey)),
+        h(Switch, {
+          checked: config.sync[key],
+          label: t(labelKey),
+          onChange: (on) => updateConfig((draft) => { draft.sync[key] = on; }),
+        }));
+      return h(Card, { title: t('sync'), desc: t('syncHint') },
+        available ? h(React.Fragment, null,
+          row('panellistOrder', 'syncPanellistOrder', 'syncPanellistOrderHint'),
+          row('panellistHidden', 'syncPanellistHidden', 'syncPanellistHiddenHint'))
+          : h('p', { className: 'dshl-hint' }, t('syncUnavailable')));
+    }
+
+    /**
+     * 联动规则卡片：条件（页面 / 折叠 / 区域在场 / 单元在场）→ 动作（隐藏单元 / 容器排列）。
+     * 规则只在条件成立时叠加到基础配置之上，不修改基础配置本身。
+     */
+    function RulesCard({ config, targets, t }) {
+      const sources = relocateSources(targets);
+      const sourceOptions = sources.map((source) => ({ id: source.id, label: source.labelKey === null ? source.name : t(source.labelKey) }));
+      const containers = [];
+      for (const known of ARRANGE_KNOWN) containers.push({ id: known.id, label: t(known.labelKey) });
+      for (const entry of targets.arrange ?? []) {
+        if (!containers.some((item) => item.id === entry.id)) {
+          containers.push({ id: entry.id, label: entry.labelKey === undefined || entry.labelKey === null ? `${t('arrangeSlotPrefix')} ${entry.slot ?? entry.id}` : t(entry.labelKey) });
+        }
+      }
+      for (const id of Object.keys(config.arrange ?? {})) {
+        if (!containers.some((item) => item.id === id)) {
+          const known = ARRANGE_KNOWN.find((item) => item.id === id);
+          containers.push({ id, label: known === undefined ? id : t(known.labelKey) });
+        }
+      }
+      const valueOptions = (kind) => {
+        if (kind === 'page') return [
+          ['any', 'rulePageAny'],
+          ['conversation', 'rulePageConversation'],
+          ['plugins', 'rulePagePlugins'],
+          ['pluginDetail', 'rulePagePluginDetail'],
+          ['settings', 'rulePageSettings'],
+          ['external', 'rulePageExternal'],
+        ].map(([value, labelKey]) => ({ value, label: t(labelKey) }));
+        if (kind === 'collapsed') return [
+          { value: true, label: t('ruleCollapsedYes') },
+          { value: false, label: t('ruleCollapsedNo') },
+        ];
+        if (kind === 'area') return [
+          ['sidebar', 'ruleAreaSidebar'],
+          ['center', 'ruleAreaCenter'],
+          ['rightbar', 'ruleAreaRightbar'],
+          ['settings', 'ruleAreaSettings'],
+        ].map(([value, labelKey]) => ({ value, label: t(labelKey) }));
+        return sourceOptions.map((option) => ({ value: option.id, label: option.label }));
+      };
+      const [condKind, setCondKind] = React.useState('page');
+      const [condValue, setCondValue] = React.useState('settings');
+      const [actionKind, setActionKind] = React.useState('hide');
+      const [hideTarget, setHideTarget] = React.useState(sourceOptions[0]?.id ?? '');
+      const [container, setContainer] = React.useState(containers[0]?.id ?? 'panels');
+      const [columns, setColumns] = React.useState(2);
+      const conditions = valueOptions(condKind);
+      const condLabel = (rule) => {
+        const options = valueOptions(rule.when.kind);
+        const hit = options.find((option) => String(option.value) === String(rule.when.value));
+        const kindLabel = t({ page: 'ruleCondPage', collapsed: 'ruleCondCollapsed', area: 'ruleCondArea', present: 'ruleCondPresent' }[rule.when.kind] ?? 'ruleCondPage');
+        return `${kindLabel} = ${hit === undefined ? String(rule.when.value) : hit.label}`;
+      };
+      const actionLabel = (rule) => {
+        if (rule.then.kind === 'hide') {
+          const hit = sources.find((source) => source.id === rule.then.target);
+          const label = hit === undefined ? rule.then.target : (hit.labelKey === null ? hit.name : t(hit.labelKey));
+          return `${t('ruleActionHide')}：${label}`;
+        }
+        const hit = containers.find((item) => item.id === rule.then.container);
+        return `${t('ruleActionArrange')}：${hit === undefined ? rule.then.container : hit.label} · ${rule.then.columns} ${t('ruleColumns')}`;
+      };
+      const plan = computePlan(targets, config);
+      const add = () => {
+        if (actionKind === 'hide' ? hideTarget === '' : container === '') return;
+        const rule = {
+          id: `r${Date.now().toString(36)}`,
+          when: { kind: condKind, value: condValue },
+          then: actionKind === 'hide'
+            ? { kind: 'hide', target: hideTarget }
+            : { kind: 'arrange', container, columns },
+        };
+        updateConfig((draft) => { draft.rules = [...draft.rules, rule].slice(0, 12); });
+      };
+      const field = (label, children) => h('label', { className: 'dshl-relocateField' }, label, children);
+      return h(Card, { title: t('rules'), desc: t('rulesHint') },
+        h('div', { className: 'dshl-relocateForm' },
+          field(t('ruleWhen'), h('select', {
+            className: 'dshl-select',
+            value: condKind,
+            onChange: (event) => {
+              const kind = event.target.value;
+              setCondKind(kind);
+              const options = valueOptions(kind);
+              setCondValue(options[0]?.value ?? '');
+            },
+          }, ...[
+            ['page', 'ruleCondPage'],
+            ['collapsed', 'ruleCondCollapsed'],
+            ['area', 'ruleCondArea'],
+            ['present', 'ruleCondPresent'],
+          ].map(([kind, labelKey]) => h('option', { key: kind, value: kind }, t(labelKey))))),
+          field('=', h('select', {
+            className: 'dshl-select',
+            value: String(condValue),
+            onChange: (event) => {
+              const raw = event.target.value;
+              setCondValue(condKind === 'collapsed' ? raw === 'true' : raw);
+            },
+          }, conditions.length === 0
+            ? h('option', { value: '' }, t('ruleEmptyValue'))
+            : conditions.map((option) => h('option', { key: String(option.value), value: String(option.value) }, option.label)))),
+          field(t('ruleThen'), h('select', {
+            className: 'dshl-select',
+            value: actionKind,
+            onChange: (event) => setActionKind(event.target.value),
+          },
+          h('option', { value: 'hide' }, t('ruleActionHide')),
+          h('option', { value: 'arrange' }, t('ruleActionArrange')))),
+          actionKind === 'hide'
+            ? field(t('ruleActionHide'), h('select', {
+              className: 'dshl-select',
+              value: hideTarget,
+              onChange: (event) => setHideTarget(event.target.value),
+            }, sourceOptions.length === 0
+              ? h('option', { value: '' }, t('ruleEmptyValue'))
+              : sourceOptions.map((option) => h('option', { key: option.id, value: option.id }, option.label))))
+            : h(React.Fragment, null,
+              field(t('ruleActionArrange'), h('select', {
+                className: 'dshl-select',
+                value: container,
+                onChange: (event) => setContainer(event.target.value),
+              }, containers.length === 0
+                ? h('option', { value: '' }, t('ruleEmptyValue'))
+                : containers.map((option) => h('option', { key: option.id, value: option.id }, option.label)))),
+              field(t('ruleColumns'), h('select', {
+                className: 'dshl-select',
+                value: String(columns),
+                onChange: (event) => setColumns(Number(event.target.value)),
+              },
+              h('option', { value: '2' }, '2'),
+              h('option', { value: '3' }, '3')))),
+          h('button', {
+            type: 'button',
+            className: 'dshl-btn',
+            'data-primary': 'true',
+            disabled: actionKind === 'hide' ? hideTarget === '' : container === '',
+            onClick: add,
+          }, t('ruleAdd'))),
+        (config.rules ?? []).length === 0
+          ? h('p', { className: 'dshl-hint' }, t('ruleNone'))
+          : h('div', { className: 'dshl-list' }, ...(config.rules ?? []).map((rule) => h('div', { key: rule.id, className: 'dshl-relocateRow' },
+            h('span', { className: 'dshl-relocateState', 'data-active': plan.matched.has(rule.id) ? 'true' : undefined }, plan.matched.has(rule.id) ? t('ruleHit') : t('ruleMiss')),
+            h('span', { className: 'dshl-itemLabel', title: rule.id }, `${condLabel(rule)} → ${actionLabel(rule)}`),
+            h('button', {
+              type: 'button',
+              className: 'dshl-iconBtn',
+              title: t('ruleRemove'),
+              'aria-label': t('ruleRemove'),
+              onClick: () => updateConfig((draft) => { draft.rules = draft.rules.filter((item) => item.id !== rule.id); }),
+            }, icon(ICON_CLOSE, 12))))));
+    }
+
     /**
      * 会话区卡片：内容宽度 + 四组拆解（基础三块与换序、会话头内部、消息区、输入区）。
      * 拆解项的开关由 PART_UNITS 声明表生成，卡片只负责摆位置。
@@ -4490,6 +4928,8 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
         pluginSources: () => h(PluginSourcesCard, { config, targets, t }),
         arrange: () => h(ArrangeCard, { config, targets, t }),
         relocate: () => h(RelocateCard, { config, targets, t }),
+        sync: () => h(SyncCard, { config, targets, t }),
+        rules: () => h(RulesCard, { config, targets, t }),
         conversation: () => h(ConversationCard, { config, targets, t }),
         rightbar: () => h(RightbarCard, { config, targets, t }),
         settings: () => h(SettingsCard, { config, targets, t }),
