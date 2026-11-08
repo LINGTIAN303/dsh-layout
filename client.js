@@ -59,10 +59,14 @@ window.__ModuleLoader__.load({
       partComposer: '输入区',
       partHeaderBottom: '会话头放到正文下方',
       partComposerTop: '输入区提到消息区上方',
-      headerPartsHint: '会话头拆解：标题行与视图标签行可各自隐藏。',
+      headerPartsHint: '会话头拆解：标题行、视图标签行，以及标题行里的会话名与操作组可各自隐藏。',
       headerPartsMissing: '未识别会话头内部结构，拆解项暂不可用。',
       partHeaderTitle: '会话头 · 标题行',
       partHeaderTabs: '会话头 · 视图标签行',
+      partHeaderCrumbs: '会话头 · 会话名',
+      partHeaderActions: '会话头 · 操作组',
+      composerPartsHint: '输入区拆解：输入框上方的任务面板可单独隐藏。',
+      partTodoPanel: '输入区 · 任务面板',
       rightbarPanel: '右栏',
       rightbarPanelHint: '右栏内部的标签栏与内容区；宽度在「区域结构」里调。',
       rightbarPartsHint: '右栏拆解：标签栏与内容区可各自隐藏，标签栏也可放到内容区下方。',
@@ -191,10 +195,14 @@ window.__ModuleLoader__.load({
       partComposer: 'Composer',
       partHeaderBottom: 'Header below the body',
       partComposerTop: 'Composer above the messages',
-      headerPartsHint: 'Session header parts: the title row and the view tabs row can each be hidden.',
+      headerPartsHint: 'Session header parts: the title row, the view tabs row, and the title row\'s session name and action group can each be hidden.',
       headerPartsMissing: 'The session header internals are not recognized; the split controls are unavailable.',
       partHeaderTitle: 'Header · title row',
       partHeaderTabs: 'Header · view tabs row',
+      partHeaderCrumbs: 'Header · session name',
+      partHeaderActions: 'Header · action group',
+      composerPartsHint: 'Composer parts: the task panel above the input can be hidden separately.',
+      partTodoPanel: 'Composer · task panel',
       rightbarPanel: 'Right column',
       rightbarPanelHint: 'The tab strip and content area inside the right column; width is set in region structure.',
       rightbarPartsHint: 'Right column parts: the tab strip and content can each be hidden, and the tab strip can move below the content.',
@@ -300,7 +308,7 @@ window.__ModuleLoader__.load({
       },
       center: {
         contentWidth: null,
-        parts: { hideHeader: false, hideMessages: false, hideComposer: false, headerBottom: false, composerTop: false, hideTitleRow: false, hideViewTabs: false },
+        parts: { hideHeader: false, hideMessages: false, hideComposer: false, headerBottom: false, composerTop: false, hideTitleRow: false, hideViewTabs: false, hideTitleCrumbs: false, hideHeaderActions: false, hideTodoPanel: false },
       },
       rightbar: {
         parts: { hideTabs: false, hideContent: false, tabsBottom: false },
@@ -326,6 +334,7 @@ window.__ModuleLoader__.load({
       conversation: null,
       convParts: null,
       headerParts: null,
+      composerParts: null,
       settings: null,
       surfaces: [],
       anomalies: [],
@@ -390,7 +399,7 @@ window.__ModuleLoader__.load({
       const parts = center.parts && typeof center.parts === 'object' ? center.parts : {};
       out.center = {
         contentWidth: center.contentWidth == null ? null : clampInt(center.contentWidth, 520, 1600, null),
-        // 会话区拆解：三块独立显隐 + 两个位置开关（会话头置底、输入区置顶）+ 会话头内部两行
+        // 会话区拆解：三块独立显隐 + 两个位置开关（会话头置底、输入区置顶）+ 会话头内部行/段 + 输入区任务面板
         parts: {
           hideHeader: parts.hideHeader === true,
           hideMessages: parts.hideMessages === true,
@@ -399,6 +408,9 @@ window.__ModuleLoader__.load({
           composerTop: parts.composerTop === true,
           hideTitleRow: parts.hideTitleRow === true,
           hideViewTabs: parts.hideViewTabs === true,
+          hideTitleCrumbs: parts.hideTitleCrumbs === true,
+          hideHeaderActions: parts.hideHeaderActions === true,
+          hideTodoPanel: parts.hideTodoPanel === true,
         },
       };
       const settings = raw.settings && typeof raw.settings === 'object' ? raw.settings : {};
@@ -590,6 +602,16 @@ window.__ModuleLoader__.load({
     /* ============================== DOM 识别 ============================== */
     function first(root, selector) {
       return root === null || root === undefined ? null : root.querySelector(selector);
+    }
+
+    /** 从锚点向上走到容器的直接子级；中间多一层包裹也能认出来（拆解单元定位的统一做法）。 */
+    function branchOf(container, selector) {
+      if (container === null || container === undefined) return null;
+      const target = container.querySelector(selector);
+      if (target === null) return null;
+      let cur = target;
+      while (cur !== null && cur.parentElement !== container) cur = cur.parentElement;
+      return cur !== null && cur.parentElement === container ? cur : null;
     }
 
     function classifySidebarBlocks(root) {
@@ -1045,14 +1067,6 @@ window.__ModuleLoader__.load({
      * 「直接子级」由锚点向上找到块的子级得到，因此中间多一层包裹也不影响识别。
      */
     function readSidebarParts(blocks) {
-      const branchOf = (block, selector) => {
-        if (block === null || block === undefined) return null;
-        const target = block.querySelector(selector);
-        if (target === null) return null;
-        let cur = target;
-        while (cur !== null && cur.parentElement !== block) cur = cur.parentElement;
-        return cur !== null && cur.parentElement === block ? cur : null;
-      };
       const brand = blocks.brand ?? null;
       const footer = blocks.footer ?? null;
       const identity = branchOf(brand, '[data-slot="sidebar.brand.mark"]');
@@ -1067,6 +1081,8 @@ window.__ModuleLoader__.load({
      * 会话头拆解：标题行（面包屑 + 会话操作 + 工具 + 角标）与视图标签行。
      * 两行都是 [data-slot="conversation.session.header"]（display:contents）的元素子级，
      * 视图标签行靠通用 ARIA 标记 role=tablist / role=tab 认，其余那一行就是标题行。
+     * 标题行内部再拆「会话名（面包屑）」与「操作组」：两者同属标题行里的 titleCluster，
+     * 靠 conversation.session.header.lineage / .actions 两个槽位区分。
      */
     function readHeaderParts(convParts) {
       const header = convParts === null || convParts === undefined ? null : convParts.headerItem;
@@ -1079,7 +1095,24 @@ window.__ModuleLoader__.load({
         ?? rows.find((node) => node !== viewTabs)
         ?? null;
       if (titleRow === null && viewTabs === null) return null;
-      return { header, titleRow, viewTabs };
+      // 标题行内部的「会话名 / 操作组」：都在 titleCluster 这个直接子级里
+      const cluster = titleRow === null ? null : [...titleRow.children].find((node) => node.querySelector('[data-slot="conversation.session.header.actions"]') !== null) ?? null;
+      const crumbs = cluster === null ? null : branchOf(cluster, '[data-slot="conversation.session.header.lineage"]');
+      const headerActions = cluster === null ? null : branchOf(cluster, '[data-slot="conversation.session.header.actions"]');
+      return { header, titleRow, viewTabs, titleCluster: cluster, crumbs, headerActions };
+    }
+
+    /**
+     * 输入区拆解：输入框上方的任务面板（待办清单）。
+     * 面板用宿主写死的 data-testid="todo-panel" 认；没有待办时这块本来就不渲染，
+     * 此时返回 null，样式中也没有可隐藏的对象。
+     */
+    function readComposerParts(convParts) {
+      const composer = convParts === null || convParts === undefined ? null : convParts.composerItem;
+      if (composer === null) return null;
+      const todo = composer.querySelector('[data-testid="todo-panel"]');
+      if (todo === null) return null;
+      return { composer, todo };
     }
 
     function readTargets() {
@@ -1120,6 +1153,7 @@ window.__ModuleLoader__.load({
         try { window.localStorage.setItem(CONV_PARTS_KEY, '1'); } catch (error) { console.warn('[dsh-layout] 保存会话区结构标记失败', error); }
       }
       const headerParts = readHeaderParts(convParts);
+      const composerParts = readComposerParts(convParts);
       const settings = document.querySelector('[data-shortcut-modal="settings"]');
       const rightbarParts = readRightbarParts();
       if (rightbarParts !== null && !rightbarPartsSeen) {
@@ -1132,7 +1166,7 @@ window.__ModuleLoader__.load({
         markAuxPartsSeen('settings');
       }
       const ok = Boolean(sidebarCol && centerCol && rightbarCol);
-      const targets = { ok, frame, regions, sidebarRoot, blocks, sidebarParts, panels, conversation, convParts, headerParts, rightbarParts, settingsParts, settings, surfaces: [], anomalies: [] };
+      const targets = { ok, frame, regions, sidebarRoot, blocks, sidebarParts, panels, conversation, convParts, headerParts, composerParts, rightbarParts, settingsParts, settings, surfaces: [], anomalies: [] };
       targets.surfaces = readSurfaces(targets);
       targets.anomalies = Object.values(surfaceAnomalies).sort((a, b) => b.lastSeenAt - a.lastSeenAt);
       return targets;
@@ -1188,7 +1222,11 @@ window.__ModuleLoader__.load({
       if (hp !== null && hp !== undefined) {
         mark(hp.titleRow, 'data-dshl-hpart', 'title');
         mark(hp.viewTabs, 'data-dshl-hpart', 'tabs');
+        mark(hp.crumbs, 'data-dshl-hpart', 'crumbs');
+        mark(hp.headerActions, 'data-dshl-hpart', 'actions');
       }
+      const cp = targets.composerParts;
+      if (cp !== null && cp !== undefined) mark(cp.todo, 'data-dshl-cpart', 'todo');
     }
 
     function refresh() {
@@ -1404,7 +1442,7 @@ window.__ModuleLoader__.load({
         // 输入区默认是「粘在底部」的 sticky；提到上方后必须改成粘顶，否则它会跟着内容滚走、跑到屏幕外
         lines.push('[data-dshl-part="composer"] { position: sticky !important; top: 0 !important; bottom: auto !important; }');
       }
-      // 会话头内部拆解：标题行 / 视图标签行。
+      // 会话头内部拆解：标题行 / 视图标签行 / 标题行里的会话名与操作组。
       // 宿主给会话头写死了两条网格行（32px / 35px）和 min-height；只给一行 display:none 会留下空轨道，
       // 高度不变，必须把行高交还 auto 并撤掉 min-height。
       if (parts.hideTitleRow && parts.hideViewTabs) {
@@ -1414,6 +1452,10 @@ window.__ModuleLoader__.load({
         if (parts.hideViewTabs) lines.push('[data-dshl-hpart="tabs"] { display: none !important; }');
         lines.push('[data-dshl-part="header"] { grid-template-rows: auto !important; min-height: auto !important; }');
       }
+      if (parts.hideTitleCrumbs) lines.push('[data-dshl-hpart="crumbs"] { display: none !important; }');
+      if (parts.hideHeaderActions) lines.push('[data-dshl-hpart="actions"] { display: none !important; }');
+      // 输入区拆解：任务面板（待办清单）独立隐藏
+      if (parts.hideTodoPanel) lines.push('[data-dshl-cpart="todo"] { display: none !important; }');
       // 右栏拆解：标签栏 / 内容区（同在 tabHost 这个 flex column 里）
       const rbParts = config.rightbar.parts;
       if (rbParts.hideTabs) lines.push('[data-dshl-rbpart="tabs"] { display: none !important; }');
@@ -2126,9 +2168,9 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 会话区卡片：内容宽度 + 三块拆解 + 会话头内部两行。
+     * 会话区卡片：内容宽度 + 三块拆解 + 会话头内部行/段 + 输入区任务面板。
      * 拆解提供「独立显隐」与「位置互换」：会话头可以与正文换前后，输入区可以提到消息区上方。
-     * 每块都是宿主真实参与 flex 布局的元素，改动只走 CSS，不改 React 树。
+     * 每块都是宿主真实参与布局的元素，改动只走 CSS，不改 React 树。
      */
     function ConversationCard({ config, t }) {
       const parts = config.center.parts;
@@ -2173,7 +2215,12 @@ window.__ModuleLoader__.load({
         h('div', { className: 'dshl-divider' }),
         h('div', { className: 'dshl-cardDesc' }, detected ? t('headerPartsHint') : t('headerPartsMissing')),
         detected ? toggle('hideTitleRow', t('partHeaderTitle')) : null,
-        detected ? toggle('hideViewTabs', t('partHeaderTabs')) : null);
+        detected ? toggle('hideViewTabs', t('partHeaderTabs')) : null,
+        detected ? toggle('hideTitleCrumbs', t('partHeaderCrumbs')) : null,
+        detected ? toggle('hideHeaderActions', t('partHeaderActions')) : null,
+        h('div', { className: 'dshl-divider' }),
+        detected ? h('div', { className: 'dshl-cardDesc' }, t('composerPartsHint')) : null,
+        detected ? toggle('hideTodoPanel', t('partTodoPanel')) : null);
     }
 
     /** 右栏卡片：宽度 + 标签栏/内容区拆解。 */

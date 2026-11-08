@@ -83,6 +83,8 @@ flowchart LR
 - 可做的操作：三块**独立显隐**；会话头与正文**换前后**（`convroot` 上设 `order`）；输入区**提到消息区上方**（`convscroll` 上设 `order:-1`）。
 - 提到上方时必须同时把输入区的 `position:sticky; bottom:0` 改成 `sticky; top:0`，否则它会跟着滚动内容一起跑出可视区——这是实测踩到的坑。
 - 会话头内部再拆两行：**标题行**（面包屑 + 会话操作 + 工具 + 角标）与**视图标签行**（对话 / 轨迹等视图切换）。两行都是 `conversation.session.header` 槽位的元素子级；视图标签行按通用 ARIA 标记 `role=tablist` / `role=tab` 认，剩下那行就是标题行——不依赖 CSS 模块类名，宿主加视图也不受影响。
+- 标题行内部再拆两段：**会话名**（面包屑，`conversation.session.header.lineage`）与**操作组**（智能体团队 / 权限等，`conversation.session.header.actions`）。两者同属标题行里的 titleCluster，按槽位各自向上取直接子级；隐藏会话名后操作组左移到原会话名位置，标题行高度不变。
+- 输入区内部再拆一段：**任务面板**（待办清单，宿主写死的 `data-testid="todo-panel"`）可单独隐藏。它只在存在待办时渲染，没有待办就没有可隐藏对象；实测隐藏后输入区整体 170 → 128。
 - 排版坑：会话头是 grid，宿主写死了 `grid-template-rows: 32px 35px` 与 `min-height: 76px`。只给一行 `display:none` 高度不会变，必须同时把行高交还 `auto` 并撤掉 `min-height`（实测隐藏标题行 78→46，隐藏标签行 78→43）；两行都隐藏时会话头整体 `display:none`。
 - 拆解结果全部是 CSS `order` / `display` 覆盖，不改 React 树、不移动 DOM，宿主自身的滚动与粘贴行为不受影响。
 
