@@ -165,6 +165,10 @@ window.__ModuleLoader__.load({
       pluginSourcesCount: (slots, items, rendered) => `槽位 ${slots} · 条目 ${items} · 已渲染 ${rendered}`,
       slotShowAll: '显示全部槽位',
       slotNothingRendered: '当前页面还没有已渲染的插件条目。',
+      slotSearch: '搜索槽位、条目、注册者',
+      slotSearchEmpty: '没有匹配的槽位或条目。',
+      slotSearchClear: '清空搜索',
+      slotDragHint: '拖动行可调整同槽位内的顺序；箭头按钮每次移动一格。',
       slotNotRendered: '未渲染',
       slotEntryOnly: '入口 · 只排序',
       slotPageOnly: '页面主体 · 只读',
@@ -513,6 +517,10 @@ window.__ModuleLoader__.load({
       pluginSourcesCount: (slots, items, rendered) => `${slots} slots · ${items} items · ${rendered} rendered`,
       slotShowAll: 'Show all slots',
       slotNothingRendered: 'No plugin entry is rendered on this page yet.',
+      slotSearch: 'Search slots, entries, registrants',
+      slotSearchEmpty: 'No slot or entry matches.',
+      slotSearchClear: 'Clear search',
+      slotDragHint: 'Drag a row to reorder within its slot; the arrows move one step at a time.',
       slotNotRendered: 'not rendered',
       slotEntryOnly: 'entry · reorder only',
       slotPageOnly: 'page body · read-only',
@@ -3649,6 +3657,11 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
 .dshl-storageMenuItem { display:flex; align-items:center; gap:8px; width:100%; padding:8px 12px; border:none; background:transparent; color:var(--dsw-alias-label-primary); font:inherit; font-size:13px; line-height:20px; text-align:left; border-radius:var(--dsw-radius-md, 8px); cursor:pointer; }
 .dshl-storageMenuItem:hover { background:var(--dsw-alias-interactive-bg-hover); }
 .dshl-storageMenuItem[data-current="true"] { color:var(--dsw-alias-brand-primary); }
+.dshl-search { display:flex; align-items:center; gap:4px; }
+.dshl-input { flex:1; min-width:0; height:28px; padding:0 8px; border-radius:8px; border:1px solid var(--dsw-alias-border-l1); background:var(--dsw-alias-bg-layer-2); color:var(--dsw-alias-label-primary); font:inherit; font-size:12px; }
+.dshl-input::placeholder { color:var(--dsw-alias-label-secondary); }
+.dshl-input:focus { outline:none; border-color:var(--dsw-alias-brand-primary); }
+.dshl-input::-webkit-search-cancel-button { display:none; }
 .dshl-moreDivider { flex:none; height:1px; margin:4px 8px; background:var(--dsw-alias-border-l1); }
 .dshl-grantFallback { display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 10px; border-radius:8px; border:1px solid var(--dsw-alias-border-l1); background:transparent; color:var(--dsw-alias-label-secondary); font:inherit; font-size:12px; cursor:pointer; }
 .dshl-grantFallback:hover { background:var(--dsw-alias-interactive-bg-hover); color:var(--dsw-alias-label-primary); }
@@ -4953,6 +4966,9 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
      */
     function PluginSourcesCard({ config, targets, t }) {
       const [showAll, setShowAll] = React.useState(false);
+      const [search, setSearch] = React.useState('');
+      const [dragId, setDragId] = React.useState('');
+      const [overId, setOverId] = React.useState('');
       const sources = targets.slotSources ?? null;
       if (sources === null) {
         return h(Card, { title: t('pluginSources'), desc: t('pluginSourcesHint') },
@@ -4976,13 +4992,63 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
         draft.slots.hide = [...set];
         if (draft.sync.panellistHidden && key.startsWith('sidebar.panellist::')) syncPanelsHidden(draft, links, key, hide);
       });
-      const shift = (key, delta) => updateConfig((draft) => {
-        const current = Object.hasOwn(draft.slots.order, key) ? draft.slots.order[key] : 0;
-        const next = Math.min(50, Math.max(-50, current + delta));
-        if (next === 0) delete draft.slots.order[key];
-        else draft.slots.order[key] = next;
-        if (draft.sync.panellistOrder && key.startsWith('sidebar.panellist::')) syncPanelFromSlots(draft, links);
+      /** 槽位内的视觉顺序：宿主按「order 升序、同值按注册顺序」摆放，配置里的 order 覆盖前者。 */
+      const visualItems = (group) => group.items
+        .map((item, index) => {
+          const override = config.slots.order[item.entryKey];
+          return { item, weight: override === undefined ? (item.order ?? 0) : override, index };
+        })
+        .sort((left, right) => (left.weight - right.weight) || (left.index - right.index))
+        .map((entry) => entry.item);
+      /** 搜索过滤：槽位键、条目 id、注册者、组件名任一命中即保留。 */
+      const query = search.trim().toLowerCase();
+      const matchesItem = (item) => query === ''
+        || item.id.toLowerCase().includes(query)
+        || (item.registrant ?? '').toLowerCase().includes(query)
+        || (item.componentName ?? '').toLowerCase().includes(query);
+      // 槽位键命中时整组条目都算命中（否则只能搜条目名，搜槽位名会得到空组）
+      const matchesGroup = (group) => query === '' || group.slot.toLowerCase().includes(query) || group.items.some(matchesItem);
+      const itemsOf = (group) => (group.slot.toLowerCase().includes(query) ? group.items : group.items.filter(matchesItem));
+      const visibleGroups = groups
+        .map((group) => ({ group, items: itemsOf(group) }))
+        .filter((entry) => query === '' || entry.group.slot.toLowerCase().includes(query) || entry.items.length > 0);
+      /**
+       * 同槽位内调序：把整组的相对顺序写成 order 值。
+       * 条目原来的 order 由宿主注册优先级决定（不等于「当前视觉序号」），所以在旧值上加减会让
+       * 拖一格看着没动；这里直接按新序列编号 0..n-1，顺序完全由配置决定。
+       */
+      const applySequence = (slot, ids) => updateConfig((draft) => {
+        const group = sources.graph.find((item) => item.slot === slot);
+        if (group === undefined) return;
+        const ordered = ids.filter((id) => group.items.some((item) => item.id === id));
+        if (ordered.length === 0) return;
+        ordered.forEach((id, index) => { draft.slots.order[`${slot}::${id}`] = index; });
+        // 面板导航与插件来源共用同一排图标：开着同步时把面板顺序也写成同一序列（面板顺序存的是显示名）
+        if (draft.sync.panellistOrder && slot === 'sidebar.panellist') {
+          const labels = ordered.map((id) => links.find((link) => link.key === `sidebar.panellist::${id}`)?.label ?? '');
+          const rest = draft.sidebar.panelOrder.filter((label) => label !== '' && !labels.includes(label));
+          draft.sidebar.panelOrder = [...labels.filter((label) => label !== ''), ...rest];
+        }
       });
+      /** 拖拽 / 箭头共用的换位：只在同一槽位内调序（顺序键按槽位分开），跨槽位拖动不生效。 */
+      const moveItem = (group, fromId, toId) => {
+        const ids = visualItems(group).map((item) => item.id);
+        const from = ids.indexOf(fromId);
+        const to = ids.indexOf(toId);
+        if (from < 0 || to < 0 || from === to) return;
+        const next = [...ids];
+        const [moved] = next.splice(from, 1);
+        next.splice(to, 0, moved);
+        applySequence(group.slot, next);
+      };
+      /** 箭头按钮 = 与相邻一行交换，和拖拽同一套序列，避免两种顺序语义打架。 */
+      const moveBy = (group, item, delta) => {
+        const ids = visualItems(group).map((entry) => entry.id);
+        const at = ids.indexOf(item.id);
+        const target = at + delta;
+        if (at < 0 || target < 0 || target >= ids.length) return;
+        moveItem(group, item.id, ids[target]);
+      };
       const lockText = (item) => {
         if (!item.rendered) return t('slotNotRendered');
         if (item.reason === 'entry') return t('slotEntryOnly');
@@ -4991,26 +5057,53 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
         if (item.reason === 'single') return t('slotSingleOnly');
         return item.registrant || t('ownerUnknown');
       };
-      const itemRow = (item) => {
+      const itemRow = (group, item) => {
         const orderValue = config.slots.order[item.entryKey];
-        return h('div', { key: item.entryKey, className: 'dshl-item', 'data-active': item.rendered ? 'true' : undefined },
+        const draggable = item.orderable && item.rendered;
+        return h('div', {
+          key: item.entryKey,
+          className: 'dshl-item',
+          'data-active': item.rendered ? 'true' : undefined,
+          'data-dragover': overId === item.entryKey && dragId !== item.entryKey ? 'true' : undefined,
+          draggable,
+          onDragStart: draggable ? (event) => {
+            setDragId(item.entryKey);
+            event.dataTransfer.effectAllowed = 'move';
+            try { event.dataTransfer.setData('text/plain', item.entryKey); } catch (error) { /* 合成事件可能没有 dataTransfer */ }
+          } : undefined,
+          onDragOver: draggable ? (event) => {
+            event.preventDefault();
+            if (overId !== item.entryKey) setOverId(item.entryKey);
+          } : undefined,
+          onDragLeave: draggable ? () => setOverId((current) => (current === item.entryKey ? '' : current)) : undefined,
+          onDrop: draggable ? (event) => {
+            event.preventDefault();
+            const from = dragId;
+            setDragId('');
+            setOverId('');
+            const fromItem = group.items.find((entry) => entry.entryKey === from);
+            if (fromItem !== undefined && fromItem.entryKey !== item.entryKey) moveItem(group, fromItem.id, item.id);
+          } : undefined,
+          onDragEnd: draggable ? () => { setDragId(''); setOverId(''); } : undefined,
+        },
+          draggable ? h('span', { className: 'dshl-itemHandle', title: t('slotDragHint'), 'aria-hidden': true }, icon(ICON_GRIP, 13)) : null,
           h('span', { className: 'dshl-surfaceDot', 'data-on': item.rendered ? 'true' : 'false', 'data-source': 'third', 'aria-hidden': true }),
           h('span', { className: 'dshl-itemLabel', title: `${item.entryKey} · ${item.componentName || item.registrant}` }, item.id),
           h('span', { className: 'dshl-itemSub' }, lockText(item)),
           h('span', { className: 'dshl-itemCtl' },
-            item.orderable && item.rendered ? h('button', {
+            draggable ? h('button', {
               type: 'button',
               className: 'dshl-iconBtn',
               title: t('externalOrderUp'),
               'aria-label': t('externalOrderUp'),
-              onClick: () => shift(item.entryKey, -1),
+              onClick: () => moveBy(group, item, -1),
             }, icon(ICON_UP, 12)) : null,
-            item.orderable && item.rendered ? h('button', {
+            draggable ? h('button', {
               type: 'button',
               className: 'dshl-iconBtn',
               title: t('externalOrderDown'),
               'aria-label': t('externalOrderDown'),
-              onClick: () => shift(item.entryKey, 1),
+              onClick: () => moveBy(group, item, 1),
             }, icon(ICON_DOWN, 12)) : null,
             orderValue === undefined ? null : h('span', { className: 'dshl-num' }, String(orderValue)),
             item.hideable && item.rendered ? h(Switch, {
@@ -5026,11 +5119,32 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
           h(Switch, { checked: showAll, label: t('slotShowAll'), onChange: setShowAll })),
         groups.length === 0
           ? h('p', { className: 'dshl-hint' }, t('slotNothingRendered'))
-          : h('div', { className: 'dshl-sourcesList' },
-            ...groups.map((group) => h('div', { key: group.slot, className: 'dshl-surfaceGroup' },
-              h('div', { className: 'dshl-surfaceGroupTitle' }, `${group.slot} · ${kindLabel(group.kind)} · ${group.rendered}/${group.items.length}`),
-              h('div', { className: 'dshl-list' },
-                ...(showAll ? group.items : group.items.filter((item) => item.rendered)).map(itemRow))))));
+          : h(React.Fragment, null,
+            h('div', { className: 'dshl-search' },
+              h('input', {
+                type: 'search',
+                className: 'dshl-input',
+                value: search,
+                placeholder: t('slotSearch'),
+                'aria-label': t('slotSearch'),
+                onChange: (event) => setSearch(event.target.value),
+              }),
+              search === '' ? null : h('button', {
+                type: 'button',
+                className: 'dshl-iconBtn',
+                title: t('slotSearchClear'),
+                'aria-label': t('slotSearchClear'),
+                onClick: () => setSearch(''),
+              }, icon(ICON_CLOSE, 12))),
+            visibleGroups.length === 0
+              ? h('p', { className: 'dshl-hint' }, t('slotSearchEmpty'))
+              : h('div', { className: 'dshl-sourcesList' },
+                ...visibleGroups.map(({ group, items }) => h('div', { key: group.slot, className: 'dshl-surfaceGroup' },
+                  h('div', { className: 'dshl-surfaceGroupTitle' }, `${group.slot} · ${kindLabel(group.kind)} · ${group.rendered}/${group.items.length}`),
+                  h('div', { className: 'dshl-list' },
+                    ...visualItems(group)
+                      .filter((item) => items.includes(item))
+                      .map((item) => itemRow(group, item))))))));
     }
 
     /**
