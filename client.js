@@ -272,6 +272,8 @@ window.__ModuleLoader__.load({
       storageZoneGuide: '右栏开始页卡片',
       storageZoneSettings: '设置页导航',
       storageZonePlugins: '插件页第三方插件',
+      storageZoneHeaderUtilities: '会话头工具按钮',
+      storageZoneSettingsActions: '设置页页头操作',
       storageZoneOffline: '此刻不在场',
       storageZoneEmpty: '这个区域当前没有可收纳的入口。',
       storageSettingsUnavailable: '设置面板没打开，或没有可收纳的导航项。',
@@ -279,6 +281,8 @@ window.__ModuleLoader__.load({
       storageGrantMore: '更多',
       storageGrantSettingsLabel: '收纳的设置页',
       storageGrantPluginsLabel: '收纳的插件',
+      storageHeaderUtilitiesUnavailable: '会话头不在场，或工具行没有可收纳的按钮。',
+      storageSettingsActionsUnavailable: '设置页页头不在场，或没有可收纳的按钮。',
       storageViewsUnavailable: '宿主槽位注册表不可用，列不出会话视图。',
       storageGuideUnavailable: '右栏开始页不在场，或没有可收纳的卡片。',
       rightbarPanel: '右栏',
@@ -616,6 +620,8 @@ window.__ModuleLoader__.load({
       storageZoneGuide: 'Right column start cards',
       storageZoneSettings: 'Settings navigation',
       storageZonePlugins: 'Third-party plugins',
+      storageZoneHeaderUtilities: 'Conversation header tools',
+      storageZoneSettingsActions: 'Settings header actions',
       storageZoneOffline: 'not present',
       storageZoneEmpty: 'No storable entry in this area right now.',
       storageSettingsUnavailable: 'The settings panel is not open, or has no storable navigation entry.',
@@ -623,6 +629,8 @@ window.__ModuleLoader__.load({
       storageGrantMore: 'More',
       storageGrantSettingsLabel: 'Stored settings',
       storageGrantPluginsLabel: 'Stored plugins',
+      storageHeaderUtilitiesUnavailable: 'The conversation header is not present, or its tool row has no storable button.',
+      storageSettingsActionsUnavailable: 'The settings header is not present, or has no storable button.',
       storageViewsUnavailable: 'The host slots registry is unavailable, so session views cannot be listed.',
       storageGuideUnavailable: 'The right column start page is not present, or has no storable card.',
       rightbarPanel: 'Right column',
@@ -831,8 +839,8 @@ window.__ModuleLoader__.load({
       rules: [],
       // 联动同步：面板导航与插件来源写同一份顺序/显隐
       sync: { panellistOrder: false, panellistHidden: false },
-      // 入口收纳：五个收纳区各自的「收进更多」清单，条目存 { id, label }
-      storage: { sidebar: [], views: [], guide: [], settings: [], plugins: [] },
+      // 入口收纳：七个收纳区各自的「收进更多」清单，条目存 { id, label }
+      storage: { sidebar: [], views: [], guide: [], settings: [], plugins: [], headerUtilities: [], settingsActions: [] },
     };
 
     /**
@@ -1130,6 +1138,8 @@ window.__ModuleLoader__.load({
         guide: storageZone(storageRaw.guide),
         settings: storageZone(storageRaw.settings),
         plugins: storageZone(storageRaw.plugins),
+        headerUtilities: storageZone(storageRaw.headerUtilities),
+        settingsActions: storageZone(storageRaw.settingsActions),
       };
       if (Array.isArray(storageRaw.tucked) && storage.sidebar.length === 0) {
         storage.sidebar = storageZone(storageRaw.tucked.map((label) => ({ id: '', label })));
@@ -3026,6 +3036,7 @@ window.__ModuleLoader__.load({
     const STORED_VIEW_ATTR = 'data-dshl-stored-view';
     const STORED_GUIDE_ATTR = 'data-dshl-stored-guide';
     const STORED_SECTION_ATTR = 'data-dshl-stored-section';
+    const STORED_BUTTON_ATTR = 'data-dshl-stored-button';
 
     function resolveLabelText(label) {
       if (typeof label === 'function') {
@@ -3108,6 +3119,30 @@ window.__ModuleLoader__.load({
       return out;
     }
 
+    /** 按钮类入口（会话头工具行 / 设置页页头操作）：容器里的按钮自动发现；槽位条目带稳定键，其余按显示名。 */
+    function readButtonEntries(outletSelector) {
+      const outlet = document.querySelector(outletSelector);
+      const container = outlet === null ? null : outlet.parentElement;
+      if (container === null) return [];
+      const out = [];
+      for (const button of container.querySelectorAll('button')) {
+        if (button.hasAttribute('data-dshl-grant-anchor')) continue;
+        const label = (button.getAttribute('aria-label') ?? button.textContent ?? '').trim().slice(0, 60);
+        if (label === '') continue;
+        const slotEntry = button.getAttribute('data-dshl-slotentry');
+        const id = slotEntry !== null && slotEntry !== '' ? slotEntry : `label:${label}`;
+        if (out.some((entry) => entry.id === id)) continue;
+        out.push({ id, label });
+      }
+      return out;
+    }
+
+    function buttonZoneContainer(zone) {
+      const selector = zone === 'headerUtilities' ? '[data-slot="conversation.session.header.utilities"]' : '[data-slot="settings.action"]';
+      const outlet = document.querySelector(selector);
+      return outlet === null ? null : outlet.parentElement;
+    }
+
     /** 当前收纳域可发现的入口清单。 */
     function readStorageZones(targets) {
       const sidebar = [];
@@ -3119,7 +3154,15 @@ window.__ModuleLoader__.load({
         seen.add(id);
         sidebar.push({ id, label: link.label });
       }
-      return { sidebar, views: readViewEntries(), guide: readGuideEntries(), settings: readSettingsSections(), plugins: readPluginCards() };
+      return {
+        sidebar,
+        views: readViewEntries(),
+        guide: readGuideEntries(),
+        settings: readSettingsSections(),
+        plugins: readPluginCards(),
+        headerUtilities: readButtonEntries('[data-slot="conversation.session.header.utilities"]'),
+        settingsActions: readButtonEntries('[data-slot="settings.action"]'),
+      };
     }
 
     /** 收纳标记：视图标签与开始页卡片按「标签 + kind」匹配打属性，样式按属性收起；配置变少时撤掉旧标记。 */
@@ -3149,11 +3192,28 @@ window.__ModuleLoader__.load({
         mark(cell, STORED_SECTION_ATTR, id);
         done.add(cell);
       }
+      // 按钮类入口：按槽位条目键或显示名匹配容器里的按钮
+      for (const zone of ['headerUtilities', 'settingsActions']) {
+        const storedButtons = config.storage?.[zone] ?? [];
+        if (storedButtons.length === 0) continue;
+        const container = buttonZoneContainer(zone);
+        if (container === null) continue;
+        for (const button of container.querySelectorAll('button')) {
+          if (button.hasAttribute('data-dshl-grant-anchor')) continue;
+          const label = (button.getAttribute('aria-label') ?? button.textContent ?? '').trim().slice(0, 60);
+          const slotEntry = button.getAttribute('data-dshl-slotentry') ?? '';
+          const hit = storedButtons.find((entry) => entry.id === slotEntry || entry.label === label);
+          if (hit === undefined) continue;
+          mark(button, STORED_BUTTON_ATTR, `${zone}:${hit.id}`);
+          done.add(button);
+        }
+      }
       for (const node of storedAnnotated) {
         if (done.has(node) || node.isConnected !== true) continue;
         node.removeAttribute(STORED_VIEW_ATTR);
         node.removeAttribute(STORED_GUIDE_ATTR);
         node.removeAttribute(STORED_SECTION_ATTR);
+        node.removeAttribute(STORED_BUTTON_ATTR);
       }
       storedAnnotated.clear();
       for (const node of done) storedAnnotated.add(node);
@@ -3619,6 +3679,9 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       if (config.storage.settings.length > 0) lines.push(`[${STORED_SECTION_ATTR}] { display: none !important; }`);
       for (const entry of config.storage.plugins) {
         lines.push(`[data-plugin-package="${cssAttr(entry.id)}"] { display: none !important; }`);
+      }
+      if (config.storage.headerUtilities.length > 0 || config.storage.settingsActions.length > 0) {
+        lines.push(`[${STORED_BUTTON_ATTR}] { display: none !important; }`);
       }
       // 拆解单元显隐：统一由声明表生成，卡片与样式不再各写一套选择器
       for (const unit of PART_UNITS) {
@@ -5128,6 +5191,8 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
         { id: 'guide', titleKey: 'storageZoneGuide', found: zones.guide ?? [], emptyKey: 'storageGuideUnavailable' },
         { id: 'settings', titleKey: 'storageZoneSettings', found: zones.settings ?? [], emptyKey: 'storageSettingsUnavailable' },
         { id: 'plugins', titleKey: 'storageZonePlugins', found: zones.plugins ?? [], emptyKey: 'storagePluginsUnavailable' },
+        { id: 'headerUtilities', titleKey: 'storageZoneHeaderUtilities', found: zones.headerUtilities ?? [], emptyKey: 'storageHeaderUtilitiesUnavailable' },
+        { id: 'settingsActions', titleKey: 'storageZoneSettingsActions', found: zones.settingsActions ?? [], emptyKey: 'storageSettingsActionsUnavailable' },
       ];
       const toggle = (zone, entry, on) => updateConfig((draft) => {
         const list = draft.storage[zone];
@@ -5302,6 +5367,39 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       return false;
     }
 
+    /** 会话头工具行 / 设置页页头操作：容器就是槽位出口的父级那一行。 */
+    function headerUtilitiesContainer() {
+      const outlet = document.querySelector('[data-slot="conversation.session.header.utilities"]');
+      return outlet === null ? null : outlet.parentElement;
+    }
+
+    function settingsActionsContainer() {
+      const outlet = document.querySelector('[data-slot="settings.action"]');
+      return outlet === null ? null : outlet.parentElement;
+    }
+
+    function headerUtilitiesAnchorChrome() {
+      const container = headerUtilitiesContainer();
+      const native = container === null ? null : [...container.querySelectorAll('button')].find((button) => !button.hasAttribute('data-dshl-grant-anchor') && button.getAttribute('aria-label') !== null);
+      const children = [h('span', { key: 'icon', 'aria-hidden': 'true', style: { display: 'inline-flex' } }, icon(['M3 8h2M7 8h2M11 8h2'], 14))];
+      return native === null ? { className: 'dshl-grantFallback', children } : { className: native.className, children };
+    }
+
+    function settingsActionsAnchorChrome(t) {
+      const container = settingsActionsContainer();
+      const native = container === null ? null : [...container.querySelectorAll('button')].find((button) => !button.hasAttribute('data-dshl-grant-anchor'));
+      const children = [t('storageGrantMore')];
+      return native === null ? { className: 'dshl-grantFallback', children } : { className: native.className, children };
+    }
+
+    /** 打开被收纳的按钮：点它本身（display:none 不影响 React onClick）。 */
+    function clickStoredButton(zone, id) {
+      const target = document.querySelector(`[${STORED_BUTTON_ATTR}="${CSS.escape(`${zone}:${id}`)}"]`);
+      if (target === null) return false;
+      target.click();
+      return true;
+    }
+
     function openPluginCard(packageName) {
       const card = document.querySelector(`[data-plugin-package="${CSS.escape(packageName)}"]`);
       if (card === null) return false;
@@ -5383,6 +5481,8 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       })();
       const settingsRows = settingsStored.map((entry) => ({ id: entry.id, label: entry.label, current: entry.label === activeSectionLabel }));
       const pluginRows = pluginsStored.map((entry) => ({ id: entry.id, label: entry.label, current: false }));
+      const headerStored = config.storage.headerUtilities ?? [];
+      const settingsActionStored = config.storage.settingsActions ?? [];
       return h(React.Fragment, null,
         settingsRows.length > 0 ? h(GrantedMenu, {
           key: 'settings',
@@ -5404,6 +5504,28 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
           rows: pluginRows,
           onPick: (row) => {
             if (!openPluginCard(row.id)) console.warn('[dsh-layout] 找不到收纳的插件卡片', row.id);
+          },
+        }) : null,
+        headerStored.length > 0 ? h(GrantedMenu, {
+          key: 'headerUtilities',
+          zone: 'headerUtilities',
+          t,
+          container: headerUtilitiesContainer,
+          chrome: () => headerUtilitiesAnchorChrome(),
+          rows: headerStored.map((entry) => ({ id: entry.id, label: entry.label, current: false })),
+          onPick: (row) => {
+            if (!clickStoredButton('headerUtilities', row.id)) console.warn('[dsh-layout] 找不到收纳的会话头按钮', row.label);
+          },
+        }) : null,
+        settingsActionStored.length > 0 ? h(GrantedMenu, {
+          key: 'settingsActions',
+          zone: 'settingsActions',
+          t,
+          container: settingsActionsContainer,
+          chrome: () => settingsActionsAnchorChrome(t),
+          rows: settingsActionStored.map((entry) => ({ id: entry.id, label: entry.label, current: false })),
+          onPick: (row) => {
+            if (!clickStoredButton('settingsActions', row.id)) console.warn('[dsh-layout] 找不到收纳的设置页页头按钮', row.label);
           },
         }) : null);
     }
