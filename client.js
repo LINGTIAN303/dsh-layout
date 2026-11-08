@@ -13,6 +13,17 @@ window.__ModuleLoader__.load({
     }
     const NS = 'dsh-layout';
 
+    // 「更多」菜单行优先用宿主的 primitives，拿不到就退化成普通按钮（功能不变，观感略有差异）
+    let MenuItemButton = null;
+    try {
+      const primitives = require('@deepseek-ai/dsh-client-ui-primitives');
+      if (primitives !== null && typeof primitives === 'object' && typeof primitives.MenuItemButton === 'function') {
+        MenuItemButton = primitives.MenuItemButton;
+      }
+    } catch (error) {
+      console.warn('[dsh-layout] 宿主未提供 MenuItemButton，收纳入口的菜单项降级为普通按钮', error);
+    }
+
     /* ============================== 文案 ============================== */
     const zh = {
       title: '布局',
@@ -245,6 +256,15 @@ window.__ModuleLoader__.load({
       ruleActionArrange: '容器排列',
       ruleColumns: '列数',
       ruleEmptyValue: '当前没有可选项。',
+      tabStorage: '入口收纳',
+      tabStorageHint: '把不常用的侧栏入口收进「更多」菜单：侧栏只留常用的，收纳的入口在更多里点一下就能打开，再关开关就回到侧栏。',
+      storage: '入口收纳',
+      storageHint: '开关打开 = 收进侧栏底部的「更多」菜单；关闭 = 回到侧栏列表。只改显示位置，入口本身与插件都不变。',
+      storageEmpty: '没有可收纳的入口：需要侧栏在界面上，且宿主 slots 注册表可用。',
+      storageHostEntry: '宿主入口，始终显示',
+      storageHiddenHint: '已在面板导航里隐藏',
+      storageMenuLabel: '收纳的入口',
+      storageMenuEmpty: '还没有收纳任何入口',
       rightbarPanel: '右栏',
       rightbarPanelHint: '右栏内部的标签栏与内容区；宽度在「区域结构」里调。',
       rightbarPartsHint: '右栏拆解：标签栏与内容区可各自隐藏，标签栏也可放到内容区下方。',
@@ -566,6 +586,15 @@ window.__ModuleLoader__.load({
       ruleActionArrange: 'Arrange container',
       ruleColumns: 'Columns',
       ruleEmptyValue: 'Nothing to pick right now.',
+      tabStorage: 'Entry storage',
+      tabStorageHint: 'Tuck rarely used sidebar entries into the More menu: keep the sidebar short, open tucked entries from More, and flip the switch back to restore them.',
+      storage: 'Entry storage',
+      storageHint: 'On = tucked into the sidebar footer More menu; off = back in the sidebar list. Only the display location changes; the entry and its plugin stay as they are.',
+      storageEmpty: 'No storable entry right now: the sidebar must be visible and the host slots registry available.',
+      storageHostEntry: 'host entry, always shown',
+      storageHiddenHint: 'hidden in the panel list',
+      storageMenuLabel: 'Stored entries',
+      storageMenuEmpty: 'Nothing stored yet',
       rightbarPanel: 'Right column',
       rightbarPanelHint: 'The tab strip and content area inside the right column; width is set in region structure.',
       rightbarPartsHint: 'Right column parts: the tab strip and content can each be hidden, and the tab strip can move below the content.',
@@ -772,6 +801,8 @@ window.__ModuleLoader__.load({
       rules: [],
       // 联动同步：面板导航与插件来源写同一份顺序/显隐
       sync: { panellistOrder: false, panellistHidden: false },
+      // 入口收纳：tucked 为收进「更多」菜单的侧栏面板显示名
+      storage: { tucked: [] },
     };
 
     /**
@@ -1047,6 +1078,12 @@ window.__ModuleLoader__.load({
         panellistOrder: syncRaw.panellistOrder === true,
         panellistHidden: syncRaw.panellistHidden === true,
       };
+      // 入口收纳：面板显示名列表，长度与数量都收一收
+      const storageRaw = raw.storage !== null && typeof raw.storage === 'object' ? raw.storage : {};
+      const tucked = Array.isArray(storageRaw.tucked)
+        ? storageRaw.tucked.filter((label) => typeof label === 'string' && label.length > 0 && label.length <= 60)
+        : [];
+      out.storage = { tucked: [...new Set(tucked)].slice(0, 40) };
       return out;
     }
 
@@ -2912,6 +2949,21 @@ window.__ModuleLoader__.load({
       return out;
     }
 
+    /**
+     * 入口收纳用的「显示名 → 面板 id」表：只收有真实面板 id 的入口（从 slots 条目键反查），
+     * 排除宿主的「插件」入口与「更多」这类伪行，避免把唯一的收纳入口本身藏掉。
+     */
+    function storagePanelIds(targets) {
+      const map = new Map();
+      for (const link of panellistLinks(targets)) {
+        const at = link.key.indexOf('::');
+        const panelId = at === -1 ? '' : link.key.slice(at + 2);
+        if (panelId === '' || panelId === 'plugins') continue;
+        map.set(link.label, panelId);
+      }
+      return map;
+    }
+
     function syncSlotsFromPanelOrder(draft, links) {
       for (const link of links) delete draft.slots.order[link.key];
       for (const link of links) {
@@ -3159,6 +3211,7 @@ window.__ModuleLoader__.load({
 .dshl-tabPanel[data-tab="areas"] .dshl-cards { grid-template-columns:repeat(auto-fit, minmax(340px, 1fr)); }
 .dshl-tabPanel[data-tab="recognition"] .dshl-cards { grid-template-columns:minmax(0, 1fr); }
 .dshl-tabPanel[data-tab="arrange"] .dshl-cards { grid-template-columns:minmax(0, 680px); justify-content:center; }
+.dshl-tabPanel[data-tab="storage"] .dshl-cards { grid-template-columns:minmax(0, 640px); justify-content:center; }
 .dshl-arrangeRow { display:flex; flex-direction:column; gap:6px; padding:8px 10px; border-radius:var(--dsw-radius-md, 8px); background:var(--dsw-alias-bg-layer-2); }
 .dshl-arrangeRow[data-offline="true"] { opacity:.6; }
 .dshl-arrangeHead { display:flex; align-items:center; gap:8px; }
@@ -3174,6 +3227,9 @@ window.__ModuleLoader__.load({
 [data-dshl-teleport] { position:fixed !important; left:0 !important; top:0 !important; right:auto !important; bottom:auto !important; margin:0 !important; z-index:1100 !important; width:var(--dshl-tw, auto) !important; max-width:none !important; box-sizing:border-box; transform:translate(var(--dshl-tx, 0px), var(--dshl-ty, 0px)) !important; }
 [data-dshl-placeholder] { display:block !important; width:100% !important; box-sizing:border-box; pointer-events:none; }
 body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in srgb, var(--dsw-alias-brand-primary) 45%, transparent); outline-offset:-1px; border-radius:var(--dsw-radius-md, 8px); }
+.dshl-storageMenuItem { display:flex; align-items:center; gap:8px; width:100%; padding:8px 12px; border:none; background:transparent; color:var(--dsw-alias-label-primary); font:inherit; font-size:13px; line-height:20px; text-align:left; border-radius:var(--dsw-radius-md, 8px); cursor:pointer; }
+.dshl-storageMenuItem:hover { background:var(--dsw-alias-interactive-bg-hover); }
+.dshl-storageMenuItem[data-current="true"] { color:var(--dsw-alias-brand-primary); }
 .dshl-card { border:1px solid var(--dsw-alias-border-l1); border-radius:var(--dsw-radius-lg, 12px); background:var(--dsw-alias-bg-layer-1); padding:12px; display:flex; flex-direction:column; gap:10px; min-width:0; }
 .dshl-cardHead { display:flex; flex-direction:column; gap:2px; }
 .dshl-cardTitle { font-size:13px; font-weight:600; }
@@ -3352,6 +3408,10 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
         lines.push(`[data-dshl-panel="${cssAttr(label)}"] { order: ${index + 1} !important; }`);
       });
       for (const label of config.sidebar.panelHidden) {
+        lines.push(`[data-dshl-panel="${cssAttr(label)}"] { display: none !important; }`);
+      }
+      // 入口收纳：收纳的入口从侧栏列表收起，改由「更多」菜单提供（菜单行在 apply 里注册）
+      for (const label of config.storage.tucked) {
         lines.push(`[data-dshl-panel="${cssAttr(label)}"] { display: none !important; }`);
       }
       // 拆解单元显隐：统一由声明表生成，卡片与样式不再各写一套选择器
@@ -3933,6 +3993,7 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
     const EDITOR_TABS = [
       { id: 'structure', labelKey: 'tabStructure', hintKey: 'tabStructureHint', cards: ['structure'] },
       { id: 'sidebar', labelKey: 'tabSidebar', hintKey: 'tabSidebarHint', cards: ['blocks', 'panels'] },
+      { id: 'storage', labelKey: 'tabStorage', hintKey: 'tabStorageHint', cards: ['storage'] },
       { id: 'areas', labelKey: 'tabAreas', hintKey: 'tabAreasHint', cards: ['conversation', 'rightbar', 'settings'] },
       { id: 'arrange', labelKey: 'tabArrange', hintKey: 'tabArrangeHint', cards: ['arrange', 'relocate', 'sync', 'rules'] },
       { id: 'recognition', labelKey: 'tabRecognition', hintKey: 'tabRecognitionHint', cards: ['surfaces', 'coverage', 'pluginSources'] },
@@ -4849,6 +4910,83 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
             }, icon(ICON_CLOSE, 12))))));
     }
 
+    /** 入口收纳卡片：把侧栏入口收进「更多」菜单，或放回侧栏列表。 */
+    function StorageCard({ config, targets, t }) {
+      const panelIds = storagePanelIds(targets);
+      const tucked = config.storage.tucked;
+      const labels = (targets.panels ?? [])
+        .map((panel) => panel.label)
+        .filter((label) => panelIds.has(label));
+      for (const label of tucked) if (!labels.includes(label)) labels.push(label);
+      if (panelIds.size === 0) {
+        return h(Card, { title: t('storage'), desc: t('storageHint') },
+          h('p', { className: 'dshl-hint' }, t('storageEmpty')));
+      }
+      const setTucked = (label, on) => updateConfig((draft) => {
+        const set = new Set(draft.storage.tucked);
+        if (on) set.add(label);
+        else set.delete(label);
+        draft.storage.tucked = [...set];
+      });
+      return h(Card, { title: t('storage'), desc: t('storageHint') },
+        labels.length === 0
+          ? h('p', { className: 'dshl-hint' }, t('storageMenuEmpty'))
+          : h('div', { className: 'dshl-listScroll' }, h('div', { className: 'dshl-list' }, ...labels.map((label) => {
+            const offline = !panelIds.has(label);
+            const hidden = config.sidebar.panelHidden.includes(label);
+            return h('div', { key: label, className: 'dshl-row' },
+              h('span', { className: 'dshl-rowLabel' }, label),
+              hidden ? h('span', { className: 'dshl-itemSub' }, t('storageHiddenHint')) : null,
+              offline && !hidden ? h('span', { className: 'dshl-itemSub' }, t('arrangeOffline')) : null,
+              h(Switch, {
+                checked: tucked.includes(label),
+                label: label,
+                onChange: (on) => setTucked(label, on),
+              }));
+          }))));
+    }
+
+    /**
+     * 「更多」菜单里的收纳行：宿主渲染菜单（sidebar.panellist.actions 槽位），我们只贡献行。
+     * 点一下先关菜单再切到对应面板；宿主 owner 回调缺失时保持静默，不影响菜单本身。
+     */
+    function StorageMenu({ entries, onDismiss, ctx }) {
+      const { config, targets } = useStoreSnapshot();
+      // 关闭「启用自定义布局」时侧栏不做任何收起，菜单里也不必重复列出
+      if (config.enabled !== true) return null;
+      const tucked = config.storage?.tucked ?? [];
+      if (tucked.length === 0) return null;
+      const panelIds = storagePanelIds(targets);
+      const activeIds = new Set(Array.isArray(entries) ? entries.filter((entry) => entry.active === true).map((entry) => entry.id) : []);
+      const rows = [];
+      for (const label of tucked) {
+        const panelId = panelIds.get(label);
+        if (panelId === undefined) continue;
+        rows.push({ label, panelId, active: activeIds.has(panelId) });
+      }
+      if (rows.length === 0) return null;
+      const open = (panelId) => {
+        if (typeof onDismiss === 'function') onDismiss();
+        const layout = ctx !== null && ctx !== undefined && typeof ctx.get === 'function' ? ctx.get('layout') : undefined;
+        if (layout === null || layout === undefined || typeof layout.selectPanel !== 'function') return;
+        try {
+          layout.selectPanel(panelId);
+        } catch (error) {
+          console.warn('[dsh-layout] 打开收纳入口失败，本次跳过', error);
+        }
+      };
+      return h(React.Fragment, null, ...rows.map((row) => (MenuItemButton !== null
+        ? h(MenuItemButton, { key: row.panelId, current: row.active, onSelect: () => open(row.panelId) }, row.label)
+        : h('button', {
+          key: row.panelId,
+          type: 'button',
+          role: 'menuitem',
+          className: 'dshl-storageMenuItem',
+          'data-current': row.active ? 'true' : undefined,
+          onClick: () => open(row.panelId),
+        }, row.label))));
+    }
+
     /**
      * 会话区卡片：内容宽度 + 四组拆解（基础三块与换序、会话头内部、消息区、输入区）。
      * 拆解项的开关由 PART_UNITS 声明表生成，卡片只负责摆位置。
@@ -4923,6 +5061,7 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
         structure: () => h(StructureCard, { config, t }),
         blocks: () => h(BlocksCard, { config, targets, t }),
         panels: () => h(PanelsCard, { config, targets, t }),
+        storage: () => h(StorageCard, { config, targets, t }),
         surfaces: () => h(SurfacesCard, { targets, t }),
         coverage: () => h(CoverageCard, { config, targets, t }),
         pluginSources: () => h(PluginSourcesCard, { config, targets, t }),
@@ -5592,6 +5731,15 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
         order: 900,
         label: () => t('editLayer'),
       }, () => h(Boundary, null, h(EditOverlay, { t, ctx })))), 'dsh-layout: edit overlay');
+
+      // 入口收纳：把收纳的入口行挂到侧栏「更多」菜单里（宿主渲染菜单，我们只提供行）
+      ctx.effect(() => ctx.slots.inject('sidebar.panellist.actions', () => ctx.slots.register({
+        name: 'sidebar.panellist.actions',
+        id: 'dsh-layout-storage',
+        order: -100,
+        locale: NS,
+        label: () => t('storageMenuLabel'),
+      }, (props) => h(Boundary, null, h(StorageMenu, { ...props, ctx })))), 'dsh-layout: storage menu');
     }
 
     return { apply, inject };
