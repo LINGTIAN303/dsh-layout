@@ -177,6 +177,38 @@ window.__ModuleLoader__.load({
       arrangeFooter: '侧栏 · 底部操作',
       arrangeRightTabs: '右栏 · 标签栏',
       arrangeSettingsNav: '设置页 · 导航列',
+      relocate: '区域搬移',
+      relocateHint: '把单元搬到别的容器里：节点留在原树里只改定位，目标容器用占位符让位；目标不在场时自动回原位。',
+      relocateSource: '源单元',
+      relocateTarget: '目标容器',
+      relocatePlace: '位置',
+      relocateStart: '放在开头',
+      relocateEnd: '放在结尾',
+      relocateAdd: '添加搬移',
+      relocateNone: '还没有配置搬移：选好源单元与目标容器后点「添加搬移」。',
+      relocateEmptySources: '当前没有可搬移的单元。',
+      relocateRemove: '移除',
+      relocatePending: '目标不在场，暂不生效',
+      relocateActive: '已生效',
+      relocateGone: '源单元不在场',
+      relocateSourceBlock: '侧栏块',
+      relocateSourceUnit: '拆解单元',
+      relocateSourceSlot: '槽位条目',
+      relocateDestBrand: '侧栏 · 品牌行',
+      relocateDestPanels: '侧栏 · 面板导航',
+      relocateDestWorkspaces: '侧栏 · 工作区',
+      relocateDestFooter: '侧栏 · 底部操作',
+      relocateDestSidebar: '侧栏（整列）',
+      relocateDestCenter: '会话区（整列）',
+      relocateDestRightbar: '右栏（整列）',
+      relocateDestConvHeader: '会话区 · 会话头',
+      relocateDestConvMessages: '会话区 · 消息区',
+      relocateDestConvComposer: '会话区 · 输入区',
+      relocateDestRbTabs: '右栏 · 标签栏',
+      relocateDestRbContent: '右栏 · 内容区',
+      relocateDestSettingsHeader: '设置页 · 页头',
+      relocateDestSettingsNav: '设置页 · 导航列',
+      relocateDestSettingsOptions: '设置页 · 选项区',
       rightbarPanel: '右栏',
       rightbarPanelHint: '右栏内部的标签栏与内容区；宽度在「区域结构」里调。',
       rightbarPartsHint: '右栏拆解：标签栏与内容区可各自隐藏，标签栏也可放到内容区下方。',
@@ -430,6 +462,38 @@ window.__ModuleLoader__.load({
       arrangeFooter: 'Sidebar · footer actions',
       arrangeRightTabs: 'Right column · tab strip',
       arrangeSettingsNav: 'Settings · navigation column',
+      relocate: 'Move between areas',
+      relocateHint: 'Move a unit into another container: the node stays in its React tree and only its position changes; the destination reserves space with a placeholder and the unit returns home when the target is not present.',
+      relocateSource: 'Source unit',
+      relocateTarget: 'Target container',
+      relocatePlace: 'Place',
+      relocateStart: 'At start',
+      relocateEnd: 'At end',
+      relocateAdd: 'Add move',
+      relocateNone: 'No move configured yet: pick a source unit and a target container, then press "Add move".',
+      relocateEmptySources: 'No movable unit right now.',
+      relocateRemove: 'Remove',
+      relocatePending: 'target not present, inactive',
+      relocateActive: 'active',
+      relocateGone: 'source not present',
+      relocateSourceBlock: 'Sidebar block',
+      relocateSourceUnit: 'Part unit',
+      relocateSourceSlot: 'Slot entry',
+      relocateDestBrand: 'Sidebar · brand row',
+      relocateDestPanels: 'Sidebar · panel list',
+      relocateDestWorkspaces: 'Sidebar · workspaces',
+      relocateDestFooter: 'Sidebar · footer actions',
+      relocateDestSidebar: 'Sidebar (whole column)',
+      relocateDestCenter: 'Conversation (whole column)',
+      relocateDestRightbar: 'Right column (whole column)',
+      relocateDestConvHeader: 'Conversation · header',
+      relocateDestConvMessages: 'Conversation · messages',
+      relocateDestConvComposer: 'Conversation · composer',
+      relocateDestRbTabs: 'Right column · tab strip',
+      relocateDestRbContent: 'Right column · content',
+      relocateDestSettingsHeader: 'Settings · header',
+      relocateDestSettingsNav: 'Settings · navigation column',
+      relocateDestSettingsOptions: 'Settings · options',
       rightbarPanel: 'Right column',
       rightbarPanelHint: 'The tab strip and content area inside the right column; width is set in region structure.',
       rightbarPartsHint: 'Right column parts: the tab strip and content can each be hidden, and the tab strip can move below the content.',
@@ -630,7 +694,32 @@ window.__ModuleLoader__.load({
       slots: { hide: [], order: {} },
       // 槽位编排（区内排列）：容器 id → { columns 2..3, gap, compact }；只收 2/3 列，1 列等于关闭
       arrange: {},
+      // 区域搬移：源单元 id → { to: 目标容器 id, place: 'start' | 'end' }
+      relocate: {},
     };
+
+    /**
+     * 搬移目标容器：只认可枚举的 id，避免配置里出现无处落脚的字符串。
+     * 运行时按 targets 解析节点；目标不在场时搬移自动失效（源回原位）。
+     */
+    const RELOCATE_DESTINATIONS = [
+      { id: 'block:brand', labelKey: 'relocateDestBrand' },
+      { id: 'block:panels', labelKey: 'relocateDestPanels' },
+      { id: 'block:workspaces', labelKey: 'relocateDestWorkspaces' },
+      { id: 'block:footer', labelKey: 'relocateDestFooter' },
+      { id: 'region:sidebar', labelKey: 'relocateDestSidebar' },
+      { id: 'region:center', labelKey: 'relocateDestCenter' },
+      { id: 'region:rightbar', labelKey: 'relocateDestRightbar' },
+      { id: 'unit:conv-header', labelKey: 'relocateDestConvHeader' },
+      { id: 'unit:conv-messages', labelKey: 'relocateDestConvMessages' },
+      { id: 'unit:conv-composer', labelKey: 'relocateDestConvComposer' },
+      { id: 'unit:rb-tabs', labelKey: 'relocateDestRbTabs' },
+      { id: 'unit:rb-content', labelKey: 'relocateDestRbContent' },
+      { id: 'unit:set-header', labelKey: 'relocateDestSettingsHeader' },
+      { id: 'unit:set-nav', labelKey: 'relocateDestSettingsNav' },
+      { id: 'unit:set-options', labelKey: 'relocateDestSettingsOptions' },
+    ];
+    const RELOCATE_DESTINATION_IDS = new Set(RELOCATE_DESTINATIONS.map((item) => item.id));
 
     const ABSENT_TARGETS = {
       ok: false,
@@ -819,6 +908,18 @@ window.__ModuleLoader__.load({
         };
       }
       out.arrange = arrange;
+      // 区域搬移：源 id → { to, place }；目标必须在枚举表里，位置只有 start / end
+      const relocateRaw = raw.relocate !== null && typeof raw.relocate === 'object' ? raw.relocate : {};
+      const relocate = {};
+      for (const [sourceId, value] of Object.entries(relocateRaw)) {
+        if (Object.keys(relocate).length >= 16) break;
+        if (typeof sourceId !== 'string' || sourceId.length === 0 || sourceId.length > 160) continue;
+        if (value === null || typeof value !== 'object') continue;
+        const to = typeof value.to === 'string' ? value.to : '';
+        if (!RELOCATE_DESTINATION_IDS.has(to)) continue;
+        relocate[sourceId] = { to, place: value.place === 'end' ? 'end' : 'start' };
+      }
+      out.relocate = relocate;
       return out;
     }
 
@@ -2409,6 +2510,191 @@ window.__ModuleLoader__.load({
       for (const node of done) arrangeAnnotated.add(node);
     }
 
+    /* ============================== 区域搬移（投影） ============================== */
+    /**
+     * 搬移不移动 DOM 节点：源节点留在 React 树里，只改成 fixed 定位并按实测矩形对齐；
+     * 目标容器里插入本插件自己的占位符参与布局，源节点投影到占位符上。
+     * 这样不触碰 React 协调器（没有 insertBefore/removeChild 风险），事件委托也仍然有效。
+     * 目标容器不在场时搬移不生效（源保持原样），所以「设置页打开时把品牌行搬进设置页」天然成立。
+     */
+    const TELEPORT_ATTR = 'data-dshl-teleport';
+    const PLACEHOLDER_ATTR = 'data-dshl-placeholder';
+
+    function relocateDestinationNode(targets, id) {
+      if (typeof id !== 'string') return null;
+      if (id.startsWith('block:')) return targets.blocks[id.slice(6)] ?? null;
+      if (id.startsWith('region:')) return targets.regions[id.slice(7)] ?? null;
+      if (id.startsWith('unit:')) return (targets.units?.[id.slice(5)] ?? [])[0] ?? null;
+      return null;
+    }
+
+    /** 可搬移源：侧栏块、拆解单元（显隐类）、已渲染且可操作的槽位条目（单目标、非弹层）。 */
+    function relocateSources(targets) {
+      const list = [];
+      for (const [block, node] of Object.entries(targets.blocks ?? {})) {
+        if (node === null || node === undefined) continue;
+        list.push({ id: `block:${block}`, labelKey: BLOCK_LABEL_KEYS[block] ?? null, name: block, group: 'block', node });
+      }
+      for (const unit of PART_UNITS) {
+        if (unit.kind !== 'hide') continue;
+        const nodes = targets.units?.[unit.id] ?? [];
+        if (nodes.length === 0) continue;
+        list.push({ id: `unit:${unit.id}`, labelKey: unit.labelKey, name: unit.id, group: 'unit', node: nodes[0] });
+      }
+      const sources = targets.slotSources ?? null;
+      if (sources !== null) {
+        for (const group of sources.graph) {
+          for (const item of group.items) {
+            if (!item.rendered || item.tops.length !== 1) continue;
+            if (!item.hideable && !item.orderable) continue;
+            if (item.reason === 'overlay') continue;
+            list.push({ id: item.entryKey, labelKey: null, name: `${group.slot} · ${item.id}`, group: 'slot', node: item.tops[0] });
+          }
+        }
+      }
+      return list;
+    }
+
+    /** 搬移源标签：配置过的源即使此刻不在场，也能从静态表里拿到名字。 */
+    function relocateSourceLabel(t, sourceId) {
+      if (sourceId.startsWith('block:')) {
+        const block = sourceId.slice(6);
+        return t(BLOCK_LABEL_KEYS[block] ?? block);
+      }
+      if (sourceId.startsWith('unit:')) {
+        const unit = PART_UNITS.find((item) => item.id === sourceId.slice(5));
+        return unit === undefined ? sourceId.slice(5) : t(unit.labelKey);
+      }
+      if (sourceId.includes('::')) {
+        const at = sourceId.indexOf('::');
+        return `${sourceId.slice(0, at)} · ${sourceId.slice(at + 2)}`;
+      }
+      return sourceId;
+    }
+
+    /** 当前真正生效的搬移：源与目标都在场，且目标不包含源时才成立。 */
+    function relocateActiveList(targets, config) {
+      const byId = new Map(relocateSources(targets).map((source) => [source.id, source]));
+      const out = [];
+      for (const [sourceId, spec] of Object.entries(config.relocate ?? {})) {
+        const source = byId.get(sourceId);
+        if (source === undefined) continue;
+        const dest = relocateDestinationNode(targets, spec.to);
+        if (dest === null || dest.isConnected !== true) continue;
+        if (readableBox(dest) === null) continue;
+        if (dest === source.node || dest.contains(source.node)) continue;
+        out.push({ sourceId, node: source.node, dest, place: spec.place });
+      }
+      return out;
+    }
+
+    const projection = { entries: new Map(), raf: 0, frames: 0 };
+
+    function projectionCreate(item) {
+      const placeholder = document.createElement('div');
+      placeholder.setAttribute(PLACEHOLDER_ATTR, item.sourceId);
+      const box = item.node.getBoundingClientRect();
+      placeholder.style.height = `${Math.max(8, Math.round(box.height))}px`;
+      if (item.place === 'end') item.dest.appendChild(placeholder);
+      else item.dest.insertBefore(placeholder, item.dest.firstChild);
+      item.node.setAttribute(TELEPORT_ATTR, item.sourceId);
+      item.node.style.setProperty('--dshl-tw', `${Math.max(24, Math.round(placeholder.getBoundingClientRect().width))}px`);
+      item.node.style.setProperty('--dshl-tx', '0px');
+      item.node.style.setProperty('--dshl-ty', '0px');
+      return { sourceId: item.sourceId, node: item.node, dest: item.dest, placeholder, tx: 0, ty: 0 };
+    }
+
+    function projectionDispose(entry) {
+      if (entry.placeholder.isConnected) entry.placeholder.remove();
+      if (entry.node.isConnected) {
+        entry.node.removeAttribute(TELEPORT_ATTR);
+        entry.node.style.removeProperty('--dshl-tw');
+        entry.node.style.removeProperty('--dshl-tx');
+        entry.node.style.removeProperty('--dshl-ty');
+        // 宿主原本没有 style 属性时别留下一个空的
+        if (entry.node.getAttribute('style') === '') entry.node.removeAttribute('style');
+      }
+    }
+
+    function projectionClear() {
+      for (const entry of projection.entries.values()) projectionDispose(entry);
+      projection.entries.clear();
+      if (projection.raf !== 0) window.cancelAnimationFrame(projection.raf);
+      projection.raf = 0;
+    }
+
+    /**
+     * 对齐帧循环：占位符是「目标位置」，源节点是「实际位置」。
+     * 宽度先对齐（宽度会影响换行与高度），再按矩形差补位移；差值收敛后停帧，等下一次触发。
+     */
+    function projectionStep() {
+      projection.raf = 0;
+      if (projection.entries.size === 0) return;
+      // 兜底：宽度/高度互相影响导致的抖动最多追 4 秒，避免帧循环常驻
+      projection.frames += 1;
+      if (projection.frames > 240) return;
+      let moving = false;
+      for (const entry of projection.entries.values()) {
+        const node = entry.node;
+        const placeholder = entry.placeholder;
+        if (!node.isConnected || !placeholder.isConnected) {
+          moving = true;
+          continue;
+        }
+        const target = placeholder.getBoundingClientRect();
+        const box = node.getBoundingClientRect();
+        if (Math.abs(box.height - placeholder.offsetHeight) > 1) {
+          placeholder.style.height = `${Math.max(8, Math.round(box.height))}px`;
+          moving = true;
+        }
+        if (Math.abs(box.width - target.width) > 2) {
+          node.style.setProperty('--dshl-tw', `${Math.round(target.width)}px`);
+          moving = true;
+          continue;
+        }
+        const dx = target.left - box.left;
+        const dy = target.top - box.top;
+        if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+          entry.tx += dx;
+          entry.ty += dy;
+          node.style.setProperty('--dshl-tx', `${entry.tx.toFixed(1)}px`);
+          node.style.setProperty('--dshl-ty', `${entry.ty.toFixed(1)}px`);
+          moving = true;
+        }
+      }
+      if (moving) projection.raf = window.requestAnimationFrame(projectionStep);
+    }
+
+    function ensureProjectionLoop() {
+      if (projection.raf !== 0 || projection.entries.size === 0) return;
+      projection.frames = 0;
+      projection.raf = window.requestAnimationFrame(projectionStep);
+    }
+
+    /** 按当前配置与识别结果同步投影：新增、变更、不再成立的搬移都在这里收敛。 */
+    function applyRelocations() {
+      if (snapshot.config.enabled !== true || Object.keys(snapshot.config.relocate ?? {}).length === 0) {
+        if (projection.entries.size > 0) projectionClear();
+        return;
+      }
+      const list = relocateActiveList(snapshot.targets, snapshot.config);
+      const next = new Map();
+      for (const item of list) {
+        const existing = projection.entries.get(item.sourceId);
+        if (existing !== undefined && existing.node === item.node && existing.dest === item.dest && existing.placeholder.parentElement === item.dest) {
+          next.set(item.sourceId, existing);
+          continue;
+        }
+        if (existing !== undefined) projectionDispose(existing);
+        next.set(item.sourceId, projectionCreate(item));
+      }
+      for (const [sourceId, entry] of projection.entries) {
+        if (!next.has(sourceId)) projectionDispose(entry);
+      }
+      projection.entries = next;
+      ensureProjectionLoop();
+    }
+
     /**
      * 把各区域识别结果收束成统一单元表：id → 元素数组（一个单元可能对应多个节点，例如设置页导航列含标题）。
      * 标记、样式、卡片、覆盖度都读这张表，不再各自维护一套形状。
@@ -2583,6 +2869,8 @@ window.__ModuleLoader__.load({
       annotate(targets);
       annotateSlotEntries();
       setTargets(targets);
+      // 识别结果可能没变（签名相同、不重绘），但流式内容仍可能换掉节点，投影每轮都同步一次
+      applyRelocations();
       return targets;
     }
 
@@ -2624,6 +2912,15 @@ window.__ModuleLoader__.load({
 .dshl-arrangeName { flex:1; min-width:0; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .dshl-arrangeCtl { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
 .dshl-arrangeCtl .dshl-chip { height:24px; padding:0 9px; font-size:11px; }
+.dshl-select { height:28px; padding:0 6px; border-radius:8px; border:1px solid var(--dsw-alias-border-l1); background:var(--dsw-alias-bg-layer-2); color:var(--dsw-alias-label-primary); font:inherit; font-size:12px; min-width:0; }
+.dshl-relocateForm { display:grid; grid-template-columns:repeat(auto-fit, minmax(132px, 1fr)); gap:8px; align-items:end; }
+.dshl-relocateField { display:flex; flex-direction:column; gap:4px; min-width:0; font-size:12px; color:var(--dsw-alias-label-secondary); }
+.dshl-relocateRow { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:var(--dsw-radius-md, 8px); background:var(--dsw-alias-bg-layer-2); }
+.dshl-relocateState { flex:none; font-size:11px; color:var(--dsw-alias-label-secondary); }
+.dshl-relocateState[data-active="true"] { color:var(--dsw-alias-state-success-primary); }
+[data-dshl-teleport] { position:fixed !important; left:0 !important; top:0 !important; right:auto !important; bottom:auto !important; margin:0 !important; z-index:1100 !important; width:var(--dshl-tw, auto) !important; max-width:none !important; box-sizing:border-box; transform:translate(var(--dshl-tx, 0px), var(--dshl-ty, 0px)) !important; }
+[data-dshl-placeholder] { display:block !important; width:100% !important; box-sizing:border-box; pointer-events:none; }
+body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in srgb, var(--dsw-alias-brand-primary) 45%, transparent); outline-offset:-1px; border-radius:var(--dsw-radius-md, 8px); }
 .dshl-card { border:1px solid var(--dsw-alias-border-l1); border-radius:var(--dsw-radius-lg, 12px); background:var(--dsw-alias-bg-layer-1); padding:12px; display:flex; flex-direction:column; gap:10px; min-width:0; }
 .dshl-cardHead { display:flex; flex-direction:column; gap:2px; }
 .dshl-cardTitle { font-size:13px; font-weight:600; }
@@ -2949,6 +3246,7 @@ window.__ModuleLoader__.load({
       ensureStyles();
       annotate(snapshot.targets);
       applyDynamicCss();
+      applyRelocations();
     }
 
     /* ============================== 工具组件 ============================== */
@@ -3375,7 +3673,7 @@ window.__ModuleLoader__.load({
       { id: 'structure', labelKey: 'tabStructure', hintKey: 'tabStructureHint', cards: ['structure'] },
       { id: 'sidebar', labelKey: 'tabSidebar', hintKey: 'tabSidebarHint', cards: ['blocks', 'panels'] },
       { id: 'areas', labelKey: 'tabAreas', hintKey: 'tabAreasHint', cards: ['conversation', 'rightbar', 'settings'] },
-      { id: 'arrange', labelKey: 'tabArrange', hintKey: 'tabArrangeHint', cards: ['arrange'] },
+      { id: 'arrange', labelKey: 'tabArrange', hintKey: 'tabArrangeHint', cards: ['arrange', 'relocate'] },
       { id: 'recognition', labelKey: 'tabRecognition', hintKey: 'tabRecognitionHint', cards: ['surfaces', 'coverage', 'pluginSources'] },
     ];
     const UI_STORE_KEY = 'dsh-layout/ui/v1';
@@ -4037,6 +4335,83 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * 区域搬移卡片：选源、选目标、选位置后添加；已配置的搬移逐条显示是否生效，可移除。
+     * 「生效」= 源与目标此刻都在场；目标不在场时配置保留但不投影（源保持原样）。
+     */
+    function RelocateCard({ config, targets, t }) {
+      const sources = relocateSources(targets);
+      const sourceIds = new Set(sources.map((source) => source.id));
+      const [sourceId, setSourceId] = React.useState('');
+      const [targetId, setTargetId] = React.useState(RELOCATE_DESTINATIONS[0].id);
+      const [place, setPlace] = React.useState('start');
+      const activeIds = new Set(relocateActiveList(targets, config).map((item) => item.sourceId));
+      const destLabel = (id) => {
+        const dest = RELOCATE_DESTINATIONS.find((item) => item.id === id);
+        return dest === undefined ? id : t(dest.labelKey);
+      };
+      const groups = [
+        ['block', 'relocateSourceBlock'],
+        ['unit', 'relocateSourceUnit'],
+        ['slot', 'relocateSourceSlot'],
+      ];
+      const add = () => {
+        if (sourceId === '') return;
+        updateConfig((draft) => { draft.relocate[sourceId] = { to: targetId, place }; });
+        setSourceId('');
+      };
+      const configured = Object.entries(config.relocate ?? {});
+      return h(Card, { title: t('relocate'), desc: t('relocateHint') },
+        sources.length === 0
+          ? h('p', { className: 'dshl-hint' }, t('relocateEmptySources'))
+          : h('div', { className: 'dshl-relocateForm' },
+            h('label', { className: 'dshl-relocateField' }, t('relocateSource'),
+              h('select', {
+                className: 'dshl-select',
+                value: sourceId,
+                onChange: (event) => setSourceId(event.target.value),
+              },
+              h('option', { value: '' }, '—'),
+              ...groups.map(([group, labelKey]) => {
+                const items = sources.filter((source) => source.group === group);
+                return items.length === 0 ? null : h('optgroup', { key: group, label: t(labelKey) },
+                  ...items.map((source) => h('option', { key: source.id, value: source.id },
+                    source.labelKey === null ? source.name : t(source.labelKey))));
+              }))),
+            h('label', { className: 'dshl-relocateField' }, t('relocateTarget'),
+              h('select', {
+                className: 'dshl-select',
+                value: targetId,
+                onChange: (event) => setTargetId(event.target.value),
+              },
+              ...RELOCATE_DESTINATIONS.map((dest) => h('option', { key: dest.id, value: dest.id }, t(dest.labelKey))))),
+            h('label', { className: 'dshl-relocateField' }, t('relocatePlace'),
+              h('select', {
+                className: 'dshl-select',
+                value: place,
+                onChange: (event) => setPlace(event.target.value),
+              },
+              h('option', { value: 'start' }, t('relocateStart')),
+              h('option', { value: 'end' }, t('relocateEnd')))),
+            h('button', { type: 'button', className: 'dshl-btn', 'data-primary': 'true', disabled: sourceId === '', onClick: add }, t('relocateAdd'))),
+        configured.length === 0
+          ? h('p', { className: 'dshl-hint' }, t('relocateNone'))
+          : h('div', { className: 'dshl-list' }, configured.map(([id, spec]) => {
+            const live = activeIds.has(id);
+            const stateKey = live ? 'relocateActive' : sourceIds.has(id) ? 'relocatePending' : 'relocateGone';
+            return h('div', { key: id, className: 'dshl-relocateRow' },
+              h('span', { className: 'dshl-relocateState', 'data-active': live ? 'true' : undefined }, t(stateKey)),
+              h('span', { className: 'dshl-itemLabel', title: id }, `${relocateSourceLabel(t, id)} → ${destLabel(spec.to)} · ${spec.place === 'end' ? t('relocateEnd') : t('relocateStart')}`),
+              h('button', {
+                type: 'button',
+                className: 'dshl-iconBtn',
+                title: t('relocateRemove'),
+                'aria-label': t('relocateRemove'),
+                onClick: () => updateConfig((draft) => { delete draft.relocate[id]; }),
+              }, icon(ICON_CLOSE, 12)));
+          })));
+    }
+
+    /**
      * 会话区卡片：内容宽度 + 四组拆解（基础三块与换序、会话头内部、消息区、输入区）。
      * 拆解项的开关由 PART_UNITS 声明表生成，卡片只负责摆位置。
      */
@@ -4114,6 +4489,7 @@ window.__ModuleLoader__.load({
         coverage: () => h(CoverageCard, { config, targets, t }),
         pluginSources: () => h(PluginSourcesCard, { config, targets, t }),
         arrange: () => h(ArrangeCard, { config, targets, t }),
+        relocate: () => h(RelocateCard, { config, targets, t }),
         conversation: () => h(ConversationCard, { config, targets, t }),
         rightbar: () => h(RightbarCard, { config, targets, t }),
         settings: () => h(SettingsCard, { config, targets, t }),
@@ -4637,11 +5013,28 @@ window.__ModuleLoader__.load({
           cssFrame = null;
           if (persistTimer !== null) window.clearTimeout(persistTimer);
           persistTimer = null;
+          projectionClear();
           removeStyles();
         };
       }, 'dsh-layout: interface bridge');
 
-      ctx.effect(() => subscribe(() => applyDynamicCss()), 'dsh-layout: layout styles');
+      ctx.effect(() => subscribe(() => {
+        applyDynamicCss();
+        applyRelocations();
+      }), 'dsh-layout: layout styles');
+
+      // 投影对齐：滚动与缩放会让目标位置漂移，重新起一帧校准（收敛后帧循环自己停）
+      ctx.effect(() => {
+        const kick = () => {
+          if (projection.entries.size > 0) ensureProjectionLoop();
+        };
+        window.addEventListener('scroll', kick, { capture: true, passive: true });
+        window.addEventListener('resize', kick);
+        return () => {
+          window.removeEventListener('scroll', kick, true);
+          window.removeEventListener('resize', kick);
+        };
+      }, 'dsh-layout: projection alignment');
 
       // 遮挡守卫：DOM 变化后（含第三方插件刚出现）检查恢复按钮是否被压住，是则请求重新落点。
       // 放在 refresh 循环之外单独跑：refresh 只做识别，这里做的是「落点是否仍然成立」的判定。
