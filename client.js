@@ -51,7 +51,7 @@ window.__ModuleLoader__.load({
       panelsHint: '左栏面板图标的顺序与显隐；列表来自当前界面。',
       panelsEmpty: '未检测到面板，先打开左栏。',
       conversation: '会话区',
-      conversationHint: '会话内容宽度；留空跟随默认列宽。下方可把会话区拆成三块分别控制。',
+      conversationHint: '会话内容宽度；留空跟随默认列宽。下方可把会话区拆成三块、把会话头再拆成两行。',
       convPartsHint: '会话区拆解：三块可独立显隐；会话头能与正文换前后，输入区能提到消息区上方。',
       convPartsMissing: '未识别会话区内部结构，拆解项暂不可用。',
       partHeader: '会话头',
@@ -59,6 +59,10 @@ window.__ModuleLoader__.load({
       partComposer: '输入区',
       partHeaderBottom: '会话头放到正文下方',
       partComposerTop: '输入区提到消息区上方',
+      headerPartsHint: '会话头拆解：标题行与视图标签行可各自隐藏。',
+      headerPartsMissing: '未识别会话头内部结构，拆解项暂不可用。',
+      partHeaderTitle: '会话头 · 标题行',
+      partHeaderTabs: '会话头 · 视图标签行',
       rightbarPanel: '右栏',
       rightbarPanelHint: '右栏内部的标签栏与内容区；宽度在「区域结构」里调。',
       rightbarPartsHint: '右栏拆解：标签栏与内容区可各自隐藏，标签栏也可放到内容区下方。',
@@ -179,7 +183,7 @@ window.__ModuleLoader__.load({
       panelsHint: 'Order and visibility of the sidebar panel icons, read from the interface.',
       panelsEmpty: 'No panels detected; open the sidebar first.',
       conversation: 'Conversation',
-      conversationHint: 'Content width; empty follows the default column width. Below you can split the conversation area into three parts.',
+      conversationHint: 'Content width; empty follows the default column width. Below you can split the conversation into parts and the header into two rows.',
       convPartsHint: 'Conversation parts: three independently hideable blocks; the header can move below the body and the composer can move above the messages.',
       convPartsMissing: 'The conversation internals are not recognized; the split controls are unavailable.',
       partHeader: 'Session header',
@@ -187,6 +191,10 @@ window.__ModuleLoader__.load({
       partComposer: 'Composer',
       partHeaderBottom: 'Header below the body',
       partComposerTop: 'Composer above the messages',
+      headerPartsHint: 'Session header parts: the title row and the view tabs row can each be hidden.',
+      headerPartsMissing: 'The session header internals are not recognized; the split controls are unavailable.',
+      partHeaderTitle: 'Header · title row',
+      partHeaderTabs: 'Header · view tabs row',
       rightbarPanel: 'Right column',
       rightbarPanelHint: 'The tab strip and content area inside the right column; width is set in region structure.',
       rightbarPartsHint: 'Right column parts: the tab strip and content can each be hidden, and the tab strip can move below the content.',
@@ -292,7 +300,7 @@ window.__ModuleLoader__.load({
       },
       center: {
         contentWidth: null,
-        parts: { hideHeader: false, hideMessages: false, hideComposer: false, headerBottom: false, composerTop: false },
+        parts: { hideHeader: false, hideMessages: false, hideComposer: false, headerBottom: false, composerTop: false, hideTitleRow: false, hideViewTabs: false },
       },
       rightbar: {
         parts: { hideTabs: false, hideContent: false, tabsBottom: false },
@@ -316,6 +324,8 @@ window.__ModuleLoader__.load({
       sidebarParts: null,
       panels: [],
       conversation: null,
+      convParts: null,
+      headerParts: null,
       settings: null,
       surfaces: [],
       anomalies: [],
@@ -380,13 +390,15 @@ window.__ModuleLoader__.load({
       const parts = center.parts && typeof center.parts === 'object' ? center.parts : {};
       out.center = {
         contentWidth: center.contentWidth == null ? null : clampInt(center.contentWidth, 520, 1600, null),
-        // 会话区拆解：三块独立显隐 + 两个位置开关（会话头置底、输入区置顶）
+        // 会话区拆解：三块独立显隐 + 两个位置开关（会话头置底、输入区置顶）+ 会话头内部两行
         parts: {
           hideHeader: parts.hideHeader === true,
           hideMessages: parts.hideMessages === true,
           hideComposer: parts.hideComposer === true,
           headerBottom: parts.headerBottom === true,
           composerTop: parts.composerTop === true,
+          hideTitleRow: parts.hideTitleRow === true,
+          hideViewTabs: parts.hideViewTabs === true,
         },
       };
       const settings = raw.settings && typeof raw.settings === 'object' ? raw.settings : {};
@@ -1051,6 +1063,25 @@ window.__ModuleLoader__.load({
       return { brand, footer, identity, toggle, status, account };
     }
 
+    /**
+     * 会话头拆解：标题行（面包屑 + 会话操作 + 工具 + 角标）与视图标签行。
+     * 两行都是 [data-slot="conversation.session.header"]（display:contents）的元素子级，
+     * 视图标签行靠通用 ARIA 标记 role=tablist / role=tab 认，其余那一行就是标题行。
+     */
+    function readHeaderParts(convParts) {
+      const header = convParts === null || convParts === undefined ? null : convParts.headerItem;
+      if (header === null) return null;
+      const sessionSlot = header.querySelector('[data-slot="conversation.session.header"]');
+      if (sessionSlot === null) return null;
+      const rows = [...sessionSlot.children].filter((node) => node.tagName !== 'STYLE' && node.tagName !== 'SCRIPT');
+      const viewTabs = rows.find((node) => node.querySelector('[role="tablist"], [role="tab"]') !== null) ?? null;
+      const titleRow = rows.find((node) => node !== viewTabs && (node.querySelector('[data-slot="conversation.session.header.actions"]') !== null || node.querySelector('[data-slot="conversation.session.header.utilities"]') !== null))
+        ?? rows.find((node) => node !== viewTabs)
+        ?? null;
+      if (titleRow === null && viewTabs === null) return null;
+      return { header, titleRow, viewTabs };
+    }
+
     function readTargets() {
       const rootEl = document.getElementById('root');
       if (rootEl === null) return ABSENT_TARGETS;
@@ -1088,6 +1119,7 @@ window.__ModuleLoader__.load({
         convPartsSeen = true;
         try { window.localStorage.setItem(CONV_PARTS_KEY, '1'); } catch (error) { console.warn('[dsh-layout] 保存会话区结构标记失败', error); }
       }
+      const headerParts = readHeaderParts(convParts);
       const settings = document.querySelector('[data-shortcut-modal="settings"]');
       const rightbarParts = readRightbarParts();
       if (rightbarParts !== null && !rightbarPartsSeen) {
@@ -1100,7 +1132,7 @@ window.__ModuleLoader__.load({
         markAuxPartsSeen('settings');
       }
       const ok = Boolean(sidebarCol && centerCol && rightbarCol);
-      const targets = { ok, frame, regions, sidebarRoot, blocks, sidebarParts, panels, conversation, convParts, rightbarParts, settingsParts, settings, surfaces: [], anomalies: [] };
+      const targets = { ok, frame, regions, sidebarRoot, blocks, sidebarParts, panels, conversation, convParts, headerParts, rightbarParts, settingsParts, settings, surfaces: [], anomalies: [] };
       targets.surfaces = readSurfaces(targets);
       targets.anomalies = Object.values(surfaceAnomalies).sort((a, b) => b.lastSeenAt - a.lastSeenAt);
       return targets;
@@ -1151,6 +1183,11 @@ window.__ModuleLoader__.load({
         mark(sb.toggle, 'data-dshl-sbpart', 'toggle');
         mark(sb.status, 'data-dshl-sbpart', 'status');
         mark(sb.account, 'data-dshl-sbpart', 'account');
+      }
+      const hp = targets.headerParts;
+      if (hp !== null && hp !== undefined) {
+        mark(hp.titleRow, 'data-dshl-hpart', 'title');
+        mark(hp.viewTabs, 'data-dshl-hpart', 'tabs');
       }
     }
 
@@ -1366,6 +1403,16 @@ window.__ModuleLoader__.load({
         lines.push('[data-dshl-part="composer"] { order: -1 !important; }');
         // 输入区默认是「粘在底部」的 sticky；提到上方后必须改成粘顶，否则它会跟着内容滚走、跑到屏幕外
         lines.push('[data-dshl-part="composer"] { position: sticky !important; top: 0 !important; bottom: auto !important; }');
+      }
+      // 会话头内部拆解：标题行 / 视图标签行。
+      // 宿主给会话头写死了两条网格行（32px / 35px）和 min-height；只给一行 display:none 会留下空轨道，
+      // 高度不变，必须把行高交还 auto 并撤掉 min-height。
+      if (parts.hideTitleRow && parts.hideViewTabs) {
+        lines.push('[data-dshl-part="header"] { display: none !important; }');
+      } else if (parts.hideTitleRow || parts.hideViewTabs) {
+        if (parts.hideTitleRow) lines.push('[data-dshl-hpart="title"] { display: none !important; }');
+        if (parts.hideViewTabs) lines.push('[data-dshl-hpart="tabs"] { display: none !important; }');
+        lines.push('[data-dshl-part="header"] { grid-template-rows: auto !important; min-height: auto !important; }');
       }
       // 右栏拆解：标签栏 / 内容区（同在 tabHost 这个 flex column 里）
       const rbParts = config.rightbar.parts;
@@ -2079,7 +2126,7 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 会话区卡片：内容宽度 + 三块拆解。
+     * 会话区卡片：内容宽度 + 三块拆解 + 会话头内部两行。
      * 拆解提供「独立显隐」与「位置互换」：会话头可以与正文换前后，输入区可以提到消息区上方。
      * 每块都是宿主真实参与 flex 布局的元素，改动只走 CSS，不改 React 树。
      */
@@ -2122,7 +2169,11 @@ window.__ModuleLoader__.load({
             checked: parts.composerTop,
             label: t('partComposerTop'),
             onChange: (on) => updateConfig((draft) => { draft.center.parts.composerTop = on; }),
-          })) : null);
+          })) : null,
+        h('div', { className: 'dshl-divider' }),
+        h('div', { className: 'dshl-cardDesc' }, detected ? t('headerPartsHint') : t('headerPartsMissing')),
+        detected ? toggle('hideTitleRow', t('partHeaderTitle')) : null,
+        detected ? toggle('hideViewTabs', t('partHeaderTabs')) : null);
     }
 
     /** 右栏卡片：宽度 + 标签栏/内容区拆解。 */
