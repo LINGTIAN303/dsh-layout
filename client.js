@@ -79,6 +79,29 @@ window.__ModuleLoader__.load({
       coverageDetected: '已识别',
       coverageEmpty: '当前为空',
       coveragePending: '待识别',
+      externalTitle: '外部插件单元',
+      externalHint: '自动扫描当前插件页面的结构；本阶段只读，只列出候选，不改界面。',
+      externalEmpty: '当前页面没有可扫描的外部插件结构（会话页，或还没打开插件页）。',
+      externalIframe: '该页面是 iframe，内部结构无法拆解（只能整页显隐）。',
+      externalCount: (total, hide, reorder) => `扫描到 ${total} 个候选 · 可隐藏 ${hide} · 可排序 ${reorder}`,
+      externalHistorical: '当前不在插件页，显示最近一次扫描结果；切到该插件页后重新扫描并生效。',
+      externalExport: '导出候选清单',
+      externalReadonly: '只读',
+      externalTypeHeader: '页头',
+      externalTypeFooter: '页底',
+      externalTypeAside: '侧栏',
+      externalTypeScroll: '滚动区',
+      externalTypeRow: '行区',
+      externalTypeMain: '主体',
+      externalTypeTabItem: '标签项',
+      externalTypeGroupItem: '组内项',
+      externalTypeContentItem: '内容项',
+      externalBlockedOnlyScroll: '唯一滚动容器',
+      externalBlockedInputs: '含输入控件',
+      externalBlockedEntry: '入口类',
+      externalBlockedTooLarge: '占满整页',
+      externalActionHide: '可隐藏',
+      externalActionReorder: '可排序',
       rightbarPanel: '右栏',
       rightbarPanelHint: '右栏内部的标签栏与内容区；宽度在「区域结构」里调。',
       rightbarPartsHint: '右栏拆解：标签栏与内容区可各自隐藏，标签栏也可放到内容区下方。',
@@ -229,6 +252,29 @@ window.__ModuleLoader__.load({
       coverageDetected: 'Detected',
       coverageEmpty: 'Empty',
       coveragePending: 'Pending',
+      externalTitle: 'External plugin units',
+      externalHint: 'Auto-scans the current plugin page structure; this stage is read-only: candidates are listed, nothing changes.',
+      externalEmpty: 'No external plugin structure to scan on this page (conversation page, or no plugin page open).',
+      externalIframe: 'This page is an iframe; its internals cannot be decomposed (whole-page visibility only).',
+      externalCount: (total, hide, reorder) => `${total} candidates · ${hide} hideable · ${reorder} reorderable`,
+      externalHistorical: 'Not on a plugin page right now; showing the last scan. Switch to that plugin page to rescan and apply.',
+      externalExport: 'Export candidates',
+      externalReadonly: 'Read only',
+      externalTypeHeader: 'Header',
+      externalTypeFooter: 'Footer',
+      externalTypeAside: 'Aside',
+      externalTypeScroll: 'Scroll area',
+      externalTypeRow: 'Row',
+      externalTypeMain: 'Main',
+      externalTypeTabItem: 'Tab item',
+      externalTypeGroupItem: 'Group item',
+      externalTypeContentItem: 'Content item',
+      externalBlockedOnlyScroll: 'Only scroll container',
+      externalBlockedInputs: 'Contains inputs',
+      externalBlockedEntry: 'Entry point',
+      externalBlockedTooLarge: 'Fills the page',
+      externalActionHide: 'Hideable',
+      externalActionReorder: 'Reorderable',
       rightbarPanel: 'Right column',
       rightbarPanelHint: 'The tab strip and content area inside the right column; width is set in region structure.',
       rightbarPartsHint: 'Right column parts: the tab strip and content can each be hidden, and the tab strip can move below the content.',
@@ -425,6 +471,7 @@ window.__ModuleLoader__.load({
       headerParts: null,
       composerParts: null,
       messagesParts: null,
+      external: null,
       units: {},
       settings: null,
       surfaces: [],
@@ -616,12 +663,15 @@ window.__ModuleLoader__.load({
       const previous = snapshot.targets;
       const surfaceSignature = (list) => list.map((surface) => `${surface.id}:${surface.active ? 1 : 0}:${surface.source}:${surface.tier}:${surface.recognized ? 1 : 0}`).join('|');
       const anomalySignature = (list) => list.map((item) => `${item.label}:${item.kind}`).join('|');
-      const signature = targets.ok
-        ? `${Object.keys(targets.regions).join(',')}|${targets.panels.map((panel) => panel.label).join('\u0001')}|${targets.settings ? 's' : ''}|${surfaceSignature(targets.surfaces)}|${anomalySignature(targets.anomalies ?? [])}`
-        : '';
-      const previousSignature = previous.ok
-        ? `${Object.keys(previous.regions).join(',')}|${previous.panels.map((panel) => panel.label).join('\u0001')}|${previous.settings ? 's' : ''}|${surfaceSignature(previous.surfaces ?? [])}|${anomalySignature(previous.anomalies ?? [])}`
-        : '';
+      // 外部插件扫描结果也进签名：页面切换/扫描变化时卡片与样式要跟着重绘
+      const externalSignature = (value) => (value === null || value === undefined
+        ? ''
+        : `${value.pageKey}:${(value.units ?? []).map((unit) => unit.key).join(',')}:${value.iframe === null ? 'd' : 'i'}`);
+      const buildSignature = (value) => (value.ok
+        ? `${Object.keys(value.regions).join(',')}|${value.panels.map((panel) => panel.label).join('\u0001')}|${value.settings ? 's' : ''}|${surfaceSignature(value.surfaces ?? [])}|${anomalySignature(value.anomalies ?? [])}|${externalSignature(value.external)}`
+        : '');
+      const signature = buildSignature(targets);
+      const previousSignature = buildSignature(previous);
       if (signature === previousSignature && targets.ok === previous.ok) {
         snapshot = { ...snapshot, targets };
         return false;
@@ -1259,6 +1309,282 @@ window.__ModuleLoader__.load({
       return { messages, viewArea, frame, flow, rail };
     }
 
+    /* ============================== 外部插件页面：自动拆解 ============================== */
+    /**
+     * 外部插件自动拆解（通用，不针对任何具体插件）。
+     * 只依赖浏览器通用事实：几何、computedStyle、ARIA role、重复结构、交互控件数量。
+     * 拆解深度固定 2 层：页面区域 → 区域的直接子级；不再往下。
+     * 三档来源：插件自声明（data-dshl-unit）→ 人工登记 → 通用启发式。
+     */
+    const EXTERNAL_SCAN_KEY = 'dsh-layout/plugin-units/v1';
+    const EXTERNAL_REGISTRY_KEY = 'dsh-layout/plugin-units-registry/v1';
+    const EXTERNAL_MAX_DEPTH = 2;
+    const EXTERNAL_MAX_UNITS = 80;
+    const SCAN_SCROLL_MS = 1500;
+    const XUNIT_TEXT_INPUT = 'input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]):not([type="range"]), textarea, select, [contenteditable="true"]';
+    const XUNIT_INTERACTIVE = 'button, a[href], input, textarea, select, [role="button"], [role="tab"], [role="menuitem"], [contenteditable="true"]';
+    const XUNIT_ENTRY = '[role="tab"], [role="tablist"], [role="menuitem"], [role="navigation"], nav, a[href]';
+
+    /** 当前激活的侧栏面板名，作为外部插件页面的稳定 pageKey。 */
+    function activePageKey() {
+      const active = [...document.querySelectorAll('[data-dshl-panel]')].find((node) => node.getAttribute('aria-current') === 'page');
+      return active === null || active === undefined ? '(unknown)' : (active.getAttribute('data-dshl-panel') ?? '(unknown)');
+    }
+
+    /** 类名前缀：CSS module 哈希形如 `_7D6uKa_board` 时取哈希段，作为弱签名。 */
+    function classPrefixOf(node) {
+      const token = String(node.className ?? '').split(/\s+/).find((item) => item.length > 0) ?? '';
+      const cleaned = token.replace(/^_+/, '');
+      const segment = cleaned.split(/[_-]/)[0];
+      return /^[A-Za-z0-9][A-Za-z0-9]*$/.test(segment) ? segment.slice(0, 16) : '';
+    }
+
+    function textFingerprintOf(node) {
+      return (node.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 24);
+    }
+
+    /**
+     * 找外部插件页面的根节点。
+     * 会话页不扫；其余页面从 main 槽位里第一个真实布局盒起，收拢「整页单子级包裹」直到出现分支。
+     * 槽位本身常是 display:contents（零尺寸），先按层级展开到第一个有尺寸的盒子，避免把零尺寸包裹当页面根。
+     */
+    function firstLaidOutBox(scope) {
+      const queue = [scope];
+      while (queue.length > 0) {
+        const node = queue.shift();
+        for (const child of node.children) {
+          if (child.tagName === 'STYLE' || child.tagName === 'SCRIPT') continue;
+          const style = getComputedStyle(child);
+          const rect = child.getBoundingClientRect();
+          if (style.display === 'contents' || rect.width < 40 || rect.height < 40) {
+            queue.push(child);
+            continue;
+          }
+          return child;
+        }
+      }
+      return null;
+    }
+
+    function readExternalPage(centerCol) {
+      if (centerCol === null || centerCol === undefined) return null;
+      if (first(centerCol, '[data-slot="main.conversation"]') !== null) return null;
+      // 布局插件自己的插件详情页（编辑区所在页）不是待拆解对象，跳过并保留上一次扫描结果
+      if (first(centerCol, '[data-plugin-detail="dsh-layout"]') !== null) return null;
+      const scope = first(centerCol, '[data-slot="main"]') ?? centerCol;
+      let root = firstLaidOutBox(scope);
+      if (root === null) return null;
+      // 整页单子级包裹（含滚动根）向下收拢，最多 3 层。
+      // 滚动容器里的内容可能比视口短，所以它是滚动容器时不再要求「高度占 90%」。
+      for (let guard = 0; guard < 3; guard += 1) {
+        const significant = [...root.children].filter((child) => {
+          if (child.tagName === 'STYLE' || child.tagName === 'SCRIPT') return false;
+          const rect = child.getBoundingClientRect();
+          return rect.width >= 40 && rect.height >= 30;
+        });
+        if (significant.length !== 1) break;
+        const only = significant[0];
+        const parentRect = root.getBoundingClientRect();
+        const childRect = only.getBoundingClientRect();
+        const rootStyle = getComputedStyle(root);
+        const rootScrolls = rootStyle.overflowY === 'auto' || rootStyle.overflowY === 'scroll';
+        if (childRect.width < parentRect.width * 0.9) break;
+        if (!rootScrolls && childRect.height < parentRect.height * 0.9) break;
+        root = only;
+      }
+      const pageKey = activePageKey();
+      const rootRect = root.getBoundingClientRect();
+      // 只有 iframe 占页面主要面积时才当成 iframe 页面；页面里嵌了个小预览框不算
+      const iframe = first(root, 'iframe');
+      if (iframe !== null) {
+        const iframeRect = iframe.getBoundingClientRect();
+        const dominant = iframeRect.width * iframeRect.height >= rootRect.width * rootRect.height * 0.5;
+        if (dominant) return { pageKey, root, iframe, units: [] };
+      }
+      if (root.tagName === 'IFRAME') return { pageKey, root, iframe: root, units: [] };
+      return { pageKey, root, iframe: null, units: [] };
+    }
+
+    /** 页面里所有「真的在滚动」的容器数量：只有一个时它是页面主体，禁止隐藏。 */
+    function countScrollContainers(root) {
+      let count = 0;
+      const walk = (node) => {
+        for (const child of node.children) {
+          if (child.tagName === 'STYLE' || child.tagName === 'SCRIPT' || child.tagName === 'IFRAME') continue;
+          const style = getComputedStyle(child);
+          if ((style.overflowY === 'auto' || style.overflowY === 'scroll') && child.scrollHeight > child.clientHeight + 4) count += 1;
+          walk(child);
+        }
+      };
+      walk(root);
+      return count;
+    }
+
+    /** 单元的可拆性判定：四档输出，入口类只给排序/尺寸不给隐藏。 */
+    function judgeExternalUnit(node, rootArea, opts) {
+      const rect = node.getBoundingClientRect();
+      const style = getComputedStyle(node);
+      const interactive = node.querySelectorAll(XUNIT_INTERACTIVE).length;
+      const inputs = node.querySelectorAll(XUNIT_TEXT_INPUT).length;
+      const isScroll = (style.overflowY === 'auto' || style.overflowY === 'scroll') && node.scrollHeight > node.clientHeight + 4;
+      const onlyScroll = isScroll && opts.scrollCount <= 1;
+      // 入口判定：以导航/切换为主要目的的单元，或「很小、只含少量链接/标签」的单元。
+      // 一个带标题和若干按钮的页头不算入口——它不是一个导航单元。
+      const entrySelf = node.matches(XUNIT_ENTRY) || node.getAttribute('role') === 'navigation';
+      const navControls = node.querySelectorAll('a[href], [role="tab"], [role="menuitem"]').length;
+      const textLength = (node.textContent ?? '').trim().length;
+      const entrySmall = interactive > 0 && interactive <= 2 && navControls >= 1 && textLength <= 40;
+      const entry = entrySelf || entrySmall;
+      const ratio = (rect.width * rect.height) / (rootArea || 1);
+      const actions = [];
+      const blocked = [];
+      if (onlyScroll) blocked.push('onlyScroll');
+      if (inputs > 0) blocked.push('inputs');
+      if (entry) blocked.push('entry');
+      if (ratio > 0.85) blocked.push('tooLarge');
+      if (!blocked.includes('onlyScroll') && !blocked.includes('inputs') && !blocked.includes('tooLarge') && !blocked.includes('entry')) actions.push('hide');
+      if (opts.reorderable) actions.push('reorder');
+      if (!blocked.includes('inputs') && !blocked.includes('onlyScroll')) actions.push('resize');
+      return {
+        interactive,
+        inputs,
+        isScroll,
+        onlyScroll,
+        entry,
+        ratio: Math.round(ratio * 1000) / 1000,
+        actions,
+        blocked,
+        position: style.position,
+      };
+    }
+
+    /** 装饰性覆盖层：绝对/固定定位、不可交互、没有文字（氛围层、光效、背景图）。 */
+    function isDecorativeNode(node) {
+      const style = getComputedStyle(node);
+      const fixedish = style.position === 'absolute' || style.position === 'fixed';
+      if (!fixedish) return false;
+      if (style.pointerEvents === 'none') return true;
+      return node.querySelectorAll(XUNIT_INTERACTIVE).length === 0 && (node.textContent ?? '').trim().length === 0;
+    }
+
+    /** 区域类型：header / footer / aside / row / scroll / main */
+    function classifyRegion(node, rootRect, rect) {
+      const widthRatio = rect.width / (rootRect.width || 1);
+      const heightRatio = rect.height / (rootRect.height || 1);
+      const topGap = rect.top - rootRect.top;
+      const bottomGap = rootRect.bottom - rect.bottom;
+      const style = getComputedStyle(node);
+      const isScroll = (style.overflowY === 'auto' || style.overflowY === 'scroll') && node.scrollHeight > node.clientHeight + 4;
+      if (widthRatio >= 0.5 && heightRatio <= 0.25 && topGap <= 24) return 'header';
+      if (widthRatio >= 0.5 && heightRatio <= 0.25 && bottomGap <= 24) return 'footer';
+      if (widthRatio >= 0.12 && widthRatio <= 0.45 && heightRatio >= 0.55) return 'aside';
+      if (widthRatio >= 0.85 && heightRatio <= 0.4) return 'row';
+      if (isScroll) return 'scroll';
+      return 'main';
+    }
+
+    /**
+     * 扫描外部插件页面，产出候选单元（只读发现）。
+     * L1：页面根的直接子级（区域带，跳过装饰层）；
+     * L2：区域里「成组」的直接子级（尺寸一致的重复结构，或 role 明确是 tablist/toolbar/nav/list/grid）；
+     * 深度固定 2 层，再往下不扫。
+     */
+    function scanExternalUnits(root) {
+      const rootRect = root.getBoundingClientRect();
+      const rootArea = rootRect.width * rootRect.height;
+      if (rootRect.width < 200 || rootRect.height < 120) return [];
+      const scrollCount = countScrollContainers(root);
+      const units = [];
+      const seen = new Set();
+      const push = (node, depth, parentKey, index, type, extra) => {
+        if (units.length >= EXTERNAL_MAX_UNITS || seen.has(node)) return;
+        seen.add(node);
+        const rect = node.getBoundingClientRect();
+        const judge = judgeExternalUnit(node, rootArea, { scrollCount, reorderable: extra.reorderable === true });
+        const key = depth === 1 ? `L1.${index}` : `${parentKey}.${index}`;
+        units.push({
+          key,
+          depth,
+          parentKey,
+          index,
+          tag: node.tagName,
+          classPrefix: classPrefixOf(node),
+          role: node.getAttribute('role') ?? '',
+          type,
+          label: (node.getAttribute('aria-label') ?? textFingerprintOf(node) ?? '').slice(0, 24),
+          text: textFingerprintOf(node),
+          rect: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
+          confidence: ['header', 'footer', 'aside', 'scroll'].includes(type) || extra.repeat === true ? 'high' : 'low',
+          judge,
+        });
+      };
+      const l1Nodes = [...root.children].filter((node) => {
+        if (node.tagName === 'STYLE' || node.tagName === 'SCRIPT') return false;
+        const rect = node.getBoundingClientRect();
+        return rect.width >= 24 && rect.height >= 16;
+      });
+      const kept = l1Nodes.filter((node) => !isDecorativeNode(node));
+      const signatures = kept.map((node) => `${node.tagName}|${classPrefixOf(node)}`);
+      const repeatedCount = (index) => signatures.filter((sig) => sig === signatures[index]).length;
+      kept.forEach((node, index) => {
+        const rect = node.getBoundingClientRect();
+        const type = classifyRegion(node, rootRect, rect);
+        push(node, 1, null, l1Nodes.indexOf(node), type, { reorderable: kept.length >= 2, repeat: repeatedCount(index) >= 2 });
+      });
+      if (EXTERNAL_MAX_DEPTH < 2) return units;
+      kept.forEach((node) => {
+        const l1Index = l1Nodes.indexOf(node);
+        const parentKey = `L1.${l1Index}`;
+        const kids = [...node.children].filter((child) => {
+          if (['STYLE', 'SCRIPT', 'IFRAME'].includes(child.tagName)) return false;
+          const rect = child.getBoundingClientRect();
+          return rect.width >= 24 && rect.height >= 16 && !isDecorativeNode(child);
+        });
+        if (kids.length < 2) return;
+        const role = node.getAttribute('role') ?? '';
+        const containerRole = ['tablist', 'toolbar', 'navigation', 'list', 'grid', 'group', 'menu', 'radiogroup'].includes(role)
+          || node.querySelector('[role="tablist"], [role="toolbar"], [role="list"], [role="grid"]') !== null;
+        const kidSignatures = kids.map((child) => `${child.tagName}|${classPrefixOf(child)}|${Math.round(child.getBoundingClientRect().height / 8)}`);
+        const uniform = kidSignatures.every((sig) => sig === kidSignatures[0]);
+        const isTabBar = role === 'tablist' || node.querySelector('[role="tablist"]') !== null;
+        // 只拆「成组」或「本身是主体/侧栏/滚动区」的容器：
+        // 尺寸一致的重复结构、语义明确的标签条/工具栏，以及主体区域里的带状子级；
+        // 普通页头/页脚里的零散按钮与标题不拆，避免噪音。
+        const parentType = classifyRegion(node, rootRect, node.getBoundingClientRect());
+        const regionLike = ['main', 'aside', 'scroll'].includes(parentType);
+        if (!uniform && !containerRole && !isTabBar && !regionLike) return;
+        kids.forEach((child, childIndex) => {
+          const type = isTabBar ? 'tab-item' : uniform ? 'group-item' : 'content-item';
+          push(child, 2, parentKey, childIndex, type, { reorderable: true, repeat: uniform });
+        });
+      });
+      return units;
+    }
+
+    /** 扫描缓存：同一页面同一根节点 1.5 秒内不重复扫，避免 MutationObserver 高频刷新时反复扫描。 */
+    let externalScanCache = { pageKey: '', root: null, at: 0, units: [] };
+
+    function scanExternalPageCached(page) {
+      const now = Date.now();
+      if (externalScanCache.root === page.root && externalScanCache.pageKey === page.pageKey && now - externalScanCache.at < SCAN_SCROLL_MS) {
+        return externalScanCache.units;
+      }
+      const units = page.iframe === null ? scanExternalUnits(page.root) : [];
+      externalScanCache = { pageKey: page.pageKey, root: page.root, at: now, units };
+      const store = readJsonStore(EXTERNAL_SCAN_KEY);
+      store[page.pageKey] = {
+        scannedAt: new Date(now).toISOString(),
+        kind: page.iframe === null ? 'dom' : 'iframe',
+        units,
+      };
+      // 只保留最近 12 个页面的扫描结果，避免 localStorage 无限增长
+      const keys = Object.keys(store).sort((a, b) => String(store[b].scannedAt).localeCompare(String(store[a].scannedAt)));
+      for (const key of keys.slice(12)) delete store[key];
+      writeJsonStore(EXTERNAL_SCAN_KEY, store);
+      return units;
+    }
+
+
     /**
      * 把各区域识别结果收束成统一单元表：id → 元素数组（一个单元可能对应多个节点，例如设置页导航列含标题）。
      * 标记、样式、卡片、覆盖度都读这张表，不再各自维护一套形状。
@@ -1363,7 +1689,9 @@ window.__ModuleLoader__.load({
         markAuxPartsSeen('settings');
       }
       const ok = Boolean(sidebarCol && centerCol && rightbarCol);
-      const targets = { ok, frame, regions, sidebarRoot, blocks, sidebarParts, panels, conversation, convParts, headerParts, composerParts, messagesParts, rightbarParts, settingsParts, settings, units: {}, surfaces: [], anomalies: [] };
+      const externalPage = readExternalPage(centerCol);
+      if (externalPage !== null) externalPage.units = scanExternalPageCached(externalPage);
+      const targets = { ok, frame, regions, sidebarRoot, blocks, sidebarParts, panels, conversation, convParts, headerParts, composerParts, messagesParts, rightbarParts, settingsParts, settings, external: externalPage, units: {}, surfaces: [], anomalies: [] };
       targets.units = collectPartUnits(targets);
       targets.surfaces = readSurfaces(targets);
       targets.anomalies = Object.values(surfaceAnomalies).sort((a, b) => b.lastSeenAt - a.lastSeenAt);
@@ -2395,11 +2723,98 @@ window.__ModuleLoader__.load({
         h('span', { className: 'dshl-surfaceDot', 'data-on': row.status === 'detected' ? 'true' : 'false', 'data-source': 'official', 'aria-hidden': true }),
         h('span', { className: 'dshl-itemLabel' }, t(row.spec.labelKey)),
         h('span', { className: 'dshl-itemSub' }, row.status === 'detected' ? t('coverageDetected') : row.status === 'empty' ? t('coverageEmpty') : t('coveragePending')));
+      // 外部插件页面：只读候选清单 + 导出。
+      // 编辑区在插件详情页上，此刻不在插件页里，所以拿不到实时扫描；此时回退显示最近一次扫描结果。
+      const liveExternal = targets.external ?? null;
+      const lastScan = (() => {
+        if (liveExternal !== null) return null;
+        const store = readJsonStore(EXTERNAL_SCAN_KEY);
+        const keys = Object.keys(store);
+        if (keys.length === 0) return null;
+        keys.sort((a, b) => String(store[b].scannedAt).localeCompare(String(store[a].scannedAt)));
+        // 优先展示「最近扫描过的其他插件页」：编辑区常驻在「插件」页，展示插件列表自身结构意义不大
+        const currentKey = activePageKey();
+        const pick = keys.find((key) => key !== currentKey && store[key].kind === 'dom' && (store[key].units ?? []).length > 0) ?? keys[0];
+        return { pageKey: pick, kind: store[pick].kind, units: store[pick].units ?? [], scannedAt: store[pick].scannedAt };
+      })();
+      const external = liveExternal ?? lastScan;
+      const externalHistorical = liveExternal === null && lastScan !== null;
+      const externalIframe = external !== null && ((external.iframe ?? null) !== null || external.kind === 'iframe');
+      const externalUnits = external?.units ?? [];
+      const typeLabel = (type) => t({
+        header: 'externalTypeHeader',
+        footer: 'externalTypeFooter',
+        aside: 'externalTypeAside',
+        scroll: 'externalTypeScroll',
+        row: 'externalTypeRow',
+        main: 'externalTypeMain',
+        'tab-item': 'externalTypeTabItem',
+        'group-item': 'externalTypeGroupItem',
+        'content-item': 'externalTypeContentItem',
+      }[type] ?? 'externalTypeContentItem');
+      const blockedLabel = (flags) => flags.map((flag) => t({
+        onlyScroll: 'externalBlockedOnlyScroll',
+        inputs: 'externalBlockedInputs',
+        entry: 'externalBlockedEntry',
+        tooLarge: 'externalBlockedTooLarge',
+      }[flag] ?? flag)).join(' / ');
+      const externalActionText = (unit) => {
+        const parts = [];
+        if (unit.judge.actions.includes('hide')) parts.push(t('externalActionHide'));
+        if (unit.judge.actions.includes('reorder')) parts.push(t('externalActionReorder'));
+        return parts.length === 0 ? t('externalReadonly') : parts.join(' · ');
+      };
+      const exportExternal = () => {
+        const payload = {
+          exportedAt: new Date().toISOString(),
+          plugin: 'dsh-layout',
+          version: 1,
+          note: '外部插件自动拆解候选清单：只读阶段的扫描结果，可用于人工登记与模板化。actions 为允许的操作，blocked 为受限原因。',
+          pages: external === null || externalUnits.length === 0
+            ? []
+            : [{ pageKey: external.pageKey, kind: externalIframe ? 'iframe' : 'dom', units: externalUnits }],
+        };
+        try {
+          const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const anchor = document.createElement('a');
+          anchor.href = url;
+          anchor.download = `dsh-layout-external-units-${new Date().toISOString().slice(0, 10)}.json`;
+          anchor.click();
+          window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+        } catch (error) {
+          console.warn('[dsh-layout] 导出外部插件候选清单失败', error);
+        }
+      };
+      const externalRows = external === null
+        ? [h('div', { key: 'none', className: 'dshl-hint' }, t('externalEmpty'))]
+        : externalIframe
+          ? [h('div', { key: 'iframe', className: 'dshl-hint' }, t('externalIframe'))]
+          : externalUnits.length === 0
+            ? [h('div', { key: 'empty', className: 'dshl-hint' }, t('externalEmpty'))]
+            : externalUnits.map((unit) => h('div', { key: unit.key, className: 'dshl-item' },
+              h('span', { className: 'dshl-surfaceDot', 'data-on': unit.judge.actions.includes('hide') ? 'true' : 'false', 'data-source': 'third', 'aria-hidden': true }),
+              h('span', { className: 'dshl-itemLabel', title: `${unit.key} · ${unit.classPrefix}` }, `${typeLabel(unit.type)} · ${unit.label || unit.classPrefix || unit.tag}`),
+              h('span', { className: 'dshl-itemSub' }, blockedLabel(unit.judge.blocked).length > 0 ? blockedLabel(unit.judge.blocked) : externalActionText(unit))));
       return h(Card, { title: t('coverage'), desc: t('coverageHint') },
         h('div', { className: 'dshl-hint' }, t('coverageSummary')(detected, empty, pending)),
         ...areas.map(([area, label]) => h('div', { key: area, className: 'dshl-surfaceGroup' },
           h('div', { className: 'dshl-surfaceGroupTitle' }, label),
-          h('div', { className: 'dshl-list' }, rows.filter((row) => row.spec.area === area).map(unitRow)))));
+          h('div', { className: 'dshl-list' }, rows.filter((row) => row.spec.area === area).map(unitRow)))),
+        h('div', { className: 'dshl-surfaceGroup' },
+          h('div', { className: 'dshl-surfaceGroupTitle' }, `${t('externalTitle')}${external === null ? '' : ` · ${external.pageKey}`}`),
+          h('div', { className: 'dshl-hint' }, t('externalHint')),
+          externalHistorical ? h('div', { className: 'dshl-hint' }, `${t('externalHistorical')}${external.scannedAt === undefined ? '' : ` · ${String(external.scannedAt).replace('T', ' ').slice(0, 19)}`}`) : null,
+          external !== null && !externalIframe && externalUnits.length > 0
+            ? h('div', { className: 'dshl-hint' }, t('externalCount')(
+              externalUnits.length,
+              externalUnits.filter((unit) => unit.judge.actions.includes('hide')).length,
+              externalUnits.filter((unit) => unit.judge.actions.includes('reorder')).length,
+            ))
+            : null,
+          h('div', { className: 'dshl-list dshl-listScroll' }, externalRows),
+          h('div', { className: 'dshl-row' },
+            h('button', { type: 'button', className: 'dshl-btn', disabled: external === null || externalUnits.length === 0, onClick: exportExternal }, t('externalExport')))));
     }
 
     /**
