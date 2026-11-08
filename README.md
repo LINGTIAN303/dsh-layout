@@ -27,7 +27,7 @@ DSH 界面布局插件：把左栏、右栏、会话区、设置页的结构、�
 | 编辑模式 | 在界面上直接拖动列分隔条改宽度；浮动工具条切换预设 |
 | 预设 | 标准 / 紧缩侧栏 / 专注 / 右栏左置 / 宽屏（起点模板，点一下即应用） |
 | 布局方案 | 把当前整套配置存成命名方案（上限 20 套），随时切换、覆盖、改名、删除。切换是整套替换：三栏、侧栏、拆解、槽位编排、入口收纳、联动规则全部跟着换。预设是模板、方案是自己的，并列在「布局结构」分页 |
-| 数据 | JSON 导出、导入、恢复默认、本地持久化 |
+| 数据 | JSON 导出、导入、恢复默认；**持久化在宿主侧**：配置与方案写进当前 profile 的 `cordis.patch.yml`（`- id: layout` 节），换浏览器、换 Web 端、清缓存都不会丢；浏览器 `localStorage` 只作启动渲染缓存，宿主不可用时降级为唯一存储 |
 
 宽度、顺序、显隐都是即时生效，不需要重启；「启用自定义布局」关闭后立刻回到 DSH 默认布局（配置保留）。
 
@@ -108,7 +108,7 @@ plugin_manager install_bundle，target 为 E:\dsh-layout
 dsh-layout/
 ├── package.json          # bundle 清单：dsh.bundle.patch + dsh.client
 ├── cordis.patch.yml      # 插入插件行 id: layout
-├── index.js              # Host 半边（仅占位，界面全在 Client）
+├── index.js              # Host 半边：声明可持久化的配置节（schemastery Config + settings.configure）
 ├── client.js             # Client 半边：注解器、样式引擎、全局编辑面板、编辑模式层
 ├── locale/zh.json|en.json# 插件列表里的标题与描述
 ├── icon.svg              # 插件图标

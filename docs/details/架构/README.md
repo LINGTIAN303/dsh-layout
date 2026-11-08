@@ -286,6 +286,23 @@ flowchart LR
 - **读取即规范**：条目结构不完整的丢弃、`config` 重新过 `normalizeConfig`、超 20 套截断并写回——存储与界面不会长期不一致。
 - **边界**：不做方案自动切换（按页面自动切属于联动规则，已有机制）；不做方案级导入导出（配置层已有整体导出/导入）。
 
+## 持久化（配置跟着 DSH 走，不跟着浏览器走）
+
+布局配置与布局方案是用户调了很久的成果，不能因为换浏览器、换 Web 端、清缓存就归零。所以主存储放在**宿主侧**，浏览器只做渲染缓存：
+
+| 层 | 位置 | 职责 |
+| --- | --- | --- |
+| Host 侧声明（`index.js`） | schemastery `Config { document, schemes }`（两个 `.volatile()` 的 JSON 字符串）+ `ctx.settings.configure({ auto: false }, ctx.fiber)` | 让宿主认得本插件有一个可持久化配置节，命名空间 = 插件行 id `layout` |
+| 主存储 | 当前 profile 的 `cordis.patch.yml` 里的 `- id: layout` 节 | 宿主每次启动都会应用；与浏览器无关，换浏览器/清缓存都在 |
+| 渲染缓存 | `localStorage` 的 `dsh-layout/*` | 启动即用，避免等异步读盘时闪默认布局；宿主不可用时它就是唯一存储（降级） |
+| 读写通道 | 客户端 `ctx.configForms.get('layout')` | `getSnapshot()` 读、`subscribe()` 订阅、`set(field, text)` 写；落盘与并发由宿主负责 |
+
+- **字段是字符串不是结构化对象**：配置字段随版本演进（storage / arrange / relocate / rules / sync / schemes），每加一层都要同步 schema，而 schema 校验失败会让整节配置被宿主丢弃。客户端的 `normalizeConfig` 已是权威校验，schema 只做字符串粗校验。
+- **只 volatile 字段可写**：当前版本的 `dsh-settings` 用 `isVolatilePath` 校验写入路径，没有 `.volatile()` 标记的字段会被拒绝。
+- **回环与并发**：`hostLastWritten` 记住已写入的字符串，读回到自己写的值直接跳过；`hostWriteChain` 串行化写入；`writable === false` 的部署不发写请求。
+- **首次迁移**：宿主该字段为空时（升级到宿主存储的第一天），客户端把 localStorage 里的现值推上去，避免「用户不改任何设置就永远带不走旧配置」。
+- 落盘位置**不是** `~/.dsh/settings.yaml`：那份文件在当前版本已被废弃，只剩一次性导入迁移（导入后改名 `.imported`）。判断依据只能取当前 `D:\DSH` asar 里的包，本机 `D:\deepseek-harness` 是停滞的旧源码。
+
 ## 编辑面板（全局浮层）
 
 编辑器原来嵌在插件详情页里，而识别层只能看见「当前渲染在 DOM 里」的那一层界面：在详情页上，会话区/右栏/设置页都不在 DOM 里，卡片只能靠声明表与「见过」布尔出控件，调的时候看不到效果；设置页浮上来时虽然识别得到，详情页却被压在下面。**能识别的时候看不见，看得见的时候识别不到。**
