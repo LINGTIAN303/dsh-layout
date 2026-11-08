@@ -35,12 +35,18 @@ window.__ModuleLoader__.load({
       moveUp: '上移',
       moveDown: '下移',
       sidebarBlocks: '侧栏内容',
-      sidebarBlocksHint: '排序或隐藏侧栏内部的区块。',
+      sidebarBlocksHint: '排序或隐藏侧栏内部的区块；下方还能再拆一层。',
       blockBrand: '品牌行',
       blockNewSession: '新建会话',
       blockPanels: '面板导航',
       blockWorkspaces: '工作区',
       blockFooter: '底部操作',
+      sidebarPartsHint: '侧栏拆解：品牌行与底部区内部的单元可单独隐藏。',
+      sidebarPartsMissing: '未识别侧栏内部结构，拆解项暂不可用。',
+      partBrandIdentity: '品牌行 · 品牌标识',
+      partBrandToggle: '品牌行 · 收起按钮',
+      partFooterStatus: '底部区 · 状态按钮行',
+      partFooterAccount: '底部区 · 账号菜单',
       panels: '面板导航',
       panelsHint: '左栏面板图标的顺序与显隐；列表来自当前界面。',
       panelsEmpty: '未检测到面板，先打开左栏。',
@@ -157,12 +163,18 @@ window.__ModuleLoader__.load({
       moveUp: 'Move up',
       moveDown: 'Move down',
       sidebarBlocks: 'Sidebar content',
-      sidebarBlocksHint: 'Order or hide the blocks inside the sidebar.',
+      sidebarBlocksHint: 'Order or hide the blocks inside the sidebar; one level deeper below.',
       blockBrand: 'Brand row',
       blockNewSession: 'New session',
       blockPanels: 'Panels',
       blockWorkspaces: 'Workspaces',
       blockFooter: 'Footer actions',
+      sidebarPartsHint: 'Sidebar parts: units inside the brand row and the footer can be hidden separately.',
+      sidebarPartsMissing: 'The sidebar internals are not recognized; the split controls are unavailable.',
+      partBrandIdentity: 'Brand row · identity',
+      partBrandToggle: 'Brand row · collapse button',
+      partFooterStatus: 'Footer · status buttons',
+      partFooterAccount: 'Footer · account menu',
       panels: 'Panel navigation',
       panelsHint: 'Order and visibility of the sidebar panel icons, read from the interface.',
       panelsEmpty: 'No panels detected; open the sidebar first.',
@@ -270,7 +282,14 @@ window.__ModuleLoader__.load({
         hideBottom: false,
         resizeHandles: true,
       },
-      sidebar: { order: [...BLOCKS], hidden: [], panelOrder: [], panelHidden: [] },
+      sidebar: {
+        order: [...BLOCKS],
+        hidden: [],
+        panelOrder: [],
+        panelHidden: [],
+        // 侧栏拆解：品牌行（品牌标识 / 收起按钮）与底部区（状态按钮行 / 账号菜单）
+        parts: { hideIdentity: false, hideToggle: false, hideStatus: false, hideAccount: false },
+      },
       center: {
         contentWidth: null,
         parts: { hideHeader: false, hideMessages: false, hideComposer: false, headerBottom: false, composerTop: false },
@@ -294,6 +313,7 @@ window.__ModuleLoader__.load({
       regions: {},
       sidebarRoot: null,
       blocks: {},
+      sidebarParts: null,
       panels: [],
       conversation: null,
       settings: null,
@@ -343,11 +363,18 @@ window.__ModuleLoader__.load({
       const blockOrder = uniqValid(sb.order, BLOCKS);
       for (const block of BLOCKS) if (!blockOrder.includes(block)) blockOrder.push(block);
       const strings = (list) => (Array.isArray(list) ? list.filter((item) => typeof item === 'string' && item.length > 0).slice(0, 200) : []);
+      const sidebarParts = sb.parts && typeof sb.parts === 'object' ? sb.parts : {};
       out.sidebar = {
         order: blockOrder,
         hidden: uniqValid(sb.hidden, BLOCKS),
         panelOrder: [...new Set(strings(sb.panelOrder))],
         panelHidden: [...new Set(strings(sb.panelHidden))],
+        parts: {
+          hideIdentity: sidebarParts.hideIdentity === true,
+          hideToggle: sidebarParts.hideToggle === true,
+          hideStatus: sidebarParts.hideStatus === true,
+          hideAccount: sidebarParts.hideAccount === true,
+        },
       };
       const center = raw.center && typeof raw.center === 'object' ? raw.center : {};
       const parts = center.parts && typeof center.parts === 'object' ? center.parts : {};
@@ -928,6 +955,7 @@ window.__ModuleLoader__.load({
     })();
     let rightbarPartsSeen = auxPartsFlags.rightbar === true;
     let settingsPartsSeen = auxPartsFlags.settings === true;
+    let sidebarPartsSeen = auxPartsFlags.sidebar === true;
 
     function markAuxPartsSeen(key) {
       if (auxPartsFlags[key] === true) return;
@@ -995,6 +1023,34 @@ window.__ModuleLoader__.load({
       };
     }
 
+    /**
+     * 侧栏内部拆解：品牌行拆成「品牌标识」「收起按钮」，底部区拆成「状态按钮行」「账号菜单」。
+     * 定位全部落在宿主的稳定标记上，不依赖 CSS 模块的哈希类名：
+     * - 品牌标识：含 [data-slot=sidebar.brand.mark] 的那个直接子级
+     * - 收起按钮：含 [data-sidebar-toggle] 的那个直接子级
+     * - 状态按钮行：含 [data-slot=sidebar.footer.action] 的那个直接子级
+     * - 账号菜单：含 [data-slot=sidebar.settings] 的那个直接子级
+     * 「直接子级」由锚点向上找到块的子级得到，因此中间多一层包裹也不影响识别。
+     */
+    function readSidebarParts(blocks) {
+      const branchOf = (block, selector) => {
+        if (block === null || block === undefined) return null;
+        const target = block.querySelector(selector);
+        if (target === null) return null;
+        let cur = target;
+        while (cur !== null && cur.parentElement !== block) cur = cur.parentElement;
+        return cur !== null && cur.parentElement === block ? cur : null;
+      };
+      const brand = blocks.brand ?? null;
+      const footer = blocks.footer ?? null;
+      const identity = branchOf(brand, '[data-slot="sidebar.brand.mark"]');
+      const toggle = branchOf(brand, '[data-sidebar-toggle]');
+      const status = branchOf(footer, '[data-slot="sidebar.footer.action"]');
+      const account = branchOf(footer, '[data-slot="sidebar.settings"]') ?? branchOf(footer, '[data-slot="settings.launcher"]');
+      if (identity === null && toggle === null && status === null && account === null) return null;
+      return { brand, footer, identity, toggle, status, account };
+    }
+
     function readTargets() {
       const rootEl = document.getElementById('root');
       if (rootEl === null) return ABSENT_TARGETS;
@@ -1013,6 +1069,11 @@ window.__ModuleLoader__.load({
       const sidebarSeat = sidebarCol ? first(sidebarCol, '[data-slot="sidebar"]') : null;
       const sidebarRoot = sidebarSeat ? sidebarSeat.firstElementChild : null;
       const blocks = classifySidebarBlocks(sidebarRoot);
+      const sidebarParts = readSidebarParts(blocks);
+      if (sidebarParts !== null && !sidebarPartsSeen) {
+        sidebarPartsSeen = true;
+        markAuxPartsSeen('sidebar');
+      }
       const panels = [];
       if (blocks.panels) {
         for (const node of [...blocks.panels.children]) {
@@ -1039,7 +1100,7 @@ window.__ModuleLoader__.load({
         markAuxPartsSeen('settings');
       }
       const ok = Boolean(sidebarCol && centerCol && rightbarCol);
-      const targets = { ok, frame, regions, sidebarRoot, blocks, panels, conversation, convParts, rightbarParts, settingsParts, settings, surfaces: [], anomalies: [] };
+      const targets = { ok, frame, regions, sidebarRoot, blocks, sidebarParts, panels, conversation, convParts, rightbarParts, settingsParts, settings, surfaces: [], anomalies: [] };
       targets.surfaces = readSurfaces(targets);
       targets.anomalies = Object.values(surfaceAnomalies).sort((a, b) => b.lastSeenAt - a.lastSeenAt);
       return targets;
@@ -1083,6 +1144,13 @@ window.__ModuleLoader__.load({
         mark(st.nav, 'data-dshl-setpart', 'nav');
         mark(st.header, 'data-dshl-setpart', 'header');
         mark(st.options, 'data-dshl-setpart', 'options');
+      }
+      const sb = targets.sidebarParts;
+      if (sb !== null && sb !== undefined) {
+        mark(sb.identity, 'data-dshl-sbpart', 'identity');
+        mark(sb.toggle, 'data-dshl-sbpart', 'toggle');
+        mark(sb.status, 'data-dshl-sbpart', 'status');
+        mark(sb.account, 'data-dshl-sbpart', 'account');
       }
     }
 
@@ -1272,6 +1340,12 @@ window.__ModuleLoader__.load({
       for (const label of config.sidebar.panelHidden) {
         lines.push(`[data-dshl-panel="${cssAttr(label)}"] { display: none !important; }`);
       }
+      // 侧栏内部拆解：四个单元各自隐藏，互不影响
+      const sbParts = config.sidebar.parts;
+      if (sbParts.hideIdentity) lines.push('[data-dshl-sbpart="identity"] { display: none !important; }');
+      if (sbParts.hideToggle) lines.push('[data-dshl-sbpart="toggle"] { display: none !important; }');
+      if (sbParts.hideStatus) lines.push('[data-dshl-sbpart="status"] { display: none !important; }');
+      if (sbParts.hideAccount) lines.push('[data-dshl-sbpart="account"] { display: none !important; }');
       if (config.center.contentWidth !== null) {
         const width = Math.round(config.center.contentWidth);
         lines.push(`[data-dshl-conv] { --dsh-chat-content-width: min(${width}px, 100%) !important; --dsh-composer-card-max-width: min(${width + 32}px, 100%) !important; }`);
@@ -1816,6 +1890,16 @@ window.__ModuleLoader__.load({
 
     function BlocksCard({ config, t }) {
       const items = config.sidebar.order.map((block) => ({ key: block, block }));
+      const parts = config.sidebar.parts;
+      const detected = sidebarPartsSeen;
+      const row = (label, control) => h('div', { className: 'dshl-row' },
+        h('span', { className: 'dshl-rowLabel' }, label),
+        control);
+      const partSwitch = (key, label) => row(label, h(Switch, {
+        checked: !parts[key],
+        label,
+        onChange: (on) => updateConfig((draft) => { draft.sidebar.parts[key] = !on; }),
+      }));
       return h(Card, { title: t('sidebarBlocks'), desc: t('sidebarBlocksHint') },
         h(SortableList, {
           items,
@@ -1837,7 +1921,13 @@ window.__ModuleLoader__.load({
               draft.sidebar.hidden = [...hidden];
             }),
           }),
-        }));
+        }),
+        h('div', { className: 'dshl-divider' }),
+        h('div', { className: 'dshl-cardDesc' }, detected ? t('sidebarPartsHint') : t('sidebarPartsMissing')),
+        detected ? partSwitch('hideIdentity', t('partBrandIdentity')) : null,
+        detected ? partSwitch('hideToggle', t('partBrandToggle')) : null,
+        detected ? partSwitch('hideStatus', t('partFooterStatus')) : null,
+        detected ? partSwitch('hideAccount', t('partFooterAccount')) : null);
     }
 
     function PanelsCard({ config, targets, t }) {
