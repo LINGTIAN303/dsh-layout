@@ -14,7 +14,7 @@ bundle: dsh-layout（package.json 的 dsh.bundle.patch + dsh.client）
    ├─ 槽位编排                     可排列容器（宿主布局容器 + 列表槽位出口）与网格排列
    ├─ 区域搬移                     投影：源节点 fixed 定位 + 目标容器占位符 + 矩形差校准
    ├─ 联动                         条件规则叠加层（页面 / 折叠 / 区域 / 单元）+ 面板导航 ↔ 插件来源配置同步
-   ├─ 入口收纳                     收纳域（侧栏面板 / 会话视图 / 右栏开始页）+ 往各区原生「更多」注册菜单行
+   ├─ 入口收纳                     五区收纳域（三区原生「更多」+ 两区授予式「更多」），入口自动发现
    ├─ 样式引擎                     按配置生成 style[data-dsh-layout="dynamic"]
    ├─ plugins.detail.section 注册  插件详情页入口（开关 + 概览 + 打开面板）
    └─ shell.overlay 注册           全局编辑面板（四类分页）+ 编辑模式层（列分隔条、区域框、工具条）
@@ -258,13 +258,16 @@ flowchart LR
 
 | 收纳域 | 入口自动发现 | 收起方式 | 菜单与打开方式 |
 | --- | --- | --- | --- |
-| 侧栏面板 | `sidebar.panellist` 槽位条目（面板 id + 显示名） | `[data-dshl-panel]` 生成 `display:none` | `sidebar.panellist.actions` 注册行 → `layout.selectPanel(panelId)` |
-| 会话视图标签 | `conversation.view` 槽位条目（id + 本地化标签；`chat` 不参与） | 注解层按标签匹配打 `data-dshl-stored-view`，动态样式收起 | `conversation.session.header.views.actions` 注册行 → owner `onOpen(id)` |
-| 右栏开始页卡片 | DOM `[data-sidebar-right-guide-entry]`（kind + 标题；`文件` 不参与） | 按 kind + 标题打 `data-dshl-stored-guide`，动态样式收起 | `sidebar.right.tab.guide.actions` 注册行 → owner `onOpen('kind:id')` |
+| 侧栏面板 | `sidebar.panellist` 槽位条目（面板 id + 显示名） | `[data-dshl-panel]` 生成 `display:none` | 原生 `sidebar.panellist.actions` 注册行 → `layout.selectPanel(panelId)` |
+| 会话视图标签 | `conversation.view` 槽位条目（id + 本地化标签；`chat` 不参与） | 注解层按标签匹配打 `data-dshl-stored-view` | 原生 `conversation.session.header.views.actions` → owner `onOpen(id)` |
+| 右栏开始页卡片 | DOM `[data-sidebar-right-guide-entry]`（kind + 标题；`文件` 不参与） | 按 kind + 标题打 `data-dshl-stored-guide` | 原生 `sidebar.right.tab.guide.actions` → owner `onOpen('kind:id')` |
+| 设置页导航（授予式） | `settings.section` 槽位条目（id + 显示名，当前约 22 项） | 注解层按显示名给导航行打 `data-dshl-stored-section` | 导航列表末尾插外来锚点（抄原生 navCell 类名）→ 宿主 `Menu` → 点原生导航行切 section |
+| 插件页第三方插件（授予式） | DOM `[data-plugin-package]` 卡片（包名 + 标题） | `[data-plugin-package="<包名>"]` 直接 `display:none` | 「已安装插件」分组标题旁插外来锚点（抄原生 `groupMore` 类名）→ 宿主 `Menu` → 点卡片打开按钮进详情 |
 
-- 三处菜单行都用宿主 `@deepseek-ai/dsh-client-ui-primitives` 的 `MenuItemButton` 渲染，order -100 排在各菜单最前；新装的插件 / 新注册的视图自动出现在清单与菜单里，不需要人工登记。
-- 宿主内部的三套 Pin 机制（侧栏面板 / 会话视图 / 开始页卡片）都只存在内存、刷新复位，且只经各自条目 inject 暴露，本插件不依赖它们；收纳状态写自己的配置。
-- 边界：宿主保留的入口（侧栏「插件」、`chat` 视图、开始页「文件」）不参与收纳，保证收起后永远有路可回；关闭「启用自定义布局」时菜单不出收纳行。
+- 收纳行用宿主 `@deepseek-ai/dsh-client-ui-primitives` 的 `MenuItemButton` 渲染；原生三区 order -100 排在各菜单最前，授予式两区自带 `Menu`。
+- 授予式的锚点由组件维护：容器出现/重建时自动重挂（900ms 轮询兜底），组件卸载时移除；配置为空或 primitives 缺失时锚点不出现。
+- 宿主内部三套 Pin 机制（侧栏面板 / 会话视图 / 开始页卡片）都只存在内存、刷新复位，且只经各自条目 inject 暴露，本插件不依赖它们；收纳状态写自己的配置。
+- 边界：宿主保留的入口（侧栏「插件」、`chat` 视图、开始页「文件」）不参与收纳，保证收起后永远有路可回；关闭「启用自定义布局」时菜单不出收纳行；授予式依赖宿主类名与容器结构，宿主大版本改版后退化为不出现锚点。
 
 ## 编辑面板（全局浮层）
 
