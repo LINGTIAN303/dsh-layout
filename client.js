@@ -2364,6 +2364,18 @@ window.__ModuleLoader__.load({
       return out;
     }
 
+    /** 已知容器可能只是外层包裹：向下穿过「只有一个子元素」的包裹，直到真正装条目的列表。 */
+    function unwrapContainer(node) {
+      let current = node;
+      for (let depth = 0; depth < 4 && current !== null; depth += 1) {
+        if (current.children.length !== 1) return current;
+        const only = current.firstElementChild;
+        if (only === null || only.children.length < 2) return current;
+        current = only;
+      }
+      return current;
+    }
+
     /** 当前可排列容器：已知容器优先，同一个节点只出现一次。 */
     function readArrangeContainers(targets) {
       const list = [];
@@ -2376,7 +2388,7 @@ window.__ModuleLoader__.load({
         used.add(node);
         list.push(entry);
       };
-      for (const known of ARRANGE_KNOWN) push({ id: known.id, labelKey: known.labelKey, node: known.pick(targets) });
+      for (const known of ARRANGE_KNOWN) push({ id: known.id, labelKey: known.labelKey, node: unwrapContainer(known.pick(targets)) });
       for (const entry of slotArrangeContainers(targets)) push(entry);
       return list;
     }

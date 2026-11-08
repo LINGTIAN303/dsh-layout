@@ -205,6 +205,7 @@ flowchart LR
 | 列表槽位出口 | 列表槽位里 ≥2 个已渲染条目的最近公共父级，id 为 `slot:<槽位键>` | `slot:sidebar.footer.action`、`slot:conversation.hero.options` |
 
 - 容器打 `data-dshl-arrange="<容器 id>"`；样式只做一件事：`display:grid` + `grid-template-columns: repeat(N, minmax(0,1fr))` + `gap`，行内补 `min-width:0`。
+- 已知容器可能只是外层包裹（设置页导航列的真正列表是它内层的唯一子元素），解析时向下穿「只有一个子元素」的包裹，直到真正装条目的列表；最多穿 4 层，穿不动就用原节点。
 - 配置 `arrange`：容器 id → `{ columns: 2..3, gap: 0..32, compact }`；只收 2/3 列（1 列等于关闭，不落配置），容器数量上限 12，未知字段丢弃。
 - **为什么不用 `order` 做排列**：`order` 只换顺序，换不出多列；容器又不是每种都是 flex（`display:contents` 的槽位出口根本没有自己的布局盒），必须先把容器变成网格容器，才能谈列。`order` 仍归「插件来源」的排序用，两者叠加（网格项也吃 `order`）互不冲突。
 - **只留图标**只对 `panels` 开放：规则是隐藏行内第二个子元素并让行居中，靠结构位置而不是类名；其它容器第二个子元素可能是控件，误藏会断功能。
