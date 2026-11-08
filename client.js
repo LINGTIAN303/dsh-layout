@@ -53,6 +53,17 @@ window.__ModuleLoader__.load({
       partComposer: '输入区',
       partHeaderBottom: '会话头放到正文下方',
       partComposerTop: '输入区提到消息区上方',
+      rightbarPanel: '右栏',
+      rightbarPanelHint: '右栏内部的标签栏与内容区；宽度在「区域结构」里调。',
+      rightbarPartsHint: '右栏拆解：标签栏与内容区可各自隐藏，标签栏也可放到内容区下方。',
+      rightbarPartsMissing: '未识别右栏内部结构，拆解项暂不可用。',
+      partTabs: '标签栏',
+      partContent: '内容区',
+      partTabsBottom: '标签栏放到内容区下方',
+      settingsPartsHint: '设置页拆解：导航列可隐藏或移到右侧。',
+      settingsPartsMissing: '尚未打开过设置面板，拆解项待识别（打开一次设置即可）。',
+      partNavHidden: '显示导航列',
+      partNavRight: '导航列放右侧',
       contentWidth: '内容宽度',
       followDefault: '跟随默认',
       settingsPanel: '设置页',
@@ -164,6 +175,17 @@ window.__ModuleLoader__.load({
       partComposer: 'Composer',
       partHeaderBottom: 'Header below the body',
       partComposerTop: 'Composer above the messages',
+      rightbarPanel: 'Right column',
+      rightbarPanelHint: 'The tab strip and content area inside the right column; width is set in region structure.',
+      rightbarPartsHint: 'Right column parts: the tab strip and content can each be hidden, and the tab strip can move below the content.',
+      rightbarPartsMissing: 'The right column internals are not recognized; the split controls are unavailable.',
+      partTabs: 'Tab strip',
+      partContent: 'Content',
+      partTabsBottom: 'Tab strip below the content',
+      settingsPartsHint: 'Settings parts: the navigation column can be hidden or moved to the right.',
+      settingsPartsMissing: 'The settings panel has not been opened yet; open it once to enable these controls.',
+      partNavHidden: 'Show navigation',
+      partNavRight: 'Navigation on the right',
       contentWidth: 'Content width',
       followDefault: 'Default',
       settingsPanel: 'Settings page',
@@ -253,7 +275,17 @@ window.__ModuleLoader__.load({
         contentWidth: null,
         parts: { hideHeader: false, hideMessages: false, hideComposer: false, headerBottom: false, composerTop: false },
       },
-      settings: { width: null, height: null, navWidth: null, offsetX: 0, offsetY: 0 },
+      rightbar: {
+        parts: { hideTabs: false, hideContent: false, tabsBottom: false },
+      },
+      settings: {
+        width: null,
+        height: null,
+        navWidth: null,
+        offsetX: 0,
+        offsetY: 0,
+        parts: { hideNav: false, navRight: false },
+      },
     };
 
     const ABSENT_TARGETS = {
@@ -331,12 +363,28 @@ window.__ModuleLoader__.load({
         },
       };
       const settings = raw.settings && typeof raw.settings === 'object' ? raw.settings : {};
+      const settingsParts = settings.parts && typeof settings.parts === 'object' ? settings.parts : {};
       out.settings = {
         width: settings.width == null ? null : clampInt(settings.width, 560, 1400, null),
         height: settings.height == null ? null : clampInt(settings.height, 380, 1200, null),
         navWidth: settings.navWidth == null ? null : clampInt(settings.navWidth, 120, 360, null),
         offsetX: clampInt(settings.offsetX, -600, 600, 0),
         offsetY: clampInt(settings.offsetY, -500, 500, 0),
+        // 设置页拆解：导航列与内容列
+        parts: {
+          hideNav: settingsParts.hideNav === true,
+          navRight: settingsParts.navRight === true,
+        },
+      };
+      const rightbar = raw.rightbar && typeof raw.rightbar === 'object' ? raw.rightbar : {};
+      const rightbarParts = rightbar.parts && typeof rightbar.parts === 'object' ? rightbar.parts : {};
+      out.rightbar = {
+        // 右栏拆解：标签栏与内容区
+        parts: {
+          hideTabs: rightbarParts.hideTabs === true,
+          hideContent: rightbarParts.hideContent === true,
+          tabsBottom: rightbarParts.tabsBottom === true,
+        },
       };
       return out;
     }
@@ -868,7 +916,87 @@ window.__ModuleLoader__.load({
       }
     })();
 
-    function readTargets() {      const rootEl = document.getElementById('root');
+    /** 右栏/设置面板同理会话区：面板不一定常驻 DOM，识别过一次就记住。 */
+    const AUX_PARTS_KEY = 'dsh-layout/aux-parts/v1';
+    const auxPartsFlags = (() => {
+      try {
+        const raw = JSON.parse(window.localStorage.getItem(AUX_PARTS_KEY) ?? '{}');
+        return raw !== null && typeof raw === 'object' ? raw : {};
+      } catch (error) {
+        return {};
+      }
+    })();
+    let rightbarPartsSeen = auxPartsFlags.rightbar === true;
+    let settingsPartsSeen = auxPartsFlags.settings === true;
+
+    function markAuxPartsSeen(key) {
+      if (auxPartsFlags[key] === true) return;
+      auxPartsFlags[key] = true;
+      try { window.localStorage.setItem(AUX_PARTS_KEY, JSON.stringify(auxPartsFlags)); } catch (error) { console.warn('[dsh-layout] 保存拆解标记失败', error); }
+    }
+
+    /**
+     * 右栏拆解：标签栏 / 内容区。
+     * 结构（宿主实现）：
+     *   ._panel_ → ._panelBody_ → ._surface_ → ._tabLayout_（grid）
+     *     → ._tabCell_ → section._tabHost_（flex column）
+     *        ├─ ._tabHostHeader_（标签栏，内含 [data-slot=sidebar.right.pane.tab.title]）
+     *        └─ ._tabHostBody_（内容区，内含 [data-slot=sidebar.right.pane.tab]）
+     * 两个分支同父（tabHost），所以既能各自隐藏，也能上下互换。
+     * 定位方式：从两个稳定 slot 各自向上找到「共同父的直接子级」，
+     * 这样不依赖 CSS module 的哈希类名。
+     */
+    function readRightbarParts() {
+      const titleSlot = document.querySelector('[data-slot="sidebar.right.pane.tab.title"]');
+      const tabSlot = document.querySelector('[data-slot="sidebar.right.pane.tab"]');
+      if (titleSlot === null || tabSlot === null) return null;
+      const ancestorsOf = (el) => {
+        const out = [];
+        for (let cur = el; cur !== null; cur = cur.parentElement) out.push(cur);
+        return out;
+      };
+      const tabAncestors = new Set(ancestorsOf(tabSlot));
+      const common = ancestorsOf(titleSlot).find((el) => tabAncestors.has(el)) ?? null;
+      if (common === null || common === document.body) return null;
+      const branchOf = (target) => {
+        let cur = target;
+        while (cur !== null && cur.parentElement !== common) cur = cur.parentElement;
+        return cur !== null && cur.parentElement === common ? cur : null;
+      };
+      const tabs = branchOf(titleSlot);
+      const content = branchOf(tabSlot);
+      if (tabs === null || content === null || tabs === content) return null;
+      return { host: common, tabs, content };
+    }
+
+    /**
+     * 设置页拆解：导航区（标题 + 导航列）与内容区（页头 + 选项）。
+     * 设置面板是 grid，两个区域各由两个子级构成，所以按「语义归属」成对隐藏/换边。
+     * 子级识别只用宿主 slot：settings.header / settings.action / settings.close / settings.section。
+     */
+    function readSettingsParts(panel) {
+      if (panel === null || panel === undefined) return null;
+      const kids = [...panel.children];
+      const bySlot = (slot) => kids.find((node) => first(node, `[data-slot="${slot}"]`) !== null) ?? null;
+      const navTitle = bySlot('settings.header');
+      const header = bySlot('settings.action') ?? bySlot('settings.close');
+      const nav = kids.find((node) => node.tagName === 'NAV') ?? null;
+      const options = bySlot('settings.section');
+      if (nav === null && options === null) return null;
+      return {
+        panel,
+        navTitle: navTitle ?? nav,
+        nav,
+        header,
+        options,
+        // 导航列（左）与内容列（右）各自的成员
+        navSide: [navTitle ?? nav, nav].filter(Boolean),
+        contentSide: [header, options].filter(Boolean),
+      };
+    }
+
+    function readTargets() {
+      const rootEl = document.getElementById('root');
       if (rootEl === null) return ABSENT_TARGETS;
       const frame = first(rootEl, '[data-slot="root"] > div');
       if (frame === null) return ABSENT_TARGETS;
@@ -900,8 +1028,18 @@ window.__ModuleLoader__.load({
         try { window.localStorage.setItem(CONV_PARTS_KEY, '1'); } catch (error) { console.warn('[dsh-layout] 保存会话区结构标记失败', error); }
       }
       const settings = document.querySelector('[data-shortcut-modal="settings"]');
+      const rightbarParts = readRightbarParts();
+      if (rightbarParts !== null && !rightbarPartsSeen) {
+        rightbarPartsSeen = true;
+        markAuxPartsSeen('rightbar');
+      }
+      const settingsParts = readSettingsParts(settings);
+      if (settingsParts !== null && !settingsPartsSeen) {
+        settingsPartsSeen = true;
+        markAuxPartsSeen('settings');
+      }
       const ok = Boolean(sidebarCol && centerCol && rightbarCol);
-      const targets = { ok, frame, regions, sidebarRoot, blocks, panels, conversation, convParts, settings, surfaces: [], anomalies: [] };
+      const targets = { ok, frame, regions, sidebarRoot, blocks, panels, conversation, convParts, rightbarParts, settingsParts, settings, surfaces: [], anomalies: [] };
       targets.surfaces = readSurfaces(targets);
       targets.anomalies = Object.values(surfaceAnomalies).sort((a, b) => b.lastSeenAt - a.lastSeenAt);
       return targets;
@@ -931,6 +1069,20 @@ window.__ModuleLoader__.load({
         mark(parts.headerItem, 'data-dshl-part', 'header');
         mark(parts.sessionSlot, 'data-dshl-part', 'messages');
         mark(parts.composerItem, 'data-dshl-part', 'composer');
+      }
+      const rb = targets.rightbarParts;
+      if (rb !== null && rb !== undefined) {
+        mark(rb.host, 'data-dshl-rbhost');
+        mark(rb.tabs, 'data-dshl-rbpart', 'tabs');
+        mark(rb.content, 'data-dshl-rbpart', 'content');
+      }
+      const st = targets.settingsParts;
+      if (st !== null && st !== undefined) {
+        mark(st.panel, 'data-dshl-setpanel');
+        mark(st.navTitle, 'data-dshl-setpart', 'navTitle');
+        mark(st.nav, 'data-dshl-setpart', 'nav');
+        mark(st.header, 'data-dshl-setpart', 'header');
+        mark(st.options, 'data-dshl-setpart', 'options');
       }
     }
 
@@ -1057,6 +1209,17 @@ window.__ModuleLoader__.load({
     }
 
     /** 生成当前配置对应的覆盖样式；未启用时返回空串，界面保持宿主默认。 */
+    /**
+     * 量出设置面板导航列的实际宽度。
+     * 「导航右置」需要把导航列宽度从旧的左列搬到新的右列，用户没手动设过导航宽度时
+     * 配置里是 null，只能现场量一次真实值。
+     */
+    function measuredSettingsNavWidth() {
+      const nav = document.querySelector('[data-dshl-setpart="nav"]');
+      const width = nav === null ? 0 : nav.getBoundingClientRect().width;
+      return width >= 80 ? Math.round(width) : 188;
+    }
+
     function buildDynamicCss(config) {
       if (!config.enabled) return '';
       const col = config.columns;
@@ -1130,6 +1293,15 @@ window.__ModuleLoader__.load({
         // 输入区默认是「粘在底部」的 sticky；提到上方后必须改成粘顶，否则它会跟着内容滚走、跑到屏幕外
         lines.push('[data-dshl-part="composer"] { position: sticky !important; top: 0 !important; bottom: auto !important; }');
       }
+      // 右栏拆解：标签栏 / 内容区（同在 tabHost 这个 flex column 里）
+      const rbParts = config.rightbar.parts;
+      if (rbParts.hideTabs) lines.push('[data-dshl-rbpart="tabs"] { display: none !important; }');
+      if (rbParts.hideContent) lines.push('[data-dshl-rbpart="content"] { display: none !important; }');
+      if (rbParts.tabsBottom) {
+        lines.push('[data-dshl-rbhost] { display: flex !important; flex-direction: column !important; }');
+        lines.push('[data-dshl-rbpart="content"] { order: 1 !important; }');
+        lines.push('[data-dshl-rbpart="tabs"] { order: 2 !important; }');
+      }
       const settings = config.settings;
       if (settings.width !== null) {
         lines.push(`[data-dshl-settings] { width: ${settings.width}px !important; max-width: min(${settings.width}px, calc(100vw - 48px)) !important; }`);
@@ -1139,6 +1311,23 @@ window.__ModuleLoader__.load({
       }
       if (settings.navWidth !== null) {
         lines.push(`[data-dshl-settings] { grid-template-columns: ${settings.navWidth}px minmax(0, 1fr) !important; }`);
+      }
+      // 设置页拆解：导航列 / 内容列。
+      // 宿主用命名网格区域摆放四个子级，所以换边/隐藏要靠「重写区域名 + 给子级重新指派区域」，
+      // 不能只改列宽——否则隐藏导航后左侧会留一条空轨道。
+      const setParts = settings.parts;
+      if (setParts.hideNav) {
+        lines.push('[data-dshl-setpart="navTitle"], [data-dshl-setpart="nav"] { display: none !important; }');
+        lines.push('[data-dshl-setpanel] { grid-template-columns: minmax(0, 1fr) !important; grid-template-areas: "dshlHeader" "dshlOptions" !important; }');
+        lines.push('[data-dshl-setpart="header"] { grid-area: dshlHeader !important; }');
+        lines.push('[data-dshl-setpart="options"] { grid-area: dshlOptions !important; }');
+      } else if (setParts.navRight) {
+        const navWidth = measuredSettingsNavWidth();
+        lines.push(`[data-dshl-setpanel] { grid-template-columns: minmax(0, 1fr) ${navWidth}px !important; grid-template-areas: "dshlHeader dshlTitle" "dshlOptions dshlNav" !important; }`);
+        lines.push('[data-dshl-setpart="navTitle"] { grid-area: dshlTitle !important; }');
+        lines.push('[data-dshl-setpart="nav"] { grid-area: dshlNav !important; }');
+        lines.push('[data-dshl-setpart="header"] { grid-area: dshlHeader !important; }');
+        lines.push('[data-dshl-setpart="options"] { grid-area: dshlOptions !important; }');
       }
       // 偏移只用来微调位置：夹取到「面板仍在屏幕内」的区间，避免把设置面板推到看不见的地方
       if (settings.offsetX !== 0 || settings.offsetY !== 0) {
@@ -1846,8 +2035,33 @@ window.__ModuleLoader__.load({
           })) : null);
     }
 
+    /** 右栏卡片：宽度 + 标签栏/内容区拆解。 */
+    function RightbarCard({ config, t }) {
+      const parts = config.rightbar.parts;
+      const detected = rightbarPartsSeen;
+      const row = (label, control) => h('div', { className: 'dshl-row' },
+        h('span', { className: 'dshl-rowLabel' }, label),
+        control);
+      const toggle = (key, label) => row(label, h(Switch, {
+        checked: !parts[key],
+        label,
+        onChange: (on) => updateConfig((draft) => { draft.rightbar.parts[key] = !on; }),
+      }));
+      return h(Card, { title: t('rightbarPanel'), desc: t('rightbarPanelHint') },
+        h('div', { className: 'dshl-cardDesc' }, detected ? t('rightbarPartsHint') : t('rightbarPartsMissing')),
+        detected ? toggle('hideTabs', t('partTabs')) : null,
+        detected ? toggle('hideContent', t('partContent')) : null,
+        detected ? row(t('partTabsBottom'), h(Switch, {
+          checked: parts.tabsBottom,
+          label: t('partTabsBottom'),
+          onChange: (on) => updateConfig((draft) => { draft.rightbar.parts.tabsBottom = on; }),
+        })) : null);
+    }
+
     function SettingsCard({ config, t }) {
       const settings = config.settings;
+      const parts = settings.parts;
+      const detected = settingsPartsSeen;
       const num = (label, key, fallback, min, max) => h(FollowField, {
         key,
         label,
@@ -1861,13 +2075,34 @@ window.__ModuleLoader__.load({
       });
       const offset = (label, key, min, max) => h(Field, { key, label, valueText: `${settings[key]}${t('px')}` },
         h(Slider, { value: settings[key], min, max, step: 10, onChange: (value) => updateConfig((draft) => { draft.settings[key] = value; }) }));
+      const row = (label, control) => h('div', { className: 'dshl-row' },
+        h('span', { className: 'dshl-rowLabel' }, label),
+        control);
       return h(Card, { title: t('settingsPanel'), desc: t('settingsPanelHint') },
         num(t('settingsWidth'), 'width', 800, 560, 1400),
         num(t('settingsHeight'), 'height', 800, 380, 1200),
         num(t('settingsNav'), 'navWidth', 188, 120, 360),
         offset(t('offsetX'), 'offsetX', -600, 600),
         offset(t('offsetY'), 'offsetY', -500, 500),
-        h('p', { className: 'dshl-hint' }, t('offsetClamped')));
+        h('p', { className: 'dshl-hint' }, t('offsetClamped')),
+        h('div', { className: 'dshl-divider' }),
+        h('div', { className: 'dshl-cardDesc' }, detected ? t('settingsPartsHint') : t('settingsPartsMissing')),
+        detected ? row(t('partNavHidden'), h(Switch, {
+          checked: !parts.hideNav,
+          label: t('partNavHidden'),
+          onChange: (on) => updateConfig((draft) => { draft.settings.parts.hideNav = !on; }),
+        })) : null,
+        detected ? row(t('partNavRight'), h(Switch, {
+          checked: parts.navRight,
+          label: t('partNavRight'),
+          onChange: (on) => {
+            updateConfig((draft) => {
+              draft.settings.parts.navRight = on;
+              // 导航右置时若还藏着导航，右置无意义，顺手放开
+              if (on) draft.settings.parts.hideNav = false;
+            });
+          },
+        })) : null);
     }
 
     function Editor({ t }) {
@@ -1966,6 +2201,7 @@ window.__ModuleLoader__.load({
           h(PanelsCard, { config, targets, t }),
           h(SurfacesCard, { targets, t }),
           h(ConversationCard, { config, t }),
+          h(RightbarCard, { config, t }),
           h(SettingsCard, { config, t })),
         h('div', { className: 'dshl-divider' }),
         h('div', { className: 'dshl-foot' },

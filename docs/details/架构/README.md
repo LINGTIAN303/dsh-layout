@@ -53,9 +53,11 @@ flowchart LR
 - **异常自动落盘 + 一键导出**：识别异常写入 `localStorage` 键 `dsh-layout/surface-anomalies/v1`，两类：`drift`（登记过但签名变了）与 `unregistered`（从未登记、只靠自动识别）。「界面结构」卡片底部「待复核清单」列出条目并提供「导出待复核清单」（JSON，含实测签名、观测时间、命中次数）与「清空」。导出文件可直接对照更新 `OFFICIAL_PAGES` / `THIRD_PARTY_PAGES`。异常在页面恢复正常登记时自动清除，清单不会堆积已解决的问题。
 - 页面列表来自侧栏面板行（`aria-current="page"` 判当前页），只收 `button` 子节点，排除「更多」这类菜单触发器。
 
-## 区域界面拆解（会话区）
+## 区域界面拆解
 
-「拆解」= 把某个区域认成更小的可控单元，让它们能独立显隐与互换位置。第一个落地的区域是会话区：
+「拆解」= 把某个区域认成更小的可控单元，让它们能独立显隐与互换位置。目前覆盖三个区域。
+
+### 会话区
 
 | 单元 | 宿主结构与判定 |
 | --- | --- |
@@ -66,7 +68,31 @@ flowchart LR
 - 可做的操作：三块**独立显隐**；会话头与正文**换前后**（`convroot` 上设 `order`）；输入区**提到消息区上方**（`convscroll` 上设 `order:-1`）。
 - 提到上方时必须同时把输入区的 `position:sticky; bottom:0` 改成 `sticky; top:0`，否则它会跟着滚动内容一起跑出可视区——这是实测踩到的坑。
 - 拆解结果全部是 CSS `order` / `display` 覆盖，不改 React 树、不移动 DOM，宿主自身的滚动与粘贴行为不受影响。
-- 结构识别过一次会持久化标记（`dsh-layout/conv-parts/v1`）：编辑区挂在插件详情页上，此时会话区不在 DOM 里，若只按「当前 DOM 有没有」判断，控制项会在插件页上永远不可用。
+
+### 右栏
+
+| 单元 | 判定方式 |
+| --- | --- |
+| 标签栏 | 由 `[data-slot="sidebar.right.pane.tab.title"]` 向上找到「共同父的直接子级」 |
+| 内容区 | 由 `[data-slot="sidebar.right.pane.tab"]` 同上定位 |
+
+两个分支同父（`._tabHost_`，flex column），所以可各自隐藏，也可上下互换（`order` 互换）。定位不用 CSS module 哈希类名：先求两个 slot 的最近公共祖先，再各自向上取该祖先的直接子级，插件换构建也照样成立。
+
+### 设置页
+
+| 单元 | 判定方式 |
+| --- | --- |
+| 导航列 | 标题行（含 `settings.header` 的子级）+ `NAV` 元素 |
+| 内容列 | 页头（含 `settings.action` / `settings.close`）+ 选项区（含 `settings.section`） |
+
+设置面板是**命名网格区域**（`grid-template-areas: "title header" "nav options"`），所以不能只改列宽——隐藏导航后左侧会留一条空轨道。正确做法是**重写区域名并给子级重新指派 `grid-area`**：
+
+- 隐藏导航：`grid-template-columns: minmax(0,1fr)`，区域改为单列，子级改挂 `dshlHeader` / `dshlOptions`。
+- 导航右置：`grid-template-columns: minmax(0,1fr) <导航宽度>`，区域改为 `"dshlHeader dshlTitle" "dshlOptions dshlNav"`。导航宽度用户没设过时现场量一次真实值。
+
+### 共同约定
+
+- 结构识别成功后持久化标记（`dsh-layout/conv-parts/v1`、`dsh-layout/aux-parts/v1`）：编辑区挂在插件详情页上，此时会话区/右栏/设置面板可能不在 DOM 里，若只按「当前 DOM 有没有」判断，控制项会在插件页上永远不可用。
 
 ## 恢复通道（不可恢复状态防护）
 
