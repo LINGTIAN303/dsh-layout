@@ -161,6 +161,22 @@ window.__ModuleLoader__.load({
       slotKindKeyed: '按 key',
       slotKindSingle: '单槽',
       slotKindChain: '链式',
+      tabArrange: '槽位编排',
+      tabArrangeHint: '把同一容器里的条目排成多列、调间距或收成图标；容器来自侧栏块与已渲染的列表槽位。',
+      arrange: '容器排列',
+      arrangeHint: '只改容器内条目的排布，不碰条目本身与顺序；关掉立即恢复宿主布局。',
+      arrangeEmpty: '当前没有可排列的容器：需要侧栏在界面上，或列表槽位有两个以上已渲染条目。',
+      arrangeColumns: '列数',
+      arrangeDefault: '默认',
+      arrangeGap: '间距',
+      arrangeCompact: '只留图标',
+      arrangeCompactHint: '隐藏每行第二个子元素（图标行里的文字），列窄时更整齐。',
+      arrangeOffline: '此刻不在场',
+      arrangeSlotPrefix: '槽位',
+      arrangePanels: '侧栏 · 面板导航',
+      arrangeFooter: '侧栏 · 底部操作',
+      arrangeRightTabs: '右栏 · 标签栏',
+      arrangeSettingsNav: '设置页 · 导航列',
       rightbarPanel: '右栏',
       rightbarPanelHint: '右栏内部的标签栏与内容区；宽度在「区域结构」里调。',
       rightbarPartsHint: '右栏拆解：标签栏与内容区可各自隐藏，标签栏也可放到内容区下方。',
@@ -398,6 +414,22 @@ window.__ModuleLoader__.load({
       slotKindKeyed: 'keyed',
       slotKindSingle: 'single',
       slotKindChain: 'chain',
+      tabArrange: 'Slots',
+      tabArrangeHint: 'Lay entries of one container out in several columns, adjust the gap, or collapse icon rows; containers come from sidebar blocks and rendered list slots.',
+      arrange: 'Container layout',
+      arrangeHint: 'Only the arrangement inside a container changes, not the entries or their order; turning it off restores the host layout.',
+      arrangeEmpty: 'No arrangeable container right now: the sidebar must be visible, or a list slot needs two or more rendered entries.',
+      arrangeColumns: 'Columns',
+      arrangeDefault: 'Default',
+      arrangeGap: 'Gap',
+      arrangeCompact: 'Icons only',
+      arrangeCompactHint: 'Hides the second child of every row (the text on icon rows) so narrow columns stay tidy.',
+      arrangeOffline: 'not present',
+      arrangeSlotPrefix: 'Slot',
+      arrangePanels: 'Sidebar · panel list',
+      arrangeFooter: 'Sidebar · footer actions',
+      arrangeRightTabs: 'Right column · tab strip',
+      arrangeSettingsNav: 'Settings · navigation column',
       rightbarPanel: 'Right column',
       rightbarPanelHint: 'The tab strip and content area inside the right column; width is set in region structure.',
       rightbarPartsHint: 'Right column parts: the tab strip and content can each be hidden, and the tab strip can move below the content.',
@@ -596,6 +628,8 @@ window.__ModuleLoader__.load({
       external: { hide: [], order: {} },
       // 插件来源（slots 注册表）：key 形如 `sidebar.panellist::task-board`；语义同上
       slots: { hide: [], order: {} },
+      // 槽位编排（区内排列）：容器 id → { columns 2..3, gap, compact }；只收 2/3 列，1 列等于关闭
+      arrange: {},
     };
 
     const ABSENT_TARGETS = {
@@ -616,6 +650,7 @@ window.__ModuleLoader__.load({
       settings: null,
       surfaces: [],
       anomalies: [],
+      arrange: [],
     };
 
     function clampInt(value, min, max, fallback) {
@@ -768,6 +803,22 @@ window.__ModuleLoader__.load({
         hide: [...new Set(slotHide)].slice(0, 200),
         order: Object.fromEntries(Object.entries(slotOrder).slice(0, 200)),
       };
+      // 槽位编排：容器 id → 列数与间距。只认 2/3 列（1 列就是关掉，不落配置），未知字段丢弃
+      const arrangeRaw = raw.arrange !== null && typeof raw.arrange === 'object' ? raw.arrange : {};
+      const arrange = {};
+      for (const [id, value] of Object.entries(arrangeRaw)) {
+        if (Object.keys(arrange).length >= 12) break;
+        if (typeof id !== 'string' || id.length === 0 || id.length > 120) continue;
+        if (value === null || typeof value !== 'object') continue;
+        const columns = Math.round(Number(value.columns));
+        if (!Number.isFinite(columns) || columns < 2 || columns > 3) continue;
+        arrange[id] = {
+          columns,
+          gap: clampInt(value.gap, 0, 32, 8),
+          compact: value.compact === true,
+        };
+      }
+      out.arrange = arrange;
       return out;
     }
 
@@ -849,7 +900,7 @@ window.__ModuleLoader__.load({
         ? ''
         : `${value.pageKey}:${(value.units ?? []).map((unit) => unit.key).join(',')}:${value.iframe === null ? 'd' : 'i'}`);
       const buildSignature = (value) => (value.ok
-        ? `${Object.keys(value.regions).join(',')}|${value.panels.map((panel) => panel.label).join('\u0001')}|${value.settings ? 's' : ''}|${surfaceSignature(value.surfaces ?? [])}|${anomalySignature(value.anomalies ?? [])}|${externalSignature(value.external)}|snap:${value.areaSnapshotVersion ?? 0}|slots:${value.slotSources?.version ?? 0}`
+        ? `${Object.keys(value.regions).join(',')}|${value.panels.map((panel) => panel.label).join('\u0001')}|${value.settings ? 's' : ''}|${surfaceSignature(value.surfaces ?? [])}|${anomalySignature(value.anomalies ?? [])}|${externalSignature(value.external)}|snap:${value.areaSnapshotVersion ?? 0}|slots:${value.slotSources?.version ?? 0}|arr:${(value.arrange ?? []).map((item) => item.id).join(',')}`
         : '');
       const signature = buildSignature(targets);
       const previousSignature = buildSignature(previous);
@@ -2253,6 +2304,98 @@ window.__ModuleLoader__.load({
       for (const node of done) slotAnnotated.add(node);
     }
 
+    /* ============================== 槽位编排（区内排列的容器） ============================== */
+    /**
+     * 可排列容器：一类是宿主自己的布局容器（侧栏面板导航、底部操作、右栏标签栏、设置页导航），
+     * 一类是列表槽位的出口（多个已渲染条目的共同父级）。
+     * 两者都只打标记，排列由生成的网格样式完成；id 是配置键与卡片身份，槽位出口用 `slot:<槽位键>`。
+     */
+    const ARRANGE_KNOWN = [
+      { id: 'panels', labelKey: 'arrangePanels', pick: (targets) => targets.blocks.panels ?? null },
+      { id: 'sidebar-footer', labelKey: 'arrangeFooter', pick: (targets) => targets.blocks.footer ?? null },
+      { id: 'rightbar-tabs', labelKey: 'arrangeRightTabs', pick: (targets) => targets.rightbarParts?.tabs ?? null },
+      { id: 'settings-nav', labelKey: 'arrangeSettingsNav', pick: (targets) => targets.settingsParts?.nav ?? null },
+    ];
+
+    /** 最近公共祖先：槽位出口外面可能还包着一层，取所有已渲染条目的公共父级。 */
+    function nearestCommonAncestor(nodes) {
+      if (nodes.length === 0) return null;
+      let candidate = nodes[0].parentElement;
+      while (candidate !== null) {
+        if (nodes.every((node) => candidate.contains(node))) return candidate;
+        candidate = candidate.parentElement;
+      }
+      return null;
+    }
+
+    /** 浮层 / 菜单 / 弹层类槽位不参与排列：它们互相覆盖，排成网格没有意义。 */
+    const ARRANGE_SKIP_SLOT = /(overlay|contextmenu|menu|popover|tooltip|dialog|toast)/i;
+
+    /** 容器要有真实尺寸才算可排列：`display:contents` 的出口按第一个有尺寸的子元素算。 */
+    function readableBox(node) {
+      if (node === null || node === undefined) return null;
+      const style = getComputedStyle(node);
+      if (style.display === 'none' || style.visibility === 'hidden') return null;
+      if (style.display === 'contents') {
+        for (const child of node.children) {
+          const box = child.getBoundingClientRect();
+          if (box.width > 0 && box.height > 0) return box;
+        }
+        return null;
+      }
+      const rect = node.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 ? rect : null;
+    }
+
+    /** 槽位出口容器：列表槽位里两个以上已渲染条目的共同父级。 */
+    function slotArrangeContainers(targets) {
+      const sources = targets.slotSources ?? null;
+      if (sources === null) return [];
+      const out = [];
+      for (const group of sources.graph) {
+        if (group.kind !== 'list' || ARRANGE_SKIP_SLOT.test(group.slot)) continue;
+        const nodes = group.items.filter((item) => item.rendered && item.tops.length === 1).map((item) => item.tops[0]);
+        if (nodes.length < 2) continue;
+        const parent = nearestCommonAncestor(nodes);
+        if (parent === null || parent === document.body || parent.children.length < 2) continue;
+        if (readableBox(parent) === null) continue;
+        out.push({ id: `slot:${group.slot}`, slot: group.slot, node: parent });
+      }
+      return out;
+    }
+
+    /** 当前可排列容器：已知容器优先，同一个节点只出现一次。 */
+    function readArrangeContainers(targets) {
+      const list = [];
+      const used = new Set();
+      const push = (entry) => {
+        const node = entry.node;
+        if (node === null || node === undefined || node.isConnected !== true) return;
+        if (used.has(node)) return;
+        if (readableBox(node) === null) return;
+        used.add(node);
+        list.push(entry);
+      };
+      for (const known of ARRANGE_KNOWN) push({ id: known.id, labelKey: known.labelKey, node: known.pick(targets) });
+      for (const entry of slotArrangeContainers(targets)) push(entry);
+      return list;
+    }
+
+    /** 容器标记：每轮识别重打；容器消失时撤掉旧标记，避免样式命中已换位置的节点。 */
+    const arrangeAnnotated = new Set();
+    function annotateArrange(targets) {
+      const done = new Set();
+      for (const entry of targets.arrange ?? []) {
+        if (entry.node === null || entry.node === undefined || entry.node.isConnected !== true) continue;
+        mark(entry.node, 'data-dshl-arrange', entry.id);
+        done.add(entry.node);
+      }
+      for (const node of arrangeAnnotated) {
+        if (!done.has(node) && node.isConnected) node.removeAttribute('data-dshl-arrange');
+      }
+      arrangeAnnotated.clear();
+      for (const node of done) arrangeAnnotated.add(node);
+    }
 
     /**
      * 把各区域识别结果收束成统一单元表：id → 元素数组（一个单元可能对应多个节点，例如设置页导航列含标题）。
@@ -2366,6 +2509,7 @@ window.__ModuleLoader__.load({
       targets.areaSnapshots = areaSnapshots;
       targets.areaSnapshotVersion = areaSnapshotVersion;
       targets.slotSources = slotsService === null ? null : scanSlots();
+      targets.arrange = readArrangeContainers(targets);
       targets.surfaces = readSurfaces(targets);
       targets.anomalies = Object.values(surfaceAnomalies).sort((a, b) => b.lastSeenAt - a.lastSeenAt);
       return targets;
@@ -2419,6 +2563,7 @@ window.__ModuleLoader__.load({
       }
       externalAnnotated.clear();
       for (const node of externalDone) externalAnnotated.add(node);
+      annotateArrange(targets);
     }
 
     function refresh() {
@@ -2460,6 +2605,13 @@ window.__ModuleLoader__.load({
 .dshl-tabPanel[data-tab="sidebar"] .dshl-cards { grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); }
 .dshl-tabPanel[data-tab="areas"] .dshl-cards { grid-template-columns:repeat(auto-fit, minmax(340px, 1fr)); }
 .dshl-tabPanel[data-tab="recognition"] .dshl-cards { grid-template-columns:minmax(0, 1fr); }
+.dshl-tabPanel[data-tab="arrange"] .dshl-cards { grid-template-columns:minmax(0, 680px); justify-content:center; }
+.dshl-arrangeRow { display:flex; flex-direction:column; gap:6px; padding:8px 10px; border-radius:var(--dsw-radius-md, 8px); background:var(--dsw-alias-bg-layer-2); }
+.dshl-arrangeRow[data-offline="true"] { opacity:.6; }
+.dshl-arrangeHead { display:flex; align-items:center; gap:8px; }
+.dshl-arrangeName { flex:1; min-width:0; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dshl-arrangeCtl { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.dshl-arrangeCtl .dshl-chip { height:24px; padding:0 9px; font-size:11px; }
 .dshl-card { border:1px solid var(--dsw-alias-border-l1); border-radius:var(--dsw-radius-lg, 12px); background:var(--dsw-alias-bg-layer-1); padding:12px; display:flex; flex-direction:column; gap:10px; min-width:0; }
 .dshl-cardHead { display:flex; flex-direction:column; gap:2px; }
 .dshl-cardTitle { font-size:13px; font-weight:600; }
@@ -2659,6 +2811,17 @@ window.__ModuleLoader__.load({
       }
       for (const [key, order] of Object.entries(config.slots.order)) {
         lines.push(`[${SLOT_ENTRY_ATTR}="${cssAttr(key)}"] { order: ${Math.round(order)} !important; }`);
+      }
+      // 槽位编排：容器改网格排列。只对配置过的容器生效，配置清空即恢复宿主布局
+      for (const [containerId, spec] of Object.entries(config.arrange ?? {})) {
+        const selector = `[data-dshl-arrange="${cssAttr(containerId)}"]`;
+        lines.push(`${selector} { display: grid !important; grid-template-columns: repeat(${Math.round(spec.columns)}, minmax(0, 1fr)) !important; gap: ${Math.round(spec.gap)}px !important; align-content: start !important; }`);
+        lines.push(`${selector} > * { min-width: 0 !important; }`);
+        // 面板导航是图标 + 文字行：只留图标时把行内第二个子元素（文字）藏起来，并让图标居中
+        if (containerId === 'panels' && spec.compact === true) {
+          lines.push(`${selector} > * > *:nth-child(2) { display: none !important; }`);
+          lines.push(`${selector} > * { justify-content: center !important; }`);
+        }
       }
       if (config.center.contentWidth !== null) {
         const width = Math.round(config.center.contentWidth);
@@ -3200,6 +3363,7 @@ window.__ModuleLoader__.load({
       { id: 'structure', labelKey: 'tabStructure', hintKey: 'tabStructureHint', cards: ['structure'] },
       { id: 'sidebar', labelKey: 'tabSidebar', hintKey: 'tabSidebarHint', cards: ['blocks', 'panels'] },
       { id: 'areas', labelKey: 'tabAreas', hintKey: 'tabAreasHint', cards: ['conversation', 'rightbar', 'settings'] },
+      { id: 'arrange', labelKey: 'tabArrange', hintKey: 'tabArrangeHint', cards: ['arrange'] },
       { id: 'recognition', labelKey: 'tabRecognition', hintKey: 'tabRecognitionHint', cards: ['surfaces', 'coverage', 'pluginSources'] },
     ];
     const UI_STORE_KEY = 'dsh-layout/ui/v1';
@@ -3801,6 +3965,66 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * 容器排列卡片：每个可排列容器一行，给列数（默认 / 2 / 3）、间距与紧凑开关。
+     * 已配置但此刻不在场的容器也列出来（可改、可复位），避免切走页面后就调不到。
+     */
+    function ArrangeCard({ config, targets, t }) {
+      const rows = [...(targets.arrange ?? [])];
+      for (const id of Object.keys(config.arrange ?? {})) {
+        if (rows.some((entry) => entry.id === id)) continue;
+        const known = ARRANGE_KNOWN.find((item) => item.id === id);
+        rows.push({ id, labelKey: known?.labelKey, slot: id.startsWith('slot:') ? id.slice(5) : undefined, node: null, offline: true });
+      }
+      const labelOf = (entry) => (entry.labelKey === undefined || entry.labelKey === null
+        ? `${t('arrangeSlotPrefix')} ${entry.slot ?? entry.id}`
+        : t(entry.labelKey));
+      const setColumns = (id, columns) => updateConfig((draft) => {
+        if (columns === null) {
+          delete draft.arrange[id];
+          return;
+        }
+        const current = draft.arrange[id];
+        draft.arrange[id] = { columns, gap: current?.gap ?? 8, compact: current?.compact === true };
+      });
+      const setGap = (id, gap) => updateConfig((draft) => {
+        if (draft.arrange[id] !== undefined) draft.arrange[id].gap = gap;
+      });
+      const setCompact = (id, compact) => updateConfig((draft) => {
+        if (draft.arrange[id] !== undefined) draft.arrange[id].compact = compact;
+      });
+      const renderRow = (entry) => {
+        const spec = config.arrange[entry.id] ?? null;
+        const current = spec === null ? null : spec.columns;
+        return h('div', { key: entry.id, className: 'dshl-arrangeRow', 'data-offline': entry.offline === true ? 'true' : undefined },
+          h('div', { className: 'dshl-arrangeHead' },
+            h('span', { className: 'dshl-arrangeName', title: entry.id }, labelOf(entry)),
+            entry.offline === true ? h('span', { className: 'dshl-itemSub' }, t('arrangeOffline')) : null),
+          h('div', { className: 'dshl-arrangeCtl' },
+            h('span', { className: 'dshl-itemSub' }, t('arrangeColumns')),
+            ...[null, 2, 3].map((columns) => h('button', {
+              key: columns === null ? 'default' : String(columns),
+              type: 'button',
+              className: 'dshl-chip',
+              'data-active': current === columns ? 'true' : undefined,
+              onClick: () => setColumns(entry.id, columns),
+            }, columns === null ? t('arrangeDefault') : String(columns)))),
+          spec === null
+            ? null
+            : h(Field, { label: t('arrangeGap'), valueText: `${spec.gap}${t('px')}` },
+              h(Slider, { value: spec.gap, min: 0, max: 32, step: 2, onChange: (value) => setGap(entry.id, value) })),
+          entry.id === 'panels' && spec !== null
+            ? h('div', { className: 'dshl-row' },
+              h('span', { className: 'dshl-rowLabel', title: t('arrangeCompactHint') }, t('arrangeCompact')),
+              h(Switch, { checked: spec.compact, label: t('arrangeCompact'), onChange: (on) => setCompact(entry.id, on) }))
+            : null);
+      };
+      return h(Card, { title: t('arrange'), desc: t('arrangeHint') },
+        rows.length === 0
+          ? h('p', { className: 'dshl-hint' }, t('arrangeEmpty'))
+          : h('div', { className: 'dshl-list' }, rows.map(renderRow)));
+    }
+
+    /**
      * 会话区卡片：内容宽度 + 四组拆解（基础三块与换序、会话头内部、消息区、输入区）。
      * 拆解项的开关由 PART_UNITS 声明表生成，卡片只负责摆位置。
      */
@@ -3877,6 +4101,7 @@ window.__ModuleLoader__.load({
         surfaces: () => h(SurfacesCard, { targets, t }),
         coverage: () => h(CoverageCard, { config, targets, t }),
         pluginSources: () => h(PluginSourcesCard, { config, targets, t }),
+        arrange: () => h(ArrangeCard, { config, targets, t }),
         conversation: () => h(ConversationCard, { config, targets, t }),
         rightbar: () => h(RightbarCard, { config, targets, t }),
         settings: () => h(SettingsCard, { config, targets, t }),
