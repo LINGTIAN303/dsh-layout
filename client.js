@@ -213,6 +213,9 @@ window.__ModuleLoader__.load({
       relocateHint: '把单元搬到别的容器里：节点留在原树里只改定位，目标容器用占位符让位；目标不在场时自动回原位。',
       relocateSource: '源单元',
       relocateTarget: '目标容器',
+      relocateTargetBuiltin: '区域与单元',
+      relocateTargetSlots: '槽位出口',
+      relocateDestSlot: '槽位出口',
       relocatePlace: '位置',
       relocateStart: '放在开头',
       relocateEnd: '放在结尾',
@@ -580,6 +583,9 @@ window.__ModuleLoader__.load({
       relocateHint: 'Move a unit into another container: the node stays in its React tree and only its position changes; the destination reserves space with a placeholder and the unit returns home when the target is not present.',
       relocateSource: 'Source unit',
       relocateTarget: 'Target container',
+      relocateTargetBuiltin: 'Regions and units',
+      relocateTargetSlots: 'Slot outlets',
+      relocateDestSlot: 'Slot outlet',
       relocatePlace: 'Place',
       relocateStart: 'At start',
       relocateEnd: 'At end',
@@ -642,6 +648,8 @@ window.__ModuleLoader__.load({
       ruleAreaSettings: 'Settings',
       ruleActionHide: 'Hide unit',
       ruleActionArrange: 'Arrange container',
+      ruleActionScheme: 'Switch layout scheme',
+      ruleSchemeEmpty: 'No saved scheme yet',
       ruleColumns: 'Columns',
       ruleEmptyValue: 'Nothing to pick right now.',
       tabStorage: 'Entry storage',
@@ -906,7 +914,7 @@ window.__ModuleLoader__.load({
 
     /** 联动规则的枚举：条件与动作都只认这几类，配置里出现的其它值一律丢掉。 */
     const RULE_CONDITION_KINDS = new Set(['page', 'collapsed', 'area', 'present']);
-    const RULE_ACTION_KINDS = new Set(['hide', 'arrange']);
+    const RULE_ACTION_KINDS = new Set(['hide', 'arrange', 'scheme']);
     const RULE_PAGE_VALUES = new Set(['any', 'conversation', 'plugins', 'pluginDetail', 'settings', 'external']);
     const RULE_AREA_VALUES = new Set(['sidebar', 'center', 'rightbar', 'settings']);
 
@@ -929,6 +937,7 @@ window.__ModuleLoader__.load({
       surfaces: [],
       anomalies: [],
       arrange: [],
+      relocateDests: [],
     };
 
     function clampInt(value, min, max, fallback) {
@@ -1097,7 +1106,7 @@ window.__ModuleLoader__.load({
         };
       }
       out.arrange = arrange;
-      // 区域搬移：源 id → { to, place }；目标必须在枚举表里，位置只有 start / end
+      // 区域搬移：源 id → { to, place }；目标要么在枚举表里，要么是 slotdest:<槽位键>（列表槽位出口），位置只有 start / end
       const relocateRaw = raw.relocate !== null && typeof raw.relocate === 'object' ? raw.relocate : {};
       const relocate = {};
       for (const [sourceId, value] of Object.entries(relocateRaw)) {
@@ -1105,8 +1114,9 @@ window.__ModuleLoader__.load({
         if (typeof sourceId !== 'string' || sourceId.length === 0 || sourceId.length > 160) continue;
         if (value === null || typeof value !== 'object') continue;
         const to = typeof value.to === 'string' ? value.to : '';
-        if (!RELOCATE_DESTINATION_IDS.has(to)) continue;
-        relocate[sourceId] = { to, place: value.place === 'end' ? 'end' : 'start' };
+        const slotDest = to.startsWith('slotdest:') && to.length > 9 && to.length <= 120 ? to : '';
+        if (slotDest === '' && !RELOCATE_DESTINATION_IDS.has(to)) continue;
+        relocate[sourceId] = { to: slotDest === '' ? to : slotDest, place: value.place === 'end' ? 'end' : 'start' };
       }
       out.relocate = relocate;
       // 联动规则：条件与动作都按枚举收束，非法规则直接丢弃（而不是留一条永远不生效的）
@@ -1139,6 +1149,14 @@ window.__ModuleLoader__.load({
         if (then.kind === 'hide') {
           if (typeof then.target !== 'string' || then.target.length === 0 || then.target.length > 160) continue;
           rule.then = { kind: 'hide', target: then.target };
+        } else if (then.kind === 'scheme') {
+          // 切方案动作：只认方案 id，名字仅用于卡片显示（方案改名后规则仍指向同一套）
+          if (typeof then.scheme !== 'string' || then.scheme.length === 0 || then.scheme.length > 64) continue;
+          rule.then = {
+            kind: 'scheme',
+            scheme: then.scheme,
+            schemeName: typeof then.schemeName === 'string' ? then.schemeName.slice(0, 40) : '',
+          };
         } else {
           const columns = Math.round(Number(then.columns));
           if (typeof then.container !== 'string' || then.container.length === 0 || then.container.length > 120) continue;
@@ -1196,6 +1214,7 @@ window.__ModuleLoader__.load({
       return out;
     }
 
+
     function readStoredConfig() {
       try {
         const text = window.localStorage.getItem(STORAGE_KEY);
@@ -1249,11 +1268,14 @@ window.__ModuleLoader__.load({
       if (persistTimer !== null) window.clearTimeout(persistTimer);
       persistTimer = window.setTimeout(() => {
         persistTimer = null;
+        const text = JSON.stringify(snapshot.config);
+        // 缓存先写：宿主写的确认是异步的，界面不能等它
         try {
-          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot.config));
+          window.localStorage.setItem(STORAGE_KEY, text);
         } catch (error) {
           console.warn('[dsh-layout] 保存本地布局配置失败', error);
         }
+        hostWrite('document', text);
       }, 250);
     }
 
@@ -1419,8 +1441,11 @@ window.__ModuleLoader__.load({
       return { active, list };
     }
 
+    /** 方案表写两层：本地缓存立即写，宿主设置文档异步跟写（跨浏览器持久化的主力）。 */
     function writeLayouts(state) {
-      writeJsonStore(LAYOUTS_KEY, { active: state.active, list: state.list });
+      const payload = { active: state.active, list: state.list };
+      writeJsonStore(LAYOUTS_KEY, payload);
+      hostWrite('schemes', JSON.stringify(payload));
     }
 
     /** 读取即规范：超上限的条目在第一次写回时裁掉，避免存储与界面长期不一致。 */
@@ -2860,11 +2885,26 @@ window.__ModuleLoader__.load({
     const TELEPORT_ATTR = 'data-dshl-teleport';
     const PLACEHOLDER_ATTR = 'data-dshl-placeholder';
 
+    /** 搬移目标可用的槽位出口容器：与槽位编排同一套识别（列表槽位 ≥2 个已渲染条目的共同父级）。 */
+    function relocateSlotDestinations(targets) {
+      const out = [];
+      for (const entry of slotArrangeContainers(targets)) {
+        out.push({ id: `slotdest:${entry.slot}`, slot: entry.slot, node: entry.node });
+      }
+      return out;
+    }
+
     function relocateDestinationNode(targets, id) {
       if (typeof id !== 'string') return null;
       if (id.startsWith('block:')) return targets.blocks[id.slice(6)] ?? null;
       if (id.startsWith('region:')) return targets.regions[id.slice(7)] ?? null;
       if (id.startsWith('unit:')) return (targets.units?.[id.slice(5)] ?? [])[0] ?? null;
+      // 槽位出口容器：目标按槽位键定位，容器重建后仍能找到（不存节点引用）
+      if (id.startsWith('slotdest:')) {
+        const slot = id.slice(9);
+        const hit = (targets.relocateDests ?? []).find((entry) => entry.slot === slot);
+        return hit === undefined ? null : hit.node;
+      }
       return null;
     }
 
@@ -3082,13 +3122,19 @@ window.__ModuleLoader__.load({
         hideKeys: new Set(),
         arrange: { ...(config.arrange ?? {}) },
         relocate: { ...(config.relocate ?? {}) },
+        /** 命中的「切方案」规则要求的目标方案 id（同名多条时取最后一条命中的）。 */
+        scheme: '',
+        schemeName: '',
         matched: new Set(),
       };
       for (const rule of config.rules ?? []) {
         if (!ruleMatches(rule.when, targets)) continue;
         plan.matched.add(rule.id);
         if (rule.then.kind === 'hide') plan.hideKeys.add(rule.then.target);
-        else {
+        else if (rule.then.kind === 'scheme') {
+          plan.scheme = rule.then.scheme;
+          plan.schemeName = rule.then.schemeName ?? '';
+        } else {
           const base = plan.arrange[rule.then.container];
           plan.arrange[rule.then.container] = { columns: rule.then.columns, gap: base?.gap ?? 8, compact: base?.compact === true };
         }
@@ -3103,6 +3149,172 @@ window.__ModuleLoader__.load({
       const value = computePlan(snapshot.targets, snapshot.config);
       planCache = { targets: snapshot.targets, config: snapshot.config, value };
       return value;
+    }
+
+    /* ============================== 持久化：宿主设置文档（主）+ localStorage（缓存） ============================== */
+    /**
+     * 配置要跟着「用户 / 机器上的 DSH 设置」走，而不是跟着浏览器走：换浏览器、换 Web 端、清缓存
+     * 都不该丢用户辛苦调好的布局（docs/plans/2026-11-08-配置跨浏览器持久化.md）。
+     *
+     * 分工：
+     * - 主存储 = 宿主设置文档 `~/.dsh/settings.yaml` 的 `layout` 节，经 `ctx.configForms` 读写；
+     *   落盘由宿主负责，同一份 DSH 安装下所有客户端读到同一份。
+     * - 缓存 = localStorage：启动时先用它渲染（不必等异步读盘就闪一下默认布局），宿主读回后以宿主为准；
+     *   宿主服务不可用时它就是唯一存储（降级，行为与改造前一致）。
+     * - 方案表同样两层，走 `schemes` 字段。
+     */
+    const HOST_FORM_NAMESPACE = 'layout';
+    let hostForm = null;
+    /** 宿主是否可写：只读部署下不发写请求，避免无谓报错。 */
+    let hostWritable = false;
+    /** 宿主写入串行化：连点时不并发，也保证「写 → 读回」不乱序。 */
+    let hostWriteChain = Promise.resolve();
+    /** 已写入值：读回到自己写的值时跳过，切断「写 → 读回 → 再写」的回环。 */
+    let hostLastWritten = { document: null, schemes: null };
+    /** 方案表版本号：宿主读回方案后让卡片重取。 */
+    let layoutsVersion = 0;
+
+    /** 取宿主配置表单并订阅；服务不在场时保持 null（此后全程走 localStorage）。 */
+    function bindHostForm(ctx) {
+      try {
+        const forms = ctx === null || ctx === undefined ? undefined : ctx.configForms;
+        if (forms === null || forms === undefined || typeof forms.get !== 'function') {
+          console.warn('[dsh-layout] 宿主没有 configForms 服务，配置只存浏览器本地');
+          window.__dshLayoutHostProbe = { forms: false };
+          return;
+        }
+        hostForm = forms.get(HOST_FORM_NAMESPACE);
+        if (hostForm === null || hostForm === undefined) {
+          window.__dshLayoutHostProbe = { forms: true, form: false };
+          return;
+        }
+        if (typeof hostForm.subscribe === 'function') hostForm.subscribe(consumeHostSnapshot);
+        consumeHostSnapshot();
+        const describe = typeof forms.describe === 'function' ? forms.describe() : null;
+        const snapshotView = describe === null ? null : describe.getSnapshot();
+        window.__dshLayoutHostProbe = {
+          forms: true,
+          form: true,
+          namespaces: (snapshotView?.view?.namespaces ?? []).map((item) => item.ns).slice(0, 40),
+          status: hostForm.getSnapshot()?.status,
+          writable: hostForm.getSnapshot()?.writable,
+          value: hostForm.getSnapshot()?.value,
+        };
+      } catch (error) {
+        console.warn('[dsh-layout] 宿主设置表单不可用，配置退回浏览器本地存储', error);
+        hostForm = null;
+        window.__dshLayoutHostProbe = { error: String(error) };
+      }
+    }
+
+    function consumeHostSnapshot() {
+      if (hostForm === null) return;
+      const snap = hostForm.getSnapshot();
+      if (snap === null || snap === undefined || snap.status !== 'ready') return;
+      hostWritable = snap.writable !== false;
+      const value = snap.value ?? {};
+      const documentText = typeof value.document === 'string' ? value.document : '';
+      const schemesText = typeof value.schemes === 'string' ? value.schemes : '';
+      // 宿主是空的（第一次升级到宿主存储）：把本地缓存推上去，否则用户不改任何设置就永远带不走旧配置
+      if (documentText === '' || schemesText === '') {
+        migrateLocalToHost(documentText === '', schemesText === '');
+        return;
+      }
+      if (documentText !== hostLastWritten.document) applyHostDocument(documentText);
+      if (schemesText !== hostLastWritten.schemes) applyHostSchemes(schemesText);
+    }
+
+    /** 一次性迁移：宿主该字段为空时，用 localStorage 里的现值填上（不覆盖宿主已有内容）。 */
+    let hostMigrated = false;
+    function migrateLocalToHost(fillDocument, fillSchemes) {
+      if (hostMigrated) return;
+      hostMigrated = true;
+      if (fillDocument) {
+        const cached = window.localStorage.getItem(STORAGE_KEY);
+        if (cached !== null && cached !== '') {
+          hostWrite('document', cached);
+          console.info('[dsh-layout] 把浏览器本地布局配置迁移到宿主设置文档');
+        }
+      }
+      if (fillSchemes) {
+        const cached = window.localStorage.getItem(LAYOUTS_KEY);
+        if (cached !== null && cached !== '' && cached !== '{}') {
+          hostWrite('schemes', cached);
+          console.info('[dsh-layout] 把浏览器本地布局方案迁移到宿主设置文档');
+        }
+      }
+    }
+
+    /** 宿主配置 → 界面。解析失败保留当前配置（不能让一份坏数据把界面清空）。 */
+    function applyHostDocument(text) {
+      let parsed;
+      try {
+        parsed = JSON.parse(text);
+      } catch (error) {
+        console.warn('[dsh-layout] 宿主里的布局配置不是合法 JSON，保留当前配置', error);
+        return;
+      }
+      const next = normalizeConfig(parsed);
+      try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch (error) { /* 缓存写失败不影响主存储 */ }
+      snapshot = { ...snapshot, config: next };
+      planCache = { targets: null, config: null, value: null };
+      annotateStored();
+      applyDynamicCss();
+      applyRelocations();
+      notify();
+    }
+
+    function applyHostSchemes(text) {
+      let parsed;
+      try {
+        parsed = JSON.parse(text);
+      } catch (error) {
+        console.warn('[dsh-layout] 宿主里的布局方案不是合法 JSON，保留当前方案表', error);
+        return;
+      }
+      writeJsonStore(LAYOUTS_KEY, parsed);
+      layoutsVersion += 1;
+      notify();
+    }
+
+    /** 写宿主：只记账、异步串行发出；失败不回滚界面（本地缓存仍然有效）。 */
+    function hostWrite(field, text) {
+      if (hostForm === null || text === null || hostWritable !== true) return;
+      hostLastWritten = { ...hostLastWritten, [field]: text };
+      hostWriteChain = hostWriteChain
+        .then(() => (hostForm === null ? undefined : hostForm.set(field, text)))
+        .catch((error) => { console.warn('[dsh-layout] 写入宿主设置失败，本地缓存仍然有效', error); });
+    }
+
+    /**
+     * 「切方案」动作的执行器。
+     * 两个必须处理的陷阱：
+     * 1. 回环：切方案会整体替换配置，而配置里就带着这条规则；直接应用会反复触发。
+     *    解法是记录「上次应用发生在哪一份配置上」，同一份配置上同一目标只应用一次。
+     * 2. 规则被吃掉：方案是整套配置，里面通常没有这条规则，替换后规则消失就再也不会触发。
+     *    所以应用方案时先暂存当前 rules，替换后写回——规则是「触发条件」，方案是「布局内容」，两者分开。
+     */
+    let schemeApplied = { key: '', config: null };
+    function applySchemeRule(plan) {
+      if (plan.scheme === '') {
+        schemeApplied = { key: '', config: null };
+        return false;
+      }
+      if (schemeApplied.key === plan.scheme && schemeApplied.config === snapshot.config) return false;
+      const state = readLayoutsNormalized();
+      const entry = state.list.find((item) => item.id === plan.scheme);
+      if (entry === undefined) {
+        schemeApplied = { key: plan.scheme, config: snapshot.config };
+        return false;
+      }
+      const rules = clone(snapshot.config.rules ?? []);
+      replaceConfig(clone(entry.config));
+      if (rules.length > 0 && JSON.stringify(snapshot.config.rules) !== JSON.stringify(rules)) {
+        updateConfig((draft) => { draft.rules = rules; });
+      }
+      writeLayouts({ ...state, active: entry.id });
+      schemeApplied = { key: plan.scheme, config: snapshot.config };
+      return true;
     }
 
     /**
@@ -3610,6 +3822,7 @@ window.__ModuleLoader__.load({
       targets.areaSnapshotVersion = areaSnapshotVersion;
       targets.slotSources = slotsService === null ? null : scanSlots();
       targets.arrange = readArrangeContainers(targets);
+      targets.relocateDests = relocateSlotDestinations(targets);
       targets.storageZones = readStorageZones(targets);
       targets.surfaces = readSurfaces(targets);
       targets.anomalies = Object.values(surfaceAnomalies).sort((a, b) => b.lastSeenAt - a.lastSeenAt);
@@ -3677,6 +3890,10 @@ window.__ModuleLoader__.load({
       setTargets(targets);
       // 识别结果可能没变（签名相同、不重绘），但联动条件可能变了（页面、折叠、条目在场），样式与投影每轮重算一次
       applyDynamicCss();
+      // 「切方案」规则要在样式与投影之前生效：它会替换整套配置，后续两步必须按新配置算
+      if (applySchemeRule(currentPlan())) {
+        applyDynamicCss();
+      }
       applyRelocations();
       return targets;
     }
@@ -5392,9 +5609,13 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       const [targetId, setTargetId] = React.useState(RELOCATE_DESTINATIONS[0].id);
       const [place, setPlace] = React.useState('start');
       const activeIds = new Set(relocateActiveList(targets, config).map((item) => item.sourceId));
+      // 槽位出口容器：除了 15 个内置目标，还能把单元搬进任意列表槽位的出口（与槽位编排同一套识别）
+      const slotDests = targets.relocateDests ?? [];
       const destLabel = (id) => {
         const dest = RELOCATE_DESTINATIONS.find((item) => item.id === id);
-        return dest === undefined ? id : t(dest.labelKey);
+        if (dest !== undefined) return t(dest.labelKey);
+        if (id.startsWith('slotdest:')) return `${t('relocateDestSlot')} ${id.slice(9)}`;
+        return id;
       };
       const groups = [
         ['block', 'relocateSourceBlock'],
@@ -5430,7 +5651,14 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
                 value: targetId,
                 onChange: (event) => setTargetId(event.target.value),
               },
-              ...RELOCATE_DESTINATIONS.map((dest) => h('option', { key: dest.id, value: dest.id }, t(dest.labelKey))))),
+              h('optgroup', { label: t('relocateTargetBuiltin') },
+                ...RELOCATE_DESTINATIONS.map((dest) => h('option', { key: dest.id, value: dest.id }, t(dest.labelKey)))),
+              slotDests.length === 0 ? null : h('optgroup', { label: t('relocateTargetSlots') },
+                ...slotDests.map((dest) => h('option', { key: dest.id, value: dest.id }, dest.slot))),
+              // 已配置但此刻不在场的槽位目标也要能显示名字，否则下拉框会跳到空值
+              ...(targetId.startsWith('slotdest:') && !slotDests.some((dest) => dest.id === targetId)
+                ? [h('option', { key: targetId, value: targetId }, `${t('relocateDestSlot')} ${targetId.slice(9)}`)]
+                : []))),
             h('label', { className: 'dshl-relocateField' }, t('relocatePlace'),
               h('select', {
                 className: 'dshl-select',
@@ -5522,6 +5750,9 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       const [hideTarget, setHideTarget] = React.useState(sourceOptions[0]?.id ?? '');
       const [container, setContainer] = React.useState(containers[0]?.id ?? 'panels');
       const [columns, setColumns] = React.useState(2);
+      // 「切方案」动作的目标：从已保存的布局方案里选（没有方案时该动作不可用）
+      const schemeList = readLayoutsNormalized().list;
+      const [schemeId, setSchemeId] = React.useState(schemeList[0]?.id ?? '');
       const conditions = valueOptions(condKind);
       const condLabel = (rule) => {
         const options = valueOptions(rule.when.kind);
@@ -5535,19 +5766,23 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
           const label = hit === undefined ? rule.then.target : (hit.labelKey === null ? hit.name : t(hit.labelKey));
           return `${t('ruleActionHide')}：${label}`;
         }
+        if (rule.then.kind === 'scheme') {
+          const hit = schemeList.find((item) => item.id === rule.then.scheme);
+          return `${t('ruleActionScheme')}：${hit === undefined ? (rule.then.schemeName === '' ? rule.then.scheme : rule.then.schemeName) : hit.name}`;
+        }
         const hit = containers.find((item) => item.id === rule.then.container);
         return `${t('ruleActionArrange')}：${hit === undefined ? rule.then.container : hit.label} · ${rule.then.columns} ${t('ruleColumns')}`;
       };
       const plan = computePlan(targets, config);
+      const canAdd = actionKind === 'hide' ? hideTarget !== '' : actionKind === 'scheme' ? schemeId !== '' : container !== '';
       const add = () => {
-        if (actionKind === 'hide' ? hideTarget === '' : container === '') return;
-        const rule = {
-          id: `r${Date.now().toString(36)}`,
-          when: { kind: condKind, value: condValue },
-          then: actionKind === 'hide'
-            ? { kind: 'hide', target: hideTarget }
-            : { kind: 'arrange', container, columns },
-        };
+        if (!canAdd) return;
+        const then = actionKind === 'hide'
+          ? { kind: 'hide', target: hideTarget }
+          : actionKind === 'scheme'
+            ? { kind: 'scheme', scheme: schemeId, schemeName: schemeList.find((item) => item.id === schemeId)?.name ?? '' }
+            : { kind: 'arrange', container, columns };
+        const rule = { id: `r${Date.now().toString(36)}`, when: { kind: condKind, value: condValue }, then };
         updateConfig((draft) => { draft.rules = [...draft.rules, rule].slice(0, 12); });
       };
       const field = (label, children) => h('label', { className: 'dshl-relocateField' }, label, children);
@@ -5584,7 +5819,8 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
             onChange: (event) => setActionKind(event.target.value),
           },
           h('option', { value: 'hide' }, t('ruleActionHide')),
-          h('option', { value: 'arrange' }, t('ruleActionArrange')))),
+          h('option', { value: 'arrange' }, t('ruleActionArrange')),
+          h('option', { value: 'scheme', disabled: schemeList.length === 0 }, t('ruleActionScheme')))),
           actionKind === 'hide'
             ? field(t('ruleActionHide'), h('select', {
               className: 'dshl-select',
@@ -5593,26 +5829,34 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
             }, sourceOptions.length === 0
               ? h('option', { value: '' }, t('ruleEmptyValue'))
               : sourceOptions.map((option) => h('option', { key: option.id, value: option.id }, option.label))))
-            : h(React.Fragment, null,
-              field(t('ruleActionArrange'), h('select', {
+            : actionKind === 'scheme'
+              ? field(t('ruleActionScheme'), h('select', {
                 className: 'dshl-select',
-                value: container,
-                onChange: (event) => setContainer(event.target.value),
-              }, containers.length === 0
-                ? h('option', { value: '' }, t('ruleEmptyValue'))
-                : containers.map((option) => h('option', { key: option.id, value: option.id }, option.label)))),
-              field(t('ruleColumns'), h('select', {
-                className: 'dshl-select',
-                value: String(columns),
-                onChange: (event) => setColumns(Number(event.target.value)),
-              },
-              h('option', { value: '2' }, '2'),
-              h('option', { value: '3' }, '3')))),
+                value: schemeId,
+                onChange: (event) => setSchemeId(event.target.value),
+              }, schemeList.length === 0
+                ? h('option', { value: '' }, t('ruleSchemeEmpty'))
+                : schemeList.map((item) => h('option', { key: item.id, value: item.id }, item.name))))
+              : h(React.Fragment, null,
+                field(t('ruleActionArrange'), h('select', {
+                  className: 'dshl-select',
+                  value: container,
+                  onChange: (event) => setContainer(event.target.value),
+                }, containers.length === 0
+                  ? h('option', { value: '' }, t('ruleEmptyValue'))
+                  : containers.map((option) => h('option', { key: option.id, value: option.id }, option.label)))),
+                field(t('ruleColumns'), h('select', {
+                  className: 'dshl-select',
+                  value: String(columns),
+                  onChange: (event) => setColumns(Number(event.target.value)),
+                },
+                h('option', { value: '2' }, '2'),
+                h('option', { value: '3' }, '3')))),
           h('button', {
             type: 'button',
             className: 'dshl-btn',
             'data-primary': 'true',
-            disabled: actionKind === 'hide' ? hideTarget === '' : container === '',
+            disabled: !canAdd,
             onClick: add,
           }, t('ruleAdd'))),
         (config.rules ?? []).length === 0
@@ -6677,13 +6921,15 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
     }
 
     /* ============================== 插件装配 ============================== */
-    const inject = ['slots', 'locale'];
+    const inject = ['slots', 'locale', 'configForms'];
 
     function apply(ctx) {
       const t = ctx.locale.bind(NS);
       ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-layout: dictionaries');
       // 插件来源面板依赖 slots 注册表；拿不到就整体降级，不影响几何拆解
       bindSlotsService(ctx);
+      // 宿主设置文档：配置与方案的第一存储（跨浏览器），服务不在场时全程走 localStorage（docs/plans/2026-11-08-配置跨浏览器持久化.md）
+      bindHostForm(ctx);
 
       let refreshTimer = null;
       const scheduleRefresh = () => {
