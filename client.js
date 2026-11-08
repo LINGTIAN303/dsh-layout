@@ -80,7 +80,7 @@ window.__ModuleLoader__.load({
       coverageEmpty: '当前为空',
       coveragePending: '待识别',
       externalTitle: '外部插件单元',
-      externalHint: '自动扫描当前插件页面的结构；本阶段只读，只列出候选，不改界面。',
+      externalHint: '自动扫描当前插件页面的结构；安全项可直接隐藏/排序，风险项（入口、含输入、唯一滚动、占满整页）保持只读。',
       externalEmpty: '当前页面没有可扫描的外部插件结构（会话页，或还没打开插件页）。',
       externalIframe: '该页面是 iframe，内部结构无法拆解（只能整页显隐）。',
       externalCount: (total, hide, reorder) => `扫描到 ${total} 个候选 · 可隐藏 ${hide} · 可排序 ${reorder}`,
@@ -102,6 +102,8 @@ window.__ModuleLoader__.load({
       externalBlockedTooLarge: '占满整页',
       externalActionHide: '可隐藏',
       externalActionReorder: '可排序',
+      externalOrderUp: '上移',
+      externalOrderDown: '下移',
       rightbarPanel: '右栏',
       rightbarPanelHint: '右栏内部的标签栏与内容区；宽度在「区域结构」里调。',
       rightbarPartsHint: '右栏拆解：标签栏与内容区可各自隐藏，标签栏也可放到内容区下方。',
@@ -253,7 +255,7 @@ window.__ModuleLoader__.load({
       coverageEmpty: 'Empty',
       coveragePending: 'Pending',
       externalTitle: 'External plugin units',
-      externalHint: 'Auto-scans the current plugin page structure; this stage is read-only: candidates are listed, nothing changes.',
+      externalHint: 'Auto-scans the current plugin page; safe units can be hidden or reordered, risky ones (entry, inputs, only scroll container, fills page) stay read-only.',
       externalEmpty: 'No external plugin structure to scan on this page (conversation page, or no plugin page open).',
       externalIframe: 'This page is an iframe; its internals cannot be decomposed (whole-page visibility only).',
       externalCount: (total, hide, reorder) => `${total} candidates · ${hide} hideable · ${reorder} reorderable`,
@@ -275,6 +277,8 @@ window.__ModuleLoader__.load({
       externalBlockedTooLarge: 'Fills the page',
       externalActionHide: 'Hideable',
       externalActionReorder: 'Reorderable',
+      externalOrderUp: 'Move up',
+      externalOrderDown: 'Move down',
       rightbarPanel: 'Right column',
       rightbarPanelHint: 'The tab strip and content area inside the right column; width is set in region structure.',
       rightbarPartsHint: 'Right column parts: the tab strip and content can each be hidden, and the tab strip can move below the content.',
@@ -456,6 +460,8 @@ window.__ModuleLoader__.load({
         offsetY: 0,
         parts: { hideNav: false, navRight: false, hideHeader: false, hideOptions: false },
       },
+      // 外部插件单元：key 形如 `任务看板::L1.1.0`；hide 为键列表，order 为键到顺序的映射
+      external: { hide: [], order: {} },
     };
 
     const ABSENT_TARGETS = {
@@ -595,6 +601,22 @@ window.__ModuleLoader__.load({
           hideContent: rightbarParts.hideContent === true,
           tabsBottom: rightbarParts.tabsBottom === true,
         },
+      };
+      // 外部插件单元：键为 `pageKey::unitKey`；只保留字符串键与整数顺序，越界夹取
+      const external = raw.external && typeof raw.external === 'object' ? raw.external : {};
+      const hideList = Array.isArray(external.hide) ? external.hide.filter((item) => typeof item === 'string' && item.length > 0 && item.length <= 120) : [];
+      const orderMap = {};
+      if (external.order !== null && typeof external.order === 'object') {
+        for (const [key, value] of Object.entries(external.order)) {
+          if (typeof key !== 'string' || key.length === 0 || key.length > 120) continue;
+          const num = Number(value);
+          if (!Number.isFinite(num)) continue;
+          orderMap[key] = Math.min(50, Math.max(-50, Math.round(num)));
+        }
+      }
+      out.external = {
+        hide: [...new Set(hideList)].slice(0, 200),
+        order: Object.fromEntries(Object.entries(orderMap).slice(0, 200)),
       };
       return out;
     }
@@ -1516,6 +1538,7 @@ window.__ModuleLoader__.load({
           rect: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
           confidence: ['header', 'footer', 'aside', 'scroll'].includes(type) || extra.repeat === true ? 'high' : 'low',
           judge,
+          node,
         });
       };
       const l1Nodes = [...root.children].filter((node) => {
@@ -1564,6 +1587,48 @@ window.__ModuleLoader__.load({
     /** 扫描缓存：同一页面同一根节点 1.5 秒内不重复扫，避免 MutationObserver 高频刷新时反复扫描。 */
     let externalScanCache = { pageKey: '', root: null, at: 0, units: [] };
 
+    /** 外部单元键：`pageKey::unitKey`，同时作为标记值、配置键与清理依据。 */
+    function externalUnitKey(pageKey, unitKey) {
+      return `${pageKey}::${unitKey}`;
+    }
+
+    function persistExternalScan(pageKey, kind, units) {
+      const store = readJsonStore(EXTERNAL_SCAN_KEY);
+      store[pageKey] = {
+        scannedAt: new Date().toISOString(),
+        kind,
+        // 持久化时去掉 DOM 引用，只保留可序列化字段
+        units: units.map(({ node, ...rest }) => rest),
+      };
+      const keys = Object.keys(store).sort((a, b) => String(store[b].scannedAt).localeCompare(String(store[a].scannedAt)));
+      for (const key of keys.slice(12)) delete store[key];
+      writeJsonStore(EXTERNAL_SCAN_KEY, store);
+    }
+
+    /**
+     * 签名失效自动清理：页面扫描成功后，删掉该页配置里已不存在的单元键。
+     * 只在该页真的扫出单元时清理，避免页面加载中途的空扫描把配置清空；用 setTimeout 跳出识别循环。
+     */
+    function requestExternalCleanup(pageKey, units) {
+      if (units.length === 0) return;
+      const valid = new Set(units.map((unit) => externalUnitKey(pageKey, unit.key)));
+      const current = snapshot.config.external;
+      const stale = [
+        ...current.hide.filter((key) => key.startsWith(`${pageKey}::`) && !valid.has(key)),
+        ...Object.keys(current.order).filter((key) => key.startsWith(`${pageKey}::`) && !valid.has(key)),
+      ];
+      if (stale.length === 0) return;
+      window.setTimeout(() => {
+        const latest = snapshot.config.external;
+        const staleNow = stale.filter((key) => latest.hide.includes(key) || Object.hasOwn(latest.order, key));
+        if (staleNow.length === 0) return;
+        updateConfig((draft) => {
+          draft.external.hide = draft.external.hide.filter((key) => !staleNow.includes(key));
+          for (const key of staleNow) delete draft.external.order[key];
+        });
+      }, 0);
+    }
+
     function scanExternalPageCached(page) {
       const now = Date.now();
       if (externalScanCache.root === page.root && externalScanCache.pageKey === page.pageKey && now - externalScanCache.at < SCAN_SCROLL_MS) {
@@ -1571,16 +1636,9 @@ window.__ModuleLoader__.load({
       }
       const units = page.iframe === null ? scanExternalUnits(page.root) : [];
       externalScanCache = { pageKey: page.pageKey, root: page.root, at: now, units };
-      const store = readJsonStore(EXTERNAL_SCAN_KEY);
-      store[page.pageKey] = {
-        scannedAt: new Date(now).toISOString(),
-        kind: page.iframe === null ? 'dom' : 'iframe',
-        units,
-      };
-      // 只保留最近 12 个页面的扫描结果，避免 localStorage 无限增长
-      const keys = Object.keys(store).sort((a, b) => String(store[b].scannedAt).localeCompare(String(store[a].scannedAt)));
-      for (const key of keys.slice(12)) delete store[key];
-      writeJsonStore(EXTERNAL_SCAN_KEY, store);
+      if (page.iframe === null) persistExternalScan(page.pageKey, 'dom', units);
+      else persistExternalScan(page.pageKey, 'iframe', []);
+      requestExternalCleanup(page.pageKey, units);
       return units;
     }
 
@@ -1705,6 +1763,9 @@ window.__ModuleLoader__.load({
       ['data-dshl-settings', (targets) => targets.settings],
     ];
 
+    /** 上一轮注解过的外部单元节点：用于离开插件页时撤掉旧标记。 */
+    const externalAnnotated = new Set();
+
     function mark(node, attribute, value = '') {
       if (node !== null && node !== undefined && node.getAttribute(attribute) !== value) node.setAttribute(attribute, value);
     }
@@ -1728,6 +1789,21 @@ window.__ModuleLoader__.load({
       for (const [unitId, nodes] of Object.entries(targets.units ?? {})) {
         for (const node of nodes) mark(node, 'data-dshl-unit', unitId);
       }
+      // 外部插件单元：标记全键（pageKey::unitKey），供样式与清理定位；离开该页时撤掉旧标记
+      const externalDone = new Set();
+      const external = targets.external;
+      if (external !== null && external !== undefined && external.units.length > 0) {
+        for (const unit of external.units) {
+          if (unit.node === undefined || unit.node === null || unit.node.isConnected !== true) continue;
+          mark(unit.node, 'data-dshl-xunit', externalUnitKey(external.pageKey, unit.key));
+          externalDone.add(unit.node);
+        }
+      }
+      for (const node of externalAnnotated) {
+        if (!externalDone.has(node)) node.removeAttribute('data-dshl-xunit');
+      }
+      externalAnnotated.clear();
+      for (const node of externalDone) externalAnnotated.add(node);
     }
 
     function refresh() {
@@ -1779,6 +1855,7 @@ window.__ModuleLoader__.load({
 .dshl-surfaceDot[data-on="true"][data-source="official"] { background:var(--dsw-alias-brand-primary); }
 .dshl-surfaceDot[data-on="true"][data-source="third"] { background:var(--dsw-alias-state-warn-primary); }
 .dshl-itemSub { font-size:11px; color:var(--dsw-alias-label-secondary); flex:none; }
+.dshl-itemCtl { display:inline-flex; align-items:center; gap:2px; flex:none; margin-left:2px; }
 .dshl-iconBtn { width:22px; height:22px; flex:none; display:inline-flex; align-items:center; justify-content:center; padding:0; border:none; border-radius:4px; background:transparent; color:var(--dsw-alias-label-secondary); cursor:pointer; }
 .dshl-iconBtn:hover { background:var(--dsw-alias-interactive-bg-hover); color:var(--dsw-alias-label-primary); }
 .dshl-iconBtn:disabled { opacity:.3; cursor:default; }
@@ -1923,6 +2000,13 @@ window.__ModuleLoader__.load({
         const selectors = (unit.targets ?? [unit.id]).map((id) => `[data-dshl-unit="${cssAttr(id)}"]`).join(', ');
         lines.push(`${selectors} { display: none !important; }`);
       }
+      // 外部插件单元：显隐与排序。键是 pageKey::unitKey，只作用于当前页面已注解的单元
+      for (const key of config.external.hide) {
+        lines.push(`[data-dshl-xunit="${cssAttr(key)}"] { display: none !important; }`);
+      }
+      for (const [key, order] of Object.entries(config.external.order)) {
+        lines.push(`[data-dshl-xunit="${cssAttr(key)}"] { order: ${Math.round(order)} !important; }`);
+      }
       if (config.center.contentWidth !== null) {
         const width = Math.round(config.center.contentWidth);
         lines.push(`[data-dshl-conv] { --dsh-chat-content-width: min(${width}px, 100%) !important; --dsh-composer-card-max-width: min(${width + 32}px, 100%) !important; }`);
@@ -2046,6 +2130,8 @@ window.__ModuleLoader__.load({
     const ICON_GRIP = ['M6 4h.01M10 4h.01M6 8h.01M10 8h.01M6 12h.01M10 12h.01'];
     const ICON_RESET = ['M3.2 8a4.8 4.8 0 1 0 1.5-3.5', 'M3.2 3.2v3.4h3.4'];
     const ICON_LAYOUT = ['M2.8 3.2h3v9.6h-3zM8.2 3.2h3v4.8h-3zM8.2 9.6h3v3.2h-3z'];
+    const ICON_UP = ['M8 12.5v-9', 'M4.6 7.6 8 4.2l3.4 3.4'];
+    const ICON_DOWN = ['M8 3.5v9', 'M4.6 8.4 8 11.8l3.4-3.4'];
 
     function Switch({ checked, onChange, label }) {
       return h('button', {
@@ -2697,7 +2783,7 @@ window.__ModuleLoader__.load({
      * 拆解覆盖卡片：把声明表里的单元逐个列出状态。
      * 三种状态：已识别（此刻 DOM 里有）/ 当前为空（区域识别过，但该单元此刻没渲染，例如没有待办、右栏未展开）/ 待识别（区域还没识别过）。
      */
-    function CoverageCard({ targets, t }) {
+    function CoverageCard({ config, targets, t }) {
       const units = targets.units ?? {};
       const present = (id) => (units[id]?.length ?? 0) > 0;
       const statusOf = (spec) => {
@@ -2764,6 +2850,18 @@ window.__ModuleLoader__.load({
         if (unit.judge.actions.includes('reorder')) parts.push(t('externalActionReorder'));
         return parts.length === 0 ? t('externalReadonly') : parts.join(' · ');
       };
+      const hideExternal = (key, hide) => updateConfig((draft) => {
+        const set = new Set(draft.external.hide);
+        if (hide) set.add(key);
+        else set.delete(key);
+        draft.external.hide = [...set];
+      });
+      const shiftExternal = (key, delta) => updateConfig((draft) => {
+        const current = Object.hasOwn(draft.external.order, key) ? draft.external.order[key] : 0;
+        const next = Math.min(50, Math.max(-50, current + delta));
+        if (next === 0) delete draft.external.order[key];
+        else draft.external.order[key] = next;
+      });
       const exportExternal = () => {
         const payload = {
           exportedAt: new Date().toISOString(),
@@ -2792,10 +2890,38 @@ window.__ModuleLoader__.load({
           ? [h('div', { key: 'iframe', className: 'dshl-hint' }, t('externalIframe'))]
           : externalUnits.length === 0
             ? [h('div', { key: 'empty', className: 'dshl-hint' }, t('externalEmpty'))]
-            : externalUnits.map((unit) => h('div', { key: unit.key, className: 'dshl-item' },
-              h('span', { className: 'dshl-surfaceDot', 'data-on': unit.judge.actions.includes('hide') ? 'true' : 'false', 'data-source': 'third', 'aria-hidden': true }),
-              h('span', { className: 'dshl-itemLabel', title: `${unit.key} · ${unit.classPrefix}` }, `${typeLabel(unit.type)} · ${unit.label || unit.classPrefix || unit.tag}`),
-              h('span', { className: 'dshl-itemSub' }, blockedLabel(unit.judge.blocked).length > 0 ? blockedLabel(unit.judge.blocked) : externalActionText(unit))));
+            : externalUnits.map((unit) => {
+              const key = externalUnitKey(external.pageKey, unit.key);
+              const hidden = config.external.hide.includes(key);
+              const orderValue = config.external.order[key];
+              const canHide = unit.judge.actions.includes('hide');
+              const canOrder = unit.judge.actions.includes('reorder');
+              return h('div', { key: unit.key, className: 'dshl-item' },
+                h('span', { className: 'dshl-surfaceDot', 'data-on': canHide ? 'true' : 'false', 'data-source': 'third', 'aria-hidden': true }),
+                h('span', { className: 'dshl-itemLabel', title: `${key} · ${unit.classPrefix}` }, `${typeLabel(unit.type)} · ${unit.label || unit.classPrefix || unit.tag}`),
+                h('span', { className: 'dshl-itemSub' }, blockedLabel(unit.judge.blocked).length > 0 ? blockedLabel(unit.judge.blocked) : externalActionText(unit)),
+                h('span', { className: 'dshl-itemCtl' },
+                  canOrder ? h('button', {
+                    type: 'button',
+                    className: 'dshl-iconBtn',
+                    title: t('externalOrderUp'),
+                    'aria-label': t('externalOrderUp'),
+                    onClick: () => shiftExternal(key, -1),
+                  }, icon(ICON_UP, 12)) : null,
+                  canOrder ? h('button', {
+                    type: 'button',
+                    className: 'dshl-iconBtn',
+                    title: t('externalOrderDown'),
+                    'aria-label': t('externalOrderDown'),
+                    onClick: () => shiftExternal(key, 1),
+                  }, icon(ICON_DOWN, 12)) : null,
+                  orderValue === undefined ? null : h('span', { className: 'dshl-num' }, String(orderValue)),
+                  canHide ? h(Switch, {
+                    checked: !hidden,
+                    label: `${t('hide')} ${unit.label || unit.key}`,
+                    onChange: (on) => hideExternal(key, !on),
+                  }) : null));
+            });
       return h(Card, { title: t('coverage'), desc: t('coverageHint') },
         h('div', { className: 'dshl-hint' }, t('coverageSummary')(detected, empty, pending)),
         ...areas.map(([area, label]) => h('div', { key: area, className: 'dshl-surfaceGroup' },
@@ -2965,7 +3091,7 @@ window.__ModuleLoader__.load({
           h(BlocksCard, { config, t }),
           h(PanelsCard, { config, targets, t }),
           h(SurfacesCard, { targets, t }),
-          h(CoverageCard, { targets, t }),
+          h(CoverageCard, { config, targets, t }),
           h(ConversationCard, { config, t }),
           h(RightbarCard, { config, t }),
           h(SettingsCard, { config, t })),
