@@ -70,7 +70,15 @@ window.__ModuleLoader__.load({
       partTodoPanel: '输入区 · 任务面板',
       partComposerDock: '输入区 · 状态条',
       messagesPartsHint: '消息区拆解：右侧的轮次导航条可单独隐藏。',
+      messagesPartsMissing: '未识别消息区内部结构，拆解项暂不可用。',
       partTurnRail: '消息区 · 轮次导航',
+      composerPartsMissing: '未识别输入区内部结构，拆解项暂不可用。',
+      coverage: '拆解覆盖',
+      coverageHint: '声明表里每个拆解单元此刻的状态；「当前为空」表示区域已识别、但这个单元现在没渲染（例如没有待办、右栏未展开）。',
+      coverageSummary: (detected, empty, pending) => `已识别 ${detected} · 当前为空 ${empty} · 待识别 ${pending}`,
+      coverageDetected: '已识别',
+      coverageEmpty: '当前为空',
+      coveragePending: '待识别',
       rightbarPanel: '右栏',
       rightbarPanelHint: '右栏内部的标签栏与内容区；宽度在「区域结构」里调。',
       rightbarPartsHint: '右栏拆解：标签栏与内容区可各自隐藏，标签栏也可放到内容区下方。',
@@ -212,7 +220,15 @@ window.__ModuleLoader__.load({
       partTodoPanel: 'Composer · task panel',
       partComposerDock: 'Composer · status bar',
       messagesPartsHint: 'Messages parts: the turn navigator rail on the right can be hidden separately.',
+      messagesPartsMissing: 'The messages internals are not recognized; the split controls are unavailable.',
       partTurnRail: 'Messages · turn navigator',
+      composerPartsMissing: 'The composer internals are not recognized; the split controls are unavailable.',
+      coverage: 'Part coverage',
+      coverageHint: 'Status of every declared part right now; "Empty" means the area is recognized but the part is not rendered at the moment (no todo list, right column closed, ...).',
+      coverageSummary: (detected, empty, pending) => `Detected ${detected} · empty ${empty} · pending ${pending}`,
+      coverageDetected: 'Detected',
+      coverageEmpty: 'Empty',
+      coveragePending: 'Pending',
       rightbarPanel: 'Right column',
       rightbarPanelHint: 'The tab strip and content area inside the right column; width is set in region structure.',
       rightbarPartsHint: 'Right column parts: the tab strip and content can each be hidden, and the tab strip can move below the content.',
@@ -296,6 +312,67 @@ window.__ModuleLoader__.load({
     const REGIONS = ['sidebar', 'center', 'rightbar'];
     const BLOCKS = ['brand', 'new-session', 'panels', 'workspaces', 'footer'];
 
+    /**
+     * 拆解单元声明表：所有拆解控制项的唯一事实源。
+     * 区域识别器只负责把元素认出来（targets.units），标记、样式、卡片、覆盖度都从这张表派生，
+     * 避免「识别一套、样式一套、卡片再一套」三处漂移。
+     *
+     * 字段：
+     * - id：主标记（data-dshl-unit 的值）；targets 缺省时等于 [id]
+     * - area：所属区域（决定覆盖度里的「区域是否识别过」）
+     * - section：卡片分组（PART_SECTIONS 的 id）
+     * - labelKey：文案键
+     * - kind：hide = 显隐；order = 换序/换边（换序的结构规则手写在 buildDynamicCss）
+     * - path：配置路径
+     * - targets：隐藏时可命中的单元标记（缺省 [id]）
+     * - needs：order 项判可用所需的单元
+     * - after：写入配置后的联动
+     */
+    const PART_UNITS = [
+      // 侧栏内部
+      { id: 'sb-brand', area: 'sidebar', section: 'sidebarParts', labelKey: 'partBrandIdentity', kind: 'hide', path: ['sidebar', 'parts', 'hideIdentity'] },
+      { id: 'sb-toggle', area: 'sidebar', section: 'sidebarParts', labelKey: 'partBrandToggle', kind: 'hide', path: ['sidebar', 'parts', 'hideToggle'] },
+      { id: 'sb-status', area: 'sidebar', section: 'sidebarParts', labelKey: 'partFooterStatus', kind: 'hide', path: ['sidebar', 'parts', 'hideStatus'] },
+      { id: 'sb-account', area: 'sidebar', section: 'sidebarParts', labelKey: 'partFooterAccount', kind: 'hide', path: ['sidebar', 'parts', 'hideAccount'] },
+      // 会话区三块 + 两个换序
+      { id: 'conv-header', area: 'center', section: 'convBase', labelKey: 'partHeader', kind: 'hide', path: ['center', 'parts', 'hideHeader'] },
+      { id: 'conv-messages', area: 'center', section: 'convBase', labelKey: 'partMessages', kind: 'hide', path: ['center', 'parts', 'hideMessages'] },
+      { id: 'conv-composer', area: 'center', section: 'convBase', labelKey: 'partComposer', kind: 'hide', path: ['center', 'parts', 'hideComposer'] },
+      { id: 'conv-header-bottom', area: 'center', section: 'convBase', labelKey: 'partHeaderBottom', kind: 'order', path: ['center', 'parts', 'headerBottom'], needs: ['conv-header', 'conv-messages'] },
+      { id: 'conv-composer-top', area: 'center', section: 'convBase', labelKey: 'partComposerTop', kind: 'order', path: ['center', 'parts', 'composerTop'], needs: ['conv-messages', 'conv-composer'] },
+      // 会话头内部
+      { id: 'conv-title-row', area: 'center', section: 'convHeader', labelKey: 'partHeaderTitle', kind: 'hide', path: ['center', 'parts', 'hideTitleRow'] },
+      { id: 'conv-view-tabs', area: 'center', section: 'convHeader', labelKey: 'partHeaderTabs', kind: 'hide', path: ['center', 'parts', 'hideViewTabs'] },
+      { id: 'conv-title-crumbs', area: 'center', section: 'convHeader', labelKey: 'partHeaderCrumbs', kind: 'hide', path: ['center', 'parts', 'hideTitleCrumbs'] },
+      { id: 'conv-title-actions', area: 'center', section: 'convHeader', labelKey: 'partHeaderActions', kind: 'hide', path: ['center', 'parts', 'hideHeaderActions'] },
+      { id: 'conv-tabs-top', area: 'center', section: 'convHeader', labelKey: 'partTabsTop', kind: 'order', path: ['center', 'parts', 'tabsTop'], needs: ['conv-title-row', 'conv-view-tabs'] },
+      // 消息区 / 输入区附加块
+      { id: 'conv-turn-rail', area: 'center', section: 'messagesParts', labelKey: 'partTurnRail', kind: 'hide', path: ['center', 'parts', 'hideTurnRail'] },
+      { id: 'conv-todo-panel', area: 'center', section: 'composerParts', labelKey: 'partTodoPanel', kind: 'hide', path: ['center', 'parts', 'hideTodoPanel'] },
+      { id: 'conv-dock', area: 'center', section: 'composerParts', labelKey: 'partComposerDock', kind: 'hide', path: ['center', 'parts', 'hideComposerDock'] },
+      // 右栏
+      { id: 'rb-tabs', area: 'rightbar', section: 'rightbarParts', labelKey: 'partTabs', kind: 'hide', path: ['rightbar', 'parts', 'hideTabs'] },
+      { id: 'rb-content', area: 'rightbar', section: 'rightbarParts', labelKey: 'partContent', kind: 'hide', path: ['rightbar', 'parts', 'hideContent'] },
+      { id: 'rb-tabs-bottom', area: 'rightbar', section: 'rightbarParts', labelKey: 'partTabsBottom', kind: 'order', path: ['rightbar', 'parts', 'tabsBottom'], needs: ['rb-tabs', 'rb-content'] },
+      // 设置页
+      { id: 'set-nav-hide', area: 'settings', section: 'settingsParts', labelKey: 'partNavHidden', kind: 'hide', path: ['settings', 'parts', 'hideNav'], targets: ['set-nav-title', 'set-nav'] },
+      { id: 'set-nav-right', area: 'settings', section: 'settingsParts', labelKey: 'partNavRight', kind: 'order', path: ['settings', 'parts', 'navRight'], needs: ['set-nav'], after: (draft, on) => { if (on) draft.settings.parts.hideNav = false; } },
+      { id: 'set-header', area: 'settings', section: 'settingsParts', labelKey: 'partSetHeader', kind: 'hide', path: ['settings', 'parts', 'hideHeader'] },
+      { id: 'set-options', area: 'settings', section: 'settingsParts', labelKey: 'partSetOptions', kind: 'hide', path: ['settings', 'parts', 'hideOptions'] },
+    ];
+
+    /** 卡片分组：一张卡片里可能有多组拆解项，每组一段说明 + 该组单元 */
+    const PART_SECTIONS = [
+      { id: 'convBase', area: 'center', hintKey: 'convPartsHint', missingKey: 'convPartsMissing' },
+      { id: 'convHeader', area: 'center', hintKey: 'headerPartsHint', missingKey: 'headerPartsMissing' },
+      { id: 'messagesParts', area: 'center', hintKey: 'messagesPartsHint', missingKey: 'messagesPartsMissing' },
+      { id: 'composerParts', area: 'center', hintKey: 'composerPartsHint', missingKey: 'composerPartsMissing' },
+      { id: 'sidebarParts', area: 'sidebar', hintKey: 'sidebarPartsHint', missingKey: 'sidebarPartsMissing' },
+      { id: 'rightbarParts', area: 'rightbar', hintKey: 'rightbarPartsHint', missingKey: 'rightbarPartsMissing' },
+      { id: 'settingsParts', area: 'settings', hintKey: 'settingsPartsHint', missingKey: 'settingsPartsMissing' },
+    ];
+
+
     const DEFAULT_CONFIG = {
       version: 1,
       enabled: false,
@@ -348,6 +425,7 @@ window.__ModuleLoader__.load({
       headerParts: null,
       composerParts: null,
       messagesParts: null,
+      units: {},
       settings: null,
       surfaces: [],
       anomalies: [],
@@ -361,6 +439,22 @@ window.__ModuleLoader__.load({
 
     function clone(value) {
       return JSON.parse(JSON.stringify(value));
+    }
+
+    /** 拆解单元的配置路径读写：声明表里只存路径，避免 24 个字段各写一遍取值/写值代码。 */
+    function readPath(source, path) {
+      let node = source;
+      for (const key of path) {
+        if (node === null || node === undefined) return undefined;
+        node = node[key];
+      }
+      return node;
+    }
+
+    function writePath(target, path, value) {
+      let node = target;
+      for (let index = 0; index < path.length - 1; index += 1) node = node[path[index]];
+      node[path[path.length - 1]] = value;
     }
 
     function uniqValid(list, allowed) {
@@ -1009,6 +1103,14 @@ window.__ModuleLoader__.load({
     let settingsPartsSeen = auxPartsFlags.settings === true;
     let sidebarPartsSeen = auxPartsFlags.sidebar === true;
 
+    /** 区域是否识别过：拆解卡片与覆盖度都用它判断「待识别」还是「当前为空」。 */
+    function areaSeen(area) {
+      if (area === 'sidebar') return sidebarPartsSeen;
+      if (area === 'rightbar') return rightbarPartsSeen;
+      if (area === 'settings') return settingsPartsSeen;
+      return convPartsSeen;
+    }
+
     function markAuxPartsSeen(key) {
       if (auxPartsFlags[key] === true) return;
       auxPartsFlags[key] = true;
@@ -1157,6 +1259,58 @@ window.__ModuleLoader__.load({
       return { messages, viewArea, frame, flow, rail };
     }
 
+    /**
+     * 把各区域识别结果收束成统一单元表：id → 元素数组（一个单元可能对应多个节点，例如设置页导航列含标题）。
+     * 标记、样式、卡片、覆盖度都读这张表，不再各自维护一套形状。
+     */
+    function collectPartUnits(targets) {
+      const units = {};
+      const put = (id, node) => {
+        if (node === null || node === undefined) return;
+        (units[id] ??= []).push(node);
+      };
+      const sb = targets.sidebarParts;
+      if (sb) {
+        put('sb-brand', sb.identity);
+        put('sb-toggle', sb.toggle);
+        put('sb-status', sb.status);
+        put('sb-account', sb.account);
+      }
+      const conv = targets.convParts;
+      if (conv) {
+        put('conv-header', conv.headerItem);
+        put('conv-messages', conv.sessionSlot);
+        put('conv-composer', conv.composerItem);
+      }
+      const hp = targets.headerParts;
+      if (hp) {
+        put('conv-title-row', hp.titleRow);
+        put('conv-view-tabs', hp.viewTabs);
+        put('conv-title-crumbs', hp.crumbs);
+        put('conv-title-actions', hp.headerActions);
+      }
+      const cp = targets.composerParts;
+      if (cp) {
+        put('conv-todo-panel', cp.todo);
+        put('conv-dock', cp.dock);
+      }
+      const mp = targets.messagesParts;
+      if (mp) put('conv-turn-rail', mp.rail);
+      const rb = targets.rightbarParts;
+      if (rb) {
+        put('rb-tabs', rb.tabs);
+        put('rb-content', rb.content);
+      }
+      const st = targets.settingsParts;
+      if (st) {
+        put('set-nav-title', st.navTitle);
+        put('set-nav', st.nav);
+        put('set-header', st.header);
+        put('set-options', st.options);
+      }
+      return units;
+    }
+
     function readTargets() {
       const rootEl = document.getElementById('root');
       if (rootEl === null) return ABSENT_TARGETS;
@@ -1209,7 +1363,8 @@ window.__ModuleLoader__.load({
         markAuxPartsSeen('settings');
       }
       const ok = Boolean(sidebarCol && centerCol && rightbarCol);
-      const targets = { ok, frame, regions, sidebarRoot, blocks, sidebarParts, panels, conversation, convParts, headerParts, composerParts, messagesParts, rightbarParts, settingsParts, settings, surfaces: [], anomalies: [] };
+      const targets = { ok, frame, regions, sidebarRoot, blocks, sidebarParts, panels, conversation, convParts, headerParts, composerParts, messagesParts, rightbarParts, settingsParts, settings, units: {}, surfaces: [], anomalies: [] };
+      targets.units = collectPartUnits(targets);
       targets.surfaces = readSurfaces(targets);
       targets.anomalies = Object.values(surfaceAnomalies).sort((a, b) => b.lastSeenAt - a.lastSeenAt);
       return targets;
@@ -1231,50 +1386,20 @@ window.__ModuleLoader__.load({
       for (const [region, node] of Object.entries(targets.regions)) mark(node, 'data-dshl-region', region);
       for (const [block, node] of Object.entries(targets.blocks)) mark(node, 'data-dshl-block', block);
       for (const panel of targets.panels) mark(panel.node, 'data-dshl-panel', panel.label);
+      // 结构性标记（换序容器等）单独标注；拆解单元统一走 data-dshl-unit
       const parts = targets.convParts;
       if (parts !== null && parts !== undefined) {
         mark(parts.root, 'data-dshl-convroot');
         mark(parts.body, 'data-dshl-convbody');
         mark(parts.scrollBody, 'data-dshl-convscroll');
-        mark(parts.headerItem, 'data-dshl-part', 'header');
-        mark(parts.sessionSlot, 'data-dshl-part', 'messages');
-        mark(parts.composerItem, 'data-dshl-part', 'composer');
       }
       const rb = targets.rightbarParts;
-      if (rb !== null && rb !== undefined) {
-        mark(rb.host, 'data-dshl-rbhost');
-        mark(rb.tabs, 'data-dshl-rbpart', 'tabs');
-        mark(rb.content, 'data-dshl-rbpart', 'content');
-      }
+      if (rb !== null && rb !== undefined) mark(rb.host, 'data-dshl-rbhost');
       const st = targets.settingsParts;
-      if (st !== null && st !== undefined) {
-        mark(st.panel, 'data-dshl-setpanel');
-        mark(st.navTitle, 'data-dshl-setpart', 'navTitle');
-        mark(st.nav, 'data-dshl-setpart', 'nav');
-        mark(st.header, 'data-dshl-setpart', 'header');
-        mark(st.options, 'data-dshl-setpart', 'options');
+      if (st !== null && st !== undefined) mark(st.panel, 'data-dshl-setpanel');
+      for (const [unitId, nodes] of Object.entries(targets.units ?? {})) {
+        for (const node of nodes) mark(node, 'data-dshl-unit', unitId);
       }
-      const sb = targets.sidebarParts;
-      if (sb !== null && sb !== undefined) {
-        mark(sb.identity, 'data-dshl-sbpart', 'identity');
-        mark(sb.toggle, 'data-dshl-sbpart', 'toggle');
-        mark(sb.status, 'data-dshl-sbpart', 'status');
-        mark(sb.account, 'data-dshl-sbpart', 'account');
-      }
-      const hp = targets.headerParts;
-      if (hp !== null && hp !== undefined) {
-        mark(hp.titleRow, 'data-dshl-hpart', 'title');
-        mark(hp.viewTabs, 'data-dshl-hpart', 'tabs');
-        mark(hp.crumbs, 'data-dshl-hpart', 'crumbs');
-        mark(hp.headerActions, 'data-dshl-hpart', 'actions');
-      }
-      const cp = targets.composerParts;
-      if (cp !== null && cp !== undefined) {
-        mark(cp.todo, 'data-dshl-cpart', 'todo');
-        mark(cp.dock, 'data-dshl-cpart', 'dock');
-      }
-      const mp = targets.messagesParts;
-      if (mp !== null && mp !== undefined) mark(mp.rail, 'data-dshl-mpart', 'rail');
     }
 
     function refresh() {
@@ -1406,7 +1531,7 @@ window.__ModuleLoader__.load({
      * 配置里是 null，只能现场量一次真实值。
      */
     function measuredSettingsNavWidth() {
-      const nav = document.querySelector('[data-dshl-setpart="nav"]');
+      const nav = document.querySelector('[data-dshl-unit="set-nav"]');
       const width = nav === null ? 0 : nav.getBoundingClientRect().width;
       return width >= 80 ? Math.round(width) : 188;
     }
@@ -1463,64 +1588,49 @@ window.__ModuleLoader__.load({
       for (const label of config.sidebar.panelHidden) {
         lines.push(`[data-dshl-panel="${cssAttr(label)}"] { display: none !important; }`);
       }
-      // 侧栏内部拆解：四个单元各自隐藏，互不影响
-      const sbParts = config.sidebar.parts;
-      if (sbParts.hideIdentity) lines.push('[data-dshl-sbpart="identity"] { display: none !important; }');
-      if (sbParts.hideToggle) lines.push('[data-dshl-sbpart="toggle"] { display: none !important; }');
-      if (sbParts.hideStatus) lines.push('[data-dshl-sbpart="status"] { display: none !important; }');
-      if (sbParts.hideAccount) lines.push('[data-dshl-sbpart="account"] { display: none !important; }');
+      // 拆解单元显隐：统一由声明表生成，卡片与样式不再各写一套选择器
+      for (const unit of PART_UNITS) {
+        if (unit.kind !== 'hide') continue;
+        if (readPath(config, unit.path) !== true) continue;
+        const selectors = (unit.targets ?? [unit.id]).map((id) => `[data-dshl-unit="${cssAttr(id)}"]`).join(', ');
+        lines.push(`${selectors} { display: none !important; }`);
+      }
       if (config.center.contentWidth !== null) {
         const width = Math.round(config.center.contentWidth);
         lines.push(`[data-dshl-conv] { --dsh-chat-content-width: min(${width}px, 100%) !important; --dsh-composer-card-max-width: min(${width + 32}px, 100%) !important; }`);
       }
-      // 会话区拆解：三块独立显隐与位置。
-      // 会话头与 body 同在 root 下；消息区与输入区同在 scrollBody 下（都是 flex column）。
+      // 会话区换序：会话头与 body 同在 root 下；消息区与输入区同在 scrollBody 下（都是 flex column）
       const parts = config.center.parts;
-      if (parts.hideHeader) lines.push('[data-dshl-part="header"] { display: none !important; }');
-      if (parts.hideMessages) lines.push('[data-dshl-part="messages"] { display: none !important; }');
-      if (parts.hideComposer) lines.push('[data-dshl-part="composer"] { display: none !important; }');
       if (parts.headerBottom) {
         lines.push('[data-dshl-convroot] { display: flex !important; flex-direction: column !important; }');
         lines.push('[data-dshl-convbody] { order: 1 !important; }');
-        lines.push('[data-dshl-part="header"] { order: 2 !important; }');
+        lines.push('[data-dshl-unit="conv-header"] { order: 2 !important; }');
       }
       if (parts.composerTop) {
         lines.push('[data-dshl-convscroll] { display: flex !important; flex-direction: column !important; }');
-        lines.push('[data-dshl-part="composer"] { order: -1 !important; }');
+        lines.push('[data-dshl-unit="conv-composer"] { order: -1 !important; }');
         // 输入区默认是「粘在底部」的 sticky；提到上方后必须改成粘顶，否则它会跟着内容滚走、跑到屏幕外
-        lines.push('[data-dshl-part="composer"] { position: sticky !important; top: 0 !important; bottom: auto !important; }');
+        lines.push('[data-dshl-unit="conv-composer"] { position: sticky !important; top: 0 !important; bottom: auto !important; }');
       }
-      // 会话头内部拆解：标题行 / 视图标签行 / 标题行里的会话名与操作组。
-      // 宿主给会话头写死了两条网格行（32px / 35px）和 min-height；只给一行 display:none 会留下空轨道，
-      // 高度不变，必须把行高交还 auto 并撤掉 min-height。
+      // 会话头内部拆解：宿主给会话头写死了两条网格行（32px / 35px）和 min-height。
+      // 只给一行 display:none 会留下空轨道、高度不变，所以隐藏任一行时都要把行高交还 auto 并撤掉 min-height。
       if (parts.hideTitleRow && parts.hideViewTabs) {
-        lines.push('[data-dshl-part="header"] { display: none !important; }');
+        lines.push('[data-dshl-unit="conv-header"] { display: none !important; }');
       } else if (parts.hideTitleRow || parts.hideViewTabs) {
-        if (parts.hideTitleRow) lines.push('[data-dshl-hpart="title"] { display: none !important; }');
-        if (parts.hideViewTabs) lines.push('[data-dshl-hpart="tabs"] { display: none !important; }');
-        lines.push('[data-dshl-part="header"] { grid-template-rows: auto !important; min-height: auto !important; }');
+        lines.push('[data-dshl-unit="conv-header"] { grid-template-rows: auto !important; min-height: auto !important; }');
       }
-      if (parts.hideTitleCrumbs) lines.push('[data-dshl-hpart="crumbs"] { display: none !important; }');
-      if (parts.hideHeaderActions) lines.push('[data-dshl-hpart="actions"] { display: none !important; }');
       // 视图标签行放到标题行上方：网格按显式行列排，不能靠 order（受 0px 的 leading 列影响会错列）
       if (parts.tabsTop && !parts.hideTitleRow && !parts.hideViewTabs) {
-        lines.push('[data-dshl-part="header"] { grid-template-rows: auto auto !important; min-height: auto !important; }');
-        lines.push('[data-dshl-hpart="tabs"] { grid-column: 2 !important; grid-row: 1 !important; }');
-        lines.push('[data-dshl-hpart="title"] { grid-column: 2 !important; grid-row: 2 !important; }');
+        lines.push('[data-dshl-unit="conv-header"] { grid-template-rows: auto auto !important; min-height: auto !important; }');
+        lines.push('[data-dshl-unit="conv-view-tabs"] { grid-column: 2 !important; grid-row: 1 !important; }');
+        lines.push('[data-dshl-unit="conv-title-row"] { grid-column: 2 !important; grid-row: 2 !important; }');
       }
-      // 输入区拆解：任务面板（待办清单）与状态条独立隐藏
-      if (parts.hideTodoPanel) lines.push('[data-dshl-cpart="todo"] { display: none !important; }');
-      if (parts.hideComposerDock) lines.push('[data-dshl-cpart="dock"] { display: none !important; }');
-      // 消息区拆解：右侧轮次导航条
-      if (parts.hideTurnRail) lines.push('[data-dshl-mpart="rail"] { display: none !important; }');
       // 右栏拆解：标签栏 / 内容区（同在 tabHost 这个 flex column 里）
       const rbParts = config.rightbar.parts;
-      if (rbParts.hideTabs) lines.push('[data-dshl-rbpart="tabs"] { display: none !important; }');
-      if (rbParts.hideContent) lines.push('[data-dshl-rbpart="content"] { display: none !important; }');
       if (rbParts.tabsBottom) {
         lines.push('[data-dshl-rbhost] { display: flex !important; flex-direction: column !important; }');
-        lines.push('[data-dshl-rbpart="content"] { order: 1 !important; }');
-        lines.push('[data-dshl-rbpart="tabs"] { order: 2 !important; }');
+        lines.push('[data-dshl-unit="rb-content"] { order: 1 !important; }');
+        lines.push('[data-dshl-unit="rb-tabs"] { order: 2 !important; }');
       }
       const settings = config.settings;
       if (settings.width !== null) {
@@ -1541,32 +1651,29 @@ window.__ModuleLoader__.load({
       const headerShown = !setParts.hideHeader;
       const optionsShown = !setParts.hideOptions;
       const navTrack = settings.navWidth !== null ? `${Math.round(settings.navWidth)}px` : `${measuredSettingsNavWidth()}px`;
-      if (!navShown) lines.push('[data-dshl-setpart="navTitle"], [data-dshl-setpart="nav"] { display: none !important; }');
-      if (!headerShown) lines.push('[data-dshl-setpart="header"] { display: none !important; }');
-      if (!optionsShown) lines.push('[data-dshl-setpart="options"] { display: none !important; }');
-      const setGrid = (columns, rows, areas, assign) => {
+      const setGrid = (columns, rows, areas) => {
         const rowRule = rows === null ? '' : ` grid-template-rows: ${rows} !important;`;
         lines.push(`[data-dshl-setpanel] { grid-template-columns: ${columns} !important;${rowRule} grid-template-areas: ${areas} !important; }`);
-        for (const [part, area] of Object.entries(assign)) lines.push(`[data-dshl-setpart="${part}"] { grid-area: ${area} !important; }`);
+        for (const [part, area] of Object.entries(assignAll)) lines.push(`[data-dshl-unit="${part}"] { grid-area: ${area} !important; }`);
       };
-      const assignAll = { navTitle: 'dshlTitle', nav: 'dshlNav', header: 'dshlHeader', options: 'dshlOptions' };
+      const assignAll = { 'set-nav-title': 'dshlTitle', 'set-nav': 'dshlNav', 'set-header': 'dshlHeader', 'set-options': 'dshlOptions' };
       if (!navShown && !headerShown && !optionsShown) {
         // 四块全隐：没有可排的内容，保持宿主网格
       } else if (!navShown) {
         // 只剩内容列
-        if (headerShown && optionsShown) setGrid('minmax(0, 1fr)', null, '"dshlHeader" "dshlOptions"', assignAll);
-        else if (optionsShown) setGrid('minmax(0, 1fr)', 'minmax(0, 1fr)', '"dshlOptions"', assignAll);
-        else setGrid('minmax(0, 1fr)', 'minmax(0, 1fr)', '"dshlHeader"', assignAll);
+        if (headerShown && optionsShown) setGrid('minmax(0, 1fr)', null, '"dshlHeader" "dshlOptions"');
+        else if (optionsShown) setGrid('minmax(0, 1fr)', 'minmax(0, 1fr)', '"dshlOptions"');
+        else setGrid('minmax(0, 1fr)', 'minmax(0, 1fr)', '"dshlHeader"');
       } else if (!headerShown && !optionsShown) {
         // 只剩导航列：单列铺满
-        setGrid('minmax(0, 1fr)', null, '"dshlTitle" "dshlNav"', assignAll);
+        setGrid('minmax(0, 1fr)', null, '"dshlTitle" "dshlNav"');
       } else if (!headerShown) {
         // 页头隐藏：选项区跨两行上移，对齐面板顶部
         const columns = setParts.navRight ? `minmax(0, 1fr) ${navTrack}` : `${navTrack} minmax(0, 1fr)`;
         const areas = setParts.navRight ? '"dshlOptions dshlTitle" "dshlOptions dshlNav"' : '"dshlTitle dshlOptions" "dshlNav dshlOptions"';
-        setGrid(columns, null, areas, assignAll);
+        setGrid(columns, null, areas);
       } else if (setParts.navRight) {
-        setGrid(`minmax(0, 1fr) ${navTrack}`, null, '"dshlHeader dshlTitle" "dshlOptions dshlNav"', assignAll);
+        setGrid(`minmax(0, 1fr) ${navTrack}`, null, '"dshlHeader dshlTitle" "dshlOptions dshlNav"');
       }
       // 其余情况（全部显示、导航在左）保持宿主默认网格，不重写
       // 偏移只用来微调位置：夹取到「面板仍在屏幕内」的区间，避免把设置面板推到看不见的地方
@@ -2056,16 +2163,6 @@ window.__ModuleLoader__.load({
 
     function BlocksCard({ config, t }) {
       const items = config.sidebar.order.map((block) => ({ key: block, block }));
-      const parts = config.sidebar.parts;
-      const detected = sidebarPartsSeen;
-      const row = (label, control) => h('div', { className: 'dshl-row' },
-        h('span', { className: 'dshl-rowLabel' }, label),
-        control);
-      const partSwitch = (key, label) => row(label, h(Switch, {
-        checked: !parts[key],
-        label,
-        onChange: (on) => updateConfig((draft) => { draft.sidebar.parts[key] = !on; }),
-      }));
       return h(Card, { title: t('sidebarBlocks'), desc: t('sidebarBlocksHint') },
         h(SortableList, {
           items,
@@ -2088,12 +2185,7 @@ window.__ModuleLoader__.load({
             }),
           }),
         }),
-        h('div', { className: 'dshl-divider' }),
-        h('div', { className: 'dshl-cardDesc' }, detected ? t('sidebarPartsHint') : t('sidebarPartsMissing')),
-        detected ? partSwitch('hideIdentity', t('partBrandIdentity')) : null,
-        detected ? partSwitch('hideToggle', t('partBrandToggle')) : null,
-        detected ? partSwitch('hideStatus', t('partFooterStatus')) : null,
-        detected ? partSwitch('hideAccount', t('partFooterAccount')) : null);
+        h(PartSection, { sectionId: 'sidebarParts', config, t }));
     }
 
     function PanelsCard({ config, targets, t }) {
@@ -2245,20 +2337,76 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 会话区卡片：内容宽度 + 三块拆解 + 会话头内部行/段 + 消息区轮次导航 + 输入区任务面板与状态条。
-     * 拆解提供「独立显隐」与「位置互换」：会话头可以与正文换前后，输入区可以提到消息区上方。
-     * 每块都是宿主真实参与布局的元素，改动只走 CSS，不改 React 树。
+     * 单个拆解项：hide 类用「显示」开关（checked = 未隐藏），order 类直接表达开关状态。
+     * 取值/写值都走声明表里的路径，卡片不再逐项手写字段。
+     */
+    function PartRow({ spec, config, t }) {
+      const stored = readPath(config, spec.path) === true;
+      return h('div', { className: 'dshl-row' },
+        h('span', { className: 'dshl-rowLabel' }, t(spec.labelKey)),
+        h(Switch, {
+          checked: spec.kind === 'order' ? stored : !stored,
+          label: t(spec.labelKey),
+          onChange: (on) => updateConfig((draft) => {
+            writePath(draft, spec.path, spec.kind === 'order' ? on : !on);
+            if (spec.after !== undefined) spec.after(draft, on);
+          }),
+        }));
+    }
+
+    /** 一组拆解项：分隔线 + 说明 + 该组单元；区域还没识别过时只显示说明（不摆无效开关）。 */
+    function PartSection({ sectionId, config, t }) {
+      const section = PART_SECTIONS.find((item) => item.id === sectionId);
+      const units = PART_UNITS.filter((unit) => unit.section === sectionId);
+      const seen = areaSeen(section.area);
+      return h(React.Fragment, null,
+        h('div', { className: 'dshl-divider' }),
+        h('div', { className: 'dshl-cardDesc' }, seen ? t(section.hintKey) : t(section.missingKey)),
+        seen ? units.map((unit) => h(PartRow, { key: unit.id, spec: unit, config, t })) : null);
+    }
+
+    /**
+     * 拆解覆盖卡片：把声明表里的单元逐个列出状态。
+     * 三种状态：已识别（此刻 DOM 里有）/ 当前为空（区域识别过，但该单元此刻没渲染，例如没有待办、右栏未展开）/ 待识别（区域还没识别过）。
+     */
+    function CoverageCard({ targets, t }) {
+      const units = targets.units ?? {};
+      const present = (id) => (units[id]?.length ?? 0) > 0;
+      const statusOf = (spec) => {
+        if (spec.kind === 'order') {
+          const needs = spec.needs ?? [];
+          if (needs.length > 0 && needs.every(present)) return 'detected';
+        } else if (present(spec.id) || (spec.targets ?? []).some(present)) {
+          return 'detected';
+        }
+        return areaSeen(spec.area) ? 'empty' : 'pending';
+      };
+      const rows = PART_UNITS.map((spec) => ({ spec, status: statusOf(spec) }));
+      const detected = rows.filter((row) => row.status === 'detected').length;
+      const empty = rows.filter((row) => row.status === 'empty').length;
+      const pending = rows.length - detected - empty;
+      const areas = [
+        ['sidebar', t('sidebar')],
+        ['center', t('center')],
+        ['rightbar', t('rightbar')],
+        ['settings', t('settingsPanel')],
+      ];
+      const unitRow = (row) => h('div', { key: row.spec.id, className: 'dshl-item' },
+        h('span', { className: 'dshl-surfaceDot', 'data-on': row.status === 'detected' ? 'true' : 'false', 'data-source': 'official', 'aria-hidden': true }),
+        h('span', { className: 'dshl-itemLabel' }, t(row.spec.labelKey)),
+        h('span', { className: 'dshl-itemSub' }, row.status === 'detected' ? t('coverageDetected') : row.status === 'empty' ? t('coverageEmpty') : t('coveragePending')));
+      return h(Card, { title: t('coverage'), desc: t('coverageHint') },
+        h('div', { className: 'dshl-hint' }, t('coverageSummary')(detected, empty, pending)),
+        ...areas.map(([area, label]) => h('div', { key: area, className: 'dshl-surfaceGroup' },
+          h('div', { className: 'dshl-surfaceGroupTitle' }, label),
+          h('div', { className: 'dshl-list' }, rows.filter((row) => row.spec.area === area).map(unitRow)))));
+    }
+
+    /**
+     * 会话区卡片：内容宽度 + 四组拆解（基础三块与换序、会话头内部、消息区、输入区）。
+     * 拆解项的开关由 PART_UNITS 声明表生成，卡片只负责摆位置。
      */
     function ConversationCard({ config, t }) {
-      const parts = config.center.parts;
-      const detected = convPartsSeen;
-      const toggle = (key, label) => h('div', { className: 'dshl-row' },
-        h('span', { className: 'dshl-rowLabel' }, label),
-        h(Switch, {
-          checked: !parts[key],
-          label,
-          onChange: (on) => updateConfig((draft) => { draft.center.parts[key] = !on; }),
-        }));
       return h(Card, { title: t('conversation'), desc: t('conversationHint') },
         h(FollowField, {
           label: t('contentWidth'),
@@ -2270,74 +2418,20 @@ window.__ModuleLoader__.load({
           t,
           onChange: (value) => updateConfig((draft) => { draft.center.contentWidth = value; }),
         }),
-        h('div', { className: 'dshl-divider' }),
-        h('div', { className: 'dshl-cardDesc' }, detected ? t('convPartsHint') : t('convPartsMissing')),
-        detected ? toggle('hideHeader', t('partHeader')) : null,
-        detected ? toggle('hideMessages', t('partMessages')) : null,
-        detected ? toggle('hideComposer', t('partComposer')) : null,
-        detected ? h('div', { className: 'dshl-row' },
-          h('span', { className: 'dshl-rowLabel' }, t('partHeaderBottom')),
-          h(Switch, {
-            checked: parts.headerBottom,
-            label: t('partHeaderBottom'),
-            onChange: (on) => updateConfig((draft) => { draft.center.parts.headerBottom = on; }),
-          })) : null,
-        detected ? h('div', { className: 'dshl-row' },
-          h('span', { className: 'dshl-rowLabel' }, t('partComposerTop')),
-          h(Switch, {
-            checked: parts.composerTop,
-            label: t('partComposerTop'),
-            onChange: (on) => updateConfig((draft) => { draft.center.parts.composerTop = on; }),
-          })) : null,
-        h('div', { className: 'dshl-divider' }),
-        h('div', { className: 'dshl-cardDesc' }, detected ? t('headerPartsHint') : t('headerPartsMissing')),
-        detected ? toggle('hideTitleRow', t('partHeaderTitle')) : null,
-        detected ? toggle('hideViewTabs', t('partHeaderTabs')) : null,
-        detected ? toggle('hideTitleCrumbs', t('partHeaderCrumbs')) : null,
-        detected ? toggle('hideHeaderActions', t('partHeaderActions')) : null,
-        detected ? h('div', { className: 'dshl-row' },
-          h('span', { className: 'dshl-rowLabel' }, t('partTabsTop')),
-          h(Switch, {
-            checked: parts.tabsTop,
-            label: t('partTabsTop'),
-            onChange: (on) => updateConfig((draft) => { draft.center.parts.tabsTop = on; }),
-          })) : null,
-        h('div', { className: 'dshl-divider' }),
-        detected ? h('div', { className: 'dshl-cardDesc' }, t('messagesPartsHint')) : null,
-        detected ? toggle('hideTurnRail', t('partTurnRail')) : null,
-        h('div', { className: 'dshl-divider' }),
-        detected ? h('div', { className: 'dshl-cardDesc' }, t('composerPartsHint')) : null,
-        detected ? toggle('hideTodoPanel', t('partTodoPanel')) : null,
-        detected ? toggle('hideComposerDock', t('partComposerDock')) : null);
+        h(PartSection, { sectionId: 'convBase', config, t }),
+        h(PartSection, { sectionId: 'convHeader', config, t }),
+        h(PartSection, { sectionId: 'messagesParts', config, t }),
+        h(PartSection, { sectionId: 'composerParts', config, t }));
     }
 
-    /** 右栏卡片：宽度 + 标签栏/内容区拆解。 */
+    /** 右栏卡片：标签栏/内容区拆解（宽度在「区域结构」里调）。 */
     function RightbarCard({ config, t }) {
-      const parts = config.rightbar.parts;
-      const detected = rightbarPartsSeen;
-      const row = (label, control) => h('div', { className: 'dshl-row' },
-        h('span', { className: 'dshl-rowLabel' }, label),
-        control);
-      const toggle = (key, label) => row(label, h(Switch, {
-        checked: !parts[key],
-        label,
-        onChange: (on) => updateConfig((draft) => { draft.rightbar.parts[key] = !on; }),
-      }));
       return h(Card, { title: t('rightbarPanel'), desc: t('rightbarPanelHint') },
-        h('div', { className: 'dshl-cardDesc' }, detected ? t('rightbarPartsHint') : t('rightbarPartsMissing')),
-        detected ? toggle('hideTabs', t('partTabs')) : null,
-        detected ? toggle('hideContent', t('partContent')) : null,
-        detected ? row(t('partTabsBottom'), h(Switch, {
-          checked: parts.tabsBottom,
-          label: t('partTabsBottom'),
-          onChange: (on) => updateConfig((draft) => { draft.rightbar.parts.tabsBottom = on; }),
-        })) : null);
+        h(PartSection, { sectionId: 'rightbarParts', config, t }));
     }
 
     function SettingsCard({ config, t }) {
       const settings = config.settings;
-      const parts = settings.parts;
-      const detected = settingsPartsSeen;
       const num = (label, key, fallback, min, max) => h(FollowField, {
         key,
         label,
@@ -2351,9 +2445,6 @@ window.__ModuleLoader__.load({
       });
       const offset = (label, key, min, max) => h(Field, { key, label, valueText: `${settings[key]}${t('px')}` },
         h(Slider, { value: settings[key], min, max, step: 10, onChange: (value) => updateConfig((draft) => { draft.settings[key] = value; }) }));
-      const row = (label, control) => h('div', { className: 'dshl-row' },
-        h('span', { className: 'dshl-rowLabel' }, label),
-        control);
       return h(Card, { title: t('settingsPanel'), desc: t('settingsPanelHint') },
         num(t('settingsWidth'), 'width', 800, 560, 1400),
         num(t('settingsHeight'), 'height', 800, 380, 1200),
@@ -2361,34 +2452,7 @@ window.__ModuleLoader__.load({
         offset(t('offsetX'), 'offsetX', -600, 600),
         offset(t('offsetY'), 'offsetY', -500, 500),
         h('p', { className: 'dshl-hint' }, t('offsetClamped')),
-        h('div', { className: 'dshl-divider' }),
-        h('div', { className: 'dshl-cardDesc' }, detected ? t('settingsPartsHint') : t('settingsPartsMissing')),
-        detected ? row(t('partNavHidden'), h(Switch, {
-          checked: !parts.hideNav,
-          label: t('partNavHidden'),
-          onChange: (on) => updateConfig((draft) => { draft.settings.parts.hideNav = !on; }),
-        })) : null,
-        detected ? row(t('partNavRight'), h(Switch, {
-          checked: parts.navRight,
-          label: t('partNavRight'),
-          onChange: (on) => {
-            updateConfig((draft) => {
-              draft.settings.parts.navRight = on;
-              // 导航右置时若还藏着导航，右置无意义，顺手放开
-              if (on) draft.settings.parts.hideNav = false;
-            });
-          },
-        })) : null,
-        detected ? row(t('partSetHeader'), h(Switch, {
-          checked: !parts.hideHeader,
-          label: t('partSetHeader'),
-          onChange: (on) => updateConfig((draft) => { draft.settings.parts.hideHeader = !on; }),
-        })) : null,
-        detected ? row(t('partSetOptions'), h(Switch, {
-          checked: !parts.hideOptions,
-          label: t('partSetOptions'),
-          onChange: (on) => updateConfig((draft) => { draft.settings.parts.hideOptions = !on; }),
-        })) : null);
+        h(PartSection, { sectionId: 'settingsParts', config, t }));
     }
 
     function Editor({ t }) {
@@ -2486,6 +2550,7 @@ window.__ModuleLoader__.load({
           h(BlocksCard, { config, t }),
           h(PanelsCard, { config, targets, t }),
           h(SurfacesCard, { targets, t }),
+          h(CoverageCard, { targets, t }),
           h(ConversationCard, { config, t }),
           h(RightbarCard, { config, t }),
           h(SettingsCard, { config, t })),

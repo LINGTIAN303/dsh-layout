@@ -119,6 +119,25 @@ flowchart LR
 
 - 结构识别成功后持久化标记（`dsh-layout/conv-parts/v1`、`dsh-layout/aux-parts/v1`）：编辑区挂在插件详情页上，此时会话区/右栏/设置面板可能不在 DOM 里，若只按「当前 DOM 有没有」判断，控制项会在插件页上永远不可用。`aux-parts` 按区域分键（`sidebar` / `rightbar` / `settings`）。
 
+### 拆解层：统一声明表与覆盖度
+
+拆解不再是「每个区域一套识别 + 一套样式 + 一套卡片」，而是收敛成一张声明表 `PART_UNITS`（24 个单元）：
+
+| 字段 | 作用 |
+| --- | --- |
+| `id` | 统一标记 `data-dshl-unit="<id>"`；隐藏样式、覆盖度都按它定位 |
+| `area` / `section` | 所属区域与卡片分组（`PART_SECTIONS`） |
+| `kind` | `hide`（显隐）或 `order`（换序/换边） |
+| `path` | 配置路径，卡片读写只走这一处 |
+| `targets` / `needs` / `after` | 复合隐藏目标、换序所需单元、写入后的联动 |
+
+各区域识别器只负责把元素认出来（汇总成 `targets.units`），其余全部从声明表派生：
+
+- **标记**：`annotate` 遍历 `targets.units` 写 `data-dshl-unit`，旧的分属性（`data-dshl-part/hpart/cpart/mpart/rbpart/setpart/sbpart`）已全部取消。
+- **样式**：所有 `hide` 单元的选择器由声明表生成；换序、命名网格等结构规则手写，但同样只引用统一标记。
+- **卡片**：`PartSection` 按 section 渲染说明 + 开关，`PartRow` 按 `path` 读写配置——新增单元只加一条声明，不改三处。
+- **覆盖度**：编辑器新增「拆解覆盖」卡片，逐个列出 24 个单元的状态：已识别 / 当前为空（区域识别过但该单元此刻没渲染）/ 待识别（区域还没识别过）。DSH 升级改掉某个结构时，这里的「待识别」会直接指出来。
+
 ## 恢复通道（不可恢复状态防护）
 
 布局可能改变「回到插件详情页」的路径，因此恢复能力必须独立于被改变的界面本身：
