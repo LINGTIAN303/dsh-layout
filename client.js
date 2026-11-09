@@ -3511,8 +3511,22 @@ window.__ModuleLoader__.load({
     let hostWritable = false;
     /** 宿主写入串行化：连点时不并发，也保证「写 → 读回」不乱序。 */
     let hostWriteChain = Promise.resolve();
-    /** 已写入值：读回到自己写的值时跳过，切断「写 → 读回 → 再写」的回环。 */
+    /**
+     * 已写入值：读回到自己写的值时跳过，切断「写 → 读回 → 再写」的回环。
+     *
+     * 必须区分「已发出」和「宿主已确认」：`hostForm.set` 是异步的，发出后到落地之间
+     * 宿主仍会推来旧快照。只比字符串挡不住——实测宿主推回的是**内容更旧的另一份文本**
+     * （少了刚加的条目，长度 5401 vs 本地 5438），既不等于 lastWritten 也不等于 pending，
+     * 会被判成外部改动而应用回去，表现为「点一次收纳生效，随即又被放出来」（30 次点击复现 3 次）。
+     *
+     * 所以判据换成「有没有写入在途」：在途期间收到的宿主快照一律不采用。
+     * 有超时兜底，避免写入失败后永远吞掉宿主值。
+     */
     let hostLastWritten = { document: null, schemes: null };
+    let hostPending = { document: null, schemes: null };
+    let hostPendingTimer = null;
+    /** 写发出后多久还没被宿主确认，就放弃拦截（宿主写失败时不能让界面永远收不到外部改动）。 */
+    const HOST_PENDING_TIMEOUT = 4000;
     /** 方案表版本号：宿主读回方案后让卡片重取。 */
     let layoutsVersion = 0;
 
@@ -3562,8 +3576,10 @@ window.__ModuleLoader__.load({
         migrateLocalToHost(documentText === '', schemesText === '');
         return;
       }
-      if (documentText !== hostLastWritten.document) applyHostDocument(documentText);
-      if (schemesText !== hostLastWritten.schemes) applyHostSchemes(schemesText);
+      // 有写入在途时，宿主推来的一律是它自己的旧值（宿主写是异步的，本客户端已经先改了内存
+      // 与 localStorage）。此时应用快照必然把刚改的配置盖回去，所以整份跳过。
+      if (hostPending.document === null && documentText !== hostLastWritten.document) applyHostDocument(documentText);
+      if (hostPending.schemes === null && schemesText !== hostLastWritten.schemes) applyHostSchemes(schemesText);
     }
 
     /** 一次性迁移：宿主该字段为空时，用 localStorage 里的现值填上（不覆盖宿主已有内容）。 */
@@ -3623,8 +3639,26 @@ window.__ModuleLoader__.load({
     function hostWrite(field, text) {
       if (hostForm === null || text === null || hostWritable !== true) return;
       hostLastWritten = { ...hostLastWritten, [field]: text };
+      // 落地前的窗口期：期间的旧快照一律不采用，否则会把刚改的配置盖回去
+      hostPending = { ...hostPending, [field]: text };
+      if (hostPendingTimer !== null) window.clearTimeout(hostPendingTimer);
+      hostPendingTimer = window.setTimeout(() => {
+        hostPendingTimer = null;
+        hostPending = { document: null, schemes: null };
+      }, HOST_PENDING_TIMEOUT);
       hostWriteChain = hostWriteChain
         .then(() => (hostForm === null ? undefined : hostForm.set(field, text)))
+        .then(() => {
+          hostLastWritten = { ...hostLastWritten, [field]: text };
+          // 这一笔已落地：清掉在途标记。若期间又排了新的一笔，保留它的标记。
+          if (hostPending[field] === text) {
+            hostPending = { ...hostPending, [field]: null };
+            if (hostPending.document === null && hostPending.schemes === null && hostPendingTimer !== null) {
+              window.clearTimeout(hostPendingTimer);
+              hostPendingTimer = null;
+            }
+          }
+        })
         .catch((error) => { console.warn('[dsh-layout] 写入宿主设置失败，本地缓存仍然有效', error); });
     }
 
