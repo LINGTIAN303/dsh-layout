@@ -1227,40 +1227,65 @@ window.__ModuleLoader__.load({
     };
 
     /**
-     * 槽位表：每个槽位有形状契约（accepts）与所在容器。
-     * 组合数从 396 降到「每个源 1–4 个合法目标」，且不合法的组合不会出现在下拉里。
+     * 槽位表：每个槽位声明它「至少需要多宽」和「能不能纵向堆叠」。
      *
-     * 槽位分得比区域细：`region:center` 整列既能放页头也能放主体，但两者的形状要求
-     * 完全不同（一个要 ≤48 高、一个要撑满），所以拆成页头槽 / 主体槽 / 底槽。
+     * 判定原则是**单向兼容**：宽容器能放下窄内容（侧栏块搬进会话区没问题），
+     * 反过来不行（会话头 1260 宽搬进 280 侧栏会被压成 22%）。所以槽位只需要声明
+     * 「最小可用宽度」与堆叠能力，不用枚举它接受哪些形状——原先逐个列 accepts
+     * 会把「窄单元 → 宽容器」这种合理组合也挡掉（实测 17 个源里 9 个无法去会话区）。
+     *
+     * `minWidth` 取该类容器实测宽度的保守下限：
+     * - 侧栏系（280px）→ narrow 系
+     * - 右栏（280–900）→ medium 系
+     * - 会话区（1260px）→ wide 系
+     * `stack` 表示能否纵向堆叠多个单元（整列可以，行内槽位不行）。
      */
     const RELOCATE_SLOTS = [
-      { id: 'block:brand', labelKey: 'relocateDestBrand', accepts: [SHAPE_NARROW, SHAPE_ICON] },
-      { id: 'block:new-session', labelKey: 'relocateDestNewSession', accepts: [SHAPE_NARROW] },
-      { id: 'block:panels', labelKey: 'relocateDestPanels', accepts: [SHAPE_NARROW, SHAPE_NARROW_STACK, SHAPE_ICON] },
-      { id: 'block:workspaces', labelKey: 'relocateDestWorkspaces', accepts: [SHAPE_NARROW_STACK] },
-      { id: 'block:footer', labelKey: 'relocateDestFooter', accepts: [SHAPE_NARROW, SHAPE_ICON] },
-      { id: 'region:sidebar', labelKey: 'relocateDestSidebar', accepts: [SHAPE_NARROW, SHAPE_NARROW_STACK] },
-      { id: 'unit:conv-header', labelKey: 'relocateDestConvHeader', accepts: [SHAPE_WIDE_SHORT] },
-      { id: 'unit:conv-messages', labelKey: 'relocateDestConvMessages', accepts: [SHAPE_WIDE_TALL] },
-      { id: 'unit:conv-composer', labelKey: 'relocateDestConvComposer', accepts: [SHAPE_WIDE_TALL, SHAPE_WIDE_SHORT] },
-      { id: 'region:center', labelKey: 'relocateDestCenter', accepts: [SHAPE_WIDE_SHORT, SHAPE_WIDE_TALL] },
-      { id: 'unit:rb-tabs', labelKey: 'relocateDestRbTabs', accepts: [SHAPE_WIDE_SHORT, SHAPE_MEDIUM] },
-      { id: 'unit:rb-content', labelKey: 'relocateDestRbContent', accepts: [SHAPE_MEDIUM, SHAPE_WIDE_TALL] },
-      { id: 'region:rightbar', labelKey: 'relocateDestRightbar', accepts: [SHAPE_MEDIUM, SHAPE_NARROW, SHAPE_NARROW_STACK] },
-      { id: 'unit:set-header', labelKey: 'relocateDestSettingsHeader', accepts: [SHAPE_WIDE_SHORT, SHAPE_MEDIUM] },
-      { id: 'unit:set-nav', labelKey: 'relocateDestSettingsNav', accepts: [SHAPE_MEDIUM, SHAPE_NARROW_STACK] },
-      { id: 'unit:set-options', labelKey: 'relocateDestSettingsOptions', accepts: [SHAPE_MEDIUM, SHAPE_WIDE_TALL] },
+      { id: 'block:brand', labelKey: 'relocateDestBrand', minWidth: 200, stack: false },
+      { id: 'block:new-session', labelKey: 'relocateDestNewSession', minWidth: 200, stack: false },
+      { id: 'block:panels', labelKey: 'relocateDestPanels', minWidth: 200, stack: true },
+      { id: 'block:workspaces', labelKey: 'relocateDestWorkspaces', minWidth: 200, stack: true },
+      { id: 'block:footer', labelKey: 'relocateDestFooter', minWidth: 200, stack: false },
+      { id: 'region:sidebar', labelKey: 'relocateDestSidebar', minWidth: 200, stack: true },
+      { id: 'unit:conv-header', labelKey: 'relocateDestConvHeader', minWidth: 600, stack: false },
+      { id: 'unit:conv-messages', labelKey: 'relocateDestConvMessages', minWidth: 600, stack: true },
+      { id: 'unit:conv-composer', labelKey: 'relocateDestConvComposer', minWidth: 600, stack: true },
+      { id: 'region:center', labelKey: 'relocateDestCenter', minWidth: 600, stack: true },
+      { id: 'unit:rb-tabs', labelKey: 'relocateDestRbTabs', minWidth: 240, stack: false },
+      { id: 'unit:rb-content', labelKey: 'relocateDestRbContent', minWidth: 240, stack: true },
+      { id: 'region:rightbar', labelKey: 'relocateDestRightbar', minWidth: 240, stack: true },
+      { id: 'unit:set-header', labelKey: 'relocateDestSettingsHeader', minWidth: 240, stack: false },
+      { id: 'unit:set-nav', labelKey: 'relocateDestSettingsNav', minWidth: 240, stack: true },
+      { id: 'unit:set-options', labelKey: 'relocateDestSettingsOptions', minWidth: 240, stack: true },
     ];
 
-    /** 某个形状的单元能不能搬进某个槽位。 */
+    /** 形状类别大致需要多宽才能正常显示（实测归纳，留出余量）。 */
+    const RELOCATE_SHAPE_NEEDS = {
+      [SHAPE_ICON]: 32,
+      [SHAPE_NARROW]: 200,
+      [SHAPE_NARROW_STACK]: 200,
+      [SHAPE_MEDIUM]: 240,
+      [SHAPE_WIDE_SHORT]: 600,
+      [SHAPE_WIDE_TALL]: 600,
+    };
+
+    /**
+     * 某个形状的单元能不能搬进某个槽位：只看「槽位最小宽度 ≥ 单元需求」。
+     * 单向兼容——窄内容进宽容器总是允许的，反之不。
+     */
     function relocateSlotAccepts(slotId, shape) {
       const slot = RELOCATE_SLOTS.find((item) => item.id === slotId);
-      return slot !== undefined && shape !== undefined && slot.accepts.includes(shape);
+      if (slot === undefined || shape === undefined) return false;
+      const need = RELOCATE_SHAPE_NEEDS[shape];
+      if (need === undefined) return false;
+      return slot.minWidth >= need;
     }
 
     /** 某个形状的单元有哪些合法去处（下拉只列这些）。 */
     function relocateSlotsFor(shape) {
-      return RELOCATE_SLOTS.filter((slot) => slot.accepts.includes(shape));
+      const need = RELOCATE_SHAPE_NEEDS[shape];
+      if (need === undefined) return [];
+      return RELOCATE_SLOTS.filter((slot) => slot.minWidth >= need);
     }
 
     /**
@@ -3543,6 +3568,13 @@ window.__ModuleLoader__.load({
       item.node.style.setProperty('--dshl-tw', `${Math.max(24, Math.round(placeholder.getBoundingClientRect().width))}px`);
       item.node.style.setProperty('--dshl-tx', '0px');
       item.node.style.setProperty('--dshl-ty', '0px');
+      /*
+       * 注意：源节点若落在「自己形成层叠上下文」的祖先里（桌面端实测 `.composerSeat`
+       * 有 z-index:9 + will-change:transform），投影的 z-index:1100 只在那一层内部有效，
+       * 可能被同层或更高的兄弟盖住。这里**没有**去给宿主祖先提权——那会把整个容器
+       * （实测 1253×128 的整条输入区）一起顶高，压住旁边不该被盖的内容。
+       * 层叠问题留待单独评估，见 docs/details/注释/布局引擎.md。
+       */
       return { sourceId: item.sourceId, node: item.node, dest: item.dest, placeholder, tx: 0, ty: 0 };
     }
 
@@ -3584,14 +3616,28 @@ window.__ModuleLoader__.load({
       if (projection.frames > 240) return;
       const topBound = projectionTopBound();
       let moving = false;
+      /** 目标塌掉的条目先收集，循环结束后统一拆除（在 for...of 里删 Map 会跳过元素）。 */
+      const dead = [];
       for (const entry of projection.entries.values()) {
         const node = entry.node;
         const placeholder = entry.placeholder;
         if (!node.isConnected || !placeholder.isConnected) {
-          moving = true;
+          dead.push(entry);
           continue;
         }
-        const target = placeholder.getBoundingClientRect();
+        /*
+         * 目标容器塌成 0 尺寸（右栏收起、面板关闭）时占位符宽度为 0，
+         * 投影会被压成一条看不见的线，却仍占着位置——桌面端实测表现为
+         * 「一条空白条盖在右栏开始页的标签条上，连页头都被遮住」。
+         * `relocateActiveList` 每轮有 readableBox 守卫，但那要等下一轮 refresh；
+         * 这里在帧循环里立刻拆掉，避免中间态可见。
+         */
+        const phRect = placeholder.getBoundingClientRect();
+        if (phRect.width < 2 || phRect.height < 2) {
+          dead.push(entry);
+          continue;
+        }
+        const target = phRect;
         const box = node.getBoundingClientRect();
         if (Math.abs(box.height - placeholder.offsetHeight) > 1) {
           placeholder.style.height = `${Math.max(8, Math.round(box.height))}px`;
@@ -3603,7 +3649,11 @@ window.__ModuleLoader__.load({
           continue;
         }
         const dx = target.left - box.left;
-        // 安全区夹取：目标在窗口栏里时，实际落点压到窗口栏下沿
+        /*
+         * 纵向安全区夹取：目标在窗口栏里时，实际落点压到窗口栏下沿。
+         * 注意 `dy` 是视口坐标的差值，累加进 `--dshl-ty` 是正确的——
+         * containing block 只改变渲染基准，不改变「还差多少」这个差值本身。
+         */
         const desiredTop = Math.max(target.top, topBound);
         const dy = desiredTop - box.top;
         if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
@@ -3614,7 +3664,12 @@ window.__ModuleLoader__.load({
           moving = true;
         }
       }
-      if (moving) projection.raf = window.requestAnimationFrame(projectionStep);
+      // 目标已塌掉（或占位符/节点被移出文档）的投影当场拆除，别留一条空白条盖在界面上
+      for (const entry of dead) {
+        projectionDispose(entry);
+        projection.entries.delete(entry.sourceId);
+      }
+      if (moving || dead.length > 0) projection.raf = window.requestAnimationFrame(projectionStep);
     }
 
     function ensureProjectionLoop() {
@@ -5251,10 +5306,13 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
      * 但搬移的源节点本来就来自页头/页顶区域，用同一个保守下界会把它推到侧栏顶部内容上，
      * 反而制造新的遮挡。这里只要求整块避开被原生层吃掉的窗口栏。
      *
-     * 窗口栏高度读不到时退回 44（本机实测 40 + 4 余量）。
+     * 取 40（窗口栏高度本身），**不留余量**：元素顶端落在 y=40 时已经完全在原生层下方、
+     * 可以正常点击。早先写成 44（多留 4px），结果只要目标本来就在 y=40 就被硬推下 4px，
+     * 桌面端实测表现为「投影与占位符不对齐 dy=4」——那个偏差是自己造的。
      */
+    const WINDOW_BAR_HEIGHT = 40;
     function projectionTopBound() {
-      return 44;
+      return WINDOW_BAR_HEIGHT;
     }
 
     /** 候选点是否落在安全区里（水平不出屏、整枚按钮都在窗口栏下面）。 */
@@ -8322,10 +8380,20 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
           if (!report.env.electron) report.verdict.push('注意：当前不在 Electron 里，桌面端字段意义有限');
           if (report.hijackers.length > 0) report.verdict.push(`发现 ${report.hijackers.length} 处祖先样式会劫持 position:fixed`);
           if (report.windowBarViolations.length > 0) report.verdict.push(`${report.windowBarViolations.length} 个 fixed 元素落在窗口栏覆盖区（点不到）`);
-          const badReloc = report.relocation.filter((item) => item.dx !== null && (Math.abs(item.dx) > 2 || Math.abs(item.dy) > 2));
+          /*
+           * 对齐判定要排除「安全区夹取」这个合法偏移：
+           * 目标落在窗口栏里时投影会被主动下推到 winBarH，此时 dy 恰好等于下推量，
+           * 那是正确行为而不是错位。只有 dx 偏差、或 dy 既不是 0 也不是下推量，才算不对齐。
+           */
+          const badReloc = report.relocation.filter((item) => {
+            if (item.dx === null) return false;
+            const clamped = Math.max(0, Math.round(winBarH - item.placeholder.y));
+            if (Math.abs(item.dx) > 2) return true;
+            return Math.abs(item.dy) > 2 && Math.abs(item.dy - clamped) > 2;
+          });
           if (badReloc.length > 0) report.verdict.push(`${badReloc.length} 个搬移投影与占位符不对齐`);
-          const crushed = report.relocation.filter((item) => item.zeroWidthChildren > 0);
-          if (crushed.length > 0) report.verdict.push(`${crushed.length} 个搬移单元内部有子元素被压到 0 宽（内容被挤没）`);
+          const clampedNow = report.relocation.filter((item) => item.dy !== null && Math.abs(item.dy - Math.max(0, Math.round(winBarH - item.placeholder.y))) <= 2 && Math.abs(item.dy) > 2);
+          if (clampedNow.length > 0) report.verdict.push(`（其中 ${clampedNow.length} 个是安全区下推 ${winBarH}px，属正常）`);
           if (report.panel !== null && !report.panel.panelIsTopmost) report.verdict.push('面板中心点上不是面板自己：可能有东西盖着它');
           if (report.verdict.length === 0) report.verdict.push('未发现已知问题模式，请把整份 JSON 贴回');
           console.log('=== dsh-layout 桌面端诊断 ===');
