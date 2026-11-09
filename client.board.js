@@ -57,10 +57,10 @@ window.__ModuleLoader__.load({
 .dshl-board[data-mode="trace"] { background:transparent; }
 /* 抽象态：整层遮住界面，成为独立工作台 */
 .dshl-board[data-mode="skeleton"] { background:var(--dsw-alias-bg-layer-2); pointer-events:auto; }
-/* 顶部条：left:0/right:0 + margin auto 居中。
-   不能用 left:50% + translateX(-50%)——绝对定位下 left 定了、right 为 auto 时，
-   可用宽度只有父级的一半，内容会被挤成两行（实测 1391px 视口下顶部条被压到 696px、换行成两行）。 */
-.dshl-boardHead { position:absolute; left:0; right:0; top:48px; margin-inline:auto; width:max-content; z-index:2; display:flex; align-items:center; gap:5px; flex-wrap:wrap; justify-content:center; max-width:calc(100vw - 20px); padding:4px 9px; border-radius:999px; border:1px solid var(--dsw-alias-border-l2); background:color-mix(in srgb, var(--dsw-alias-bg-layer-1) 94%, transparent); box-shadow:0 4px 16px rgba(0,0,0,.24); pointer-events:auto; }
+/* 顶部条：位置由 --dshl-head-top 决定（运行时量页面头栏）。
+   居中用 left:0/right:0 + margin auto，不能用 left:50% + translateX(-50%)——
+   绝对定位下 left 定了、right 为 auto 时，可用宽度只有父级的一半，内容会被挤成两行。 */
+.dshl-boardHead { position:absolute; left:0; right:0; top:var(--dshl-head-top, 48px); margin-inline:auto; width:max-content; z-index:2; display:flex; align-items:center; gap:5px; flex-wrap:wrap; justify-content:center; max-width:calc(100vw - 20px); padding:4px 9px; border-radius:999px; border:1px solid var(--dsw-alias-border-l2); background:color-mix(in srgb, var(--dsw-alias-bg-layer-1) 94%, transparent); box-shadow:0 4px 16px rgba(0,0,0,.24); pointer-events:auto; }
 .dshl-boardTitle { font-size:12px; font-weight:600; white-space:nowrap; }
 .dshl-boardPage { font-size:11px; color:var(--dsw-alias-label-secondary); white-space:nowrap; max-width:150px; overflow:hidden; text-overflow:ellipsis; }
 .dshl-boardScenes { display:flex; align-items:center; gap:3px; flex-wrap:wrap; }
@@ -89,15 +89,20 @@ window.__ModuleLoader__.load({
 .dshl-boardBoxTag[data-below="true"] { top:auto; bottom:-14px; }
 .dshl-boardEmpty { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:24px; text-align:center; color:var(--dsw-alias-label-secondary); font-size:12px; }
 /* 骨架漂移提示条：骨架态贴在画布上方，提醒用户看到的是旧结构 */
-/* 骨架漂移提示条同理：left/right 都定住再 margin auto，否则文案被压到父级一半宽。 */
-.dshl-boardDrift { position:absolute; left:0; right:0; margin-inline:auto; width:max-content; z-index:3; display:flex; align-items:center; gap:8px; max-width:calc(100vw - 40px); padding:6px 10px; border-radius:10px; border:1px solid color-mix(in srgb, var(--dsw-alias-state-warning-primary, #d99a2b) 60%, transparent); background:color-mix(in srgb, var(--dsw-alias-state-warning-primary, #d99a2b) 14%, var(--dsw-alias-bg-layer-1)); color:var(--dsw-alias-label-primary); font-size:11px; line-height:16px; box-shadow:0 4px 14px rgba(0,0,0,.22); pointer-events:auto; }
+/* 骨架漂移提示条同理：left/right 都定住再 margin auto，否则文案被压到父级一半宽。
+   垂直位置接在顶部条下方，用同一组 CSS 变量。 */
+.dshl-boardDrift { position:absolute; left:0; right:0; top:calc(var(--dshl-head-top, 48px) + var(--dshl-head-h, 32px) + 8px); margin-inline:auto; width:max-content; z-index:3; display:flex; align-items:center; gap:8px; max-width:calc(100vw - 40px); padding:6px 10px; border-radius:10px; border:1px solid color-mix(in srgb, var(--dsw-alias-state-warning-primary, #d99a2b) 60%, transparent); background:color-mix(in srgb, var(--dsw-alias-state-warning-primary, #d99a2b) 14%, var(--dsw-alias-bg-layer-1)); color:var(--dsw-alias-label-primary); font-size:11px; line-height:16px; box-shadow:0 4px 14px rgba(0,0,0,.22); pointer-events:auto; }
 .dshl-boardDriftText { min-width:0; }
 .dshl-boardDriftTitle { font-weight:600; }
 .dshl-boardDriftBtn { flex:none; height:26px; padding:0 10px; border-radius:999px; border:1px solid var(--dsw-alias-border-l1); background:transparent; color:var(--dsw-alias-label-primary); font:inherit; font-size:11px; cursor:pointer; }
 .dshl-boardDriftBtn:hover { background:var(--dsw-alias-interactive-bg-hover); }
 /* 抽屉：描图态默认收起，按需拉出；收起时只剩一条窄标签，不遮挡真实界面 */
 .dshl-boardDrawers { position:absolute; top:0; bottom:0; left:0; right:0; pointer-events:none; }
-.dshl-boardDrawer { position:absolute; top:52px; bottom:52px; box-sizing:border-box; display:flex; flex-direction:column; pointer-events:auto; border-radius:10px; border:1px solid var(--dsw-alias-border-l2); background:var(--dsw-alias-bg-layer-1); box-shadow:0 10px 30px rgba(0,0,0,.28); overflow:hidden; }
+/* 抽屉的上下位置都由运行时写入的 CSS 变量决定：
+   顶部条与底部条在窄屏会换行变高（实测 640px 下顶部条 67px、底部条 78px），
+   写死偏移会让抽屉钻到条下面去（实测重叠 36px）。变量由 effect 直接写到根元素上，
+   不进 React state——进 state 会形成「测量 → 重渲染 → 再测量」的正反馈。 */
+.dshl-boardDrawer { position:absolute; top:calc(var(--dshl-head-top, 48px) + var(--dshl-head-h, 32px) + 8px); bottom:calc(var(--dshl-foot-h, 42px) + 20px); box-sizing:border-box; display:flex; flex-direction:column; pointer-events:auto; border-radius:10px; border:1px solid var(--dsw-alias-border-l2); background:var(--dsw-alias-bg-layer-1); box-shadow:0 10px 30px rgba(0,0,0,.28); overflow:hidden; }
 .dshl-boardDrawer[data-side="left"] { left:8px; width:272px; }
 .dshl-boardDrawer[data-side="right"] { right:8px; width:320px; }
 .dshl-boardTabs { display:flex; flex-direction:column; gap:6px; pointer-events:auto; }
@@ -748,29 +753,44 @@ window.__ModuleLoader__.load({
       const [layerOn, setLayerOn] = React.useState({ region: true, container: true, slot: false, control: false });
       const [rects, setRects] = React.useState({});
       const [canvasBox, setCanvasBox] = React.useState({ left: 0, top: 0, width: 0, height: 0 });
-      /** 顶部安全偏移：窗口栏（Electron titleBarOverlay）与会话头都在 y 0..40，浮层条必须让开 */
-      const [headTop, setHeadTop] = React.useState(48);
-      /** 顶部条实际高度：抽屉要接在它下面，写死偏移会在顶部条换行时压住它 */
-      const [headHeight, setHeadHeight] = React.useState(32);
+      /**
+       * 顶部安全偏移与顶/底条高度**不进 state**：它们是纯样式量，
+       * 由下面的 effect 直接写进白板根元素的 CSS 变量（--dshl-head-top / --dshl-head-h / --dshl-foot-h）。
+       * 进 state 会在窄屏换行时形成「测量 → 重渲染 → 再测量」的正反馈，实测打爆成 React #185。
+       */
       /** 骨架漂移诊断：只在骨架态显示提示（描图态看到的就是真实结构，不存在漂移） */
       const [drift, setDrift] = React.useState(null);
       const canvasRef = React.useRef(null);
+      /** 白板根元素：CSS 变量的宿主 */
+      const boardRef = React.useRef(null);
       /** 顶部条元素：要量它的实际高度来给抽屉让位 */
       const headRef = React.useRef(null);
+      /** 底部条元素：同上 */
+      const footRef = React.useRef(null);
       const tree = React.useMemo(() => buildTree(snapshot), [snapshot]);
       const pageKey = pageKeyOf(targets);
       const pageLabel = host.currentPageLabel(targets, t);
 
-      // 量顶部安全偏移：页面头栏高度会随页面变（插件页 / 设置弹层不同），每次快照变化与 resize 重算。
-      // 同时量顶部条自身高度：它换行时抽屉必须跟着往下让，写死偏移会压住条。
+      // 量顶部安全偏移 + 顶/底条自身高度：它们换行时抽屉要跟着让位。
+      //
+      // 关键：结果写进 CSS 变量（--dshl-head-top / --dshl-head-h / --dshl-foot-h），
+      // **不写 React state**。写 state 会触发重渲染，重渲染可能改变条的高度，再触发测量——
+      // 实测在窄屏换行时这个正反馈直接打爆成 React #185（无限渲染），白板整块崩掉。
+      // 写 CSS 变量只影响样式、不触发 React 更新，从根上断掉这条回路。
       React.useLayoutEffect(() => {
         const sync = () => {
-          const next = topSafeOffset();
-          setHeadTop((current) => (current === next ? current : next));
+          const boardEl = boardRef.current;
+          if (boardEl === null) return;
+          boardEl.style.setProperty('--dshl-head-top', `${topSafeOffset()}px`);
           const el = headRef.current;
           if (el !== null) {
             const h = Math.round(el.getBoundingClientRect().height);
-            if (h > 0) setHeadHeight((current) => (current === h ? current : h));
+            if (h > 0) boardEl.style.setProperty('--dshl-head-h', `${h}px`);
+          }
+          const footEl = footRef.current;
+          if (footEl !== null) {
+            const h = Math.round(footEl.getBoundingClientRect().height);
+            if (h > 0) boardEl.style.setProperty('--dshl-foot-h', `${h}px`);
           }
         };
         sync();
@@ -815,11 +835,25 @@ window.__ModuleLoader__.load({
         // 冻结该页快照：否则主 bundle 每 5 秒自动重量，快照永远新鲜、漂移永远检测不到
         host.freezeGeometry(pageKey);
         const geometry = host.readGeometry(pageKey);
-        setRects(layoutSkeleton(geometry, canvasBox));
+        // 画布尺寸必须**在这里当场量**，不能复用 canvasBox：
+        // canvasBox 只由描图态的定时器更新，切到骨架态后那个 effect 直接 return，
+        // 于是 canvasBox 永远停在初始的 0×0，骨架会被全部乘成 0 尺寸——实测骨架态一个框都不显示。
+        const el = canvasRef.current;
+        const boxOf = () => (el === null
+          ? { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight }
+          : (() => { const r = el.getBoundingClientRect(); return { left: r.left, top: r.top, width: r.width, height: r.height }; })());
+        const paintSkeleton = () => setRects(layoutSkeleton(host.readGeometry(pageKey), boxOf()));
+        paintSkeleton();
+        // 窗口尺寸变化时要重铺：骨架是按画布尺寸等比缩放的
+        const onResize = () => paintSkeleton();
+        window.addEventListener('resize', onResize);
         // 漂移校验只在骨架态做：描图态看到的就是真实结构，没有「过期」这回事
         setDrift(host.readDrift());
-        return () => host.unfreezeGeometry();
-      }, [mode, pageKey, canvasBox, snapshot]);
+        return () => {
+          window.removeEventListener('resize', onResize);
+          host.unfreezeGeometry();
+        };
+      }, [mode, pageKey, snapshot]);
 
       /**
        * 切页清空选中：页面换了，原来选中的节点多半不在这一页上。
@@ -887,7 +921,7 @@ window.__ModuleLoader__.load({
       ];
       const currentKind = host.pageKindOf(targets);
 
-      return h('div', { className: 'dshl-board', 'data-dshl-layer': '', 'data-mode': mode },
+      return h('div', { className: 'dshl-board', ref: boardRef, 'data-dshl-layer': '', 'data-mode': mode },
         // 画布铺满整层：描图态的框用视口坐标减去画布原点，与真实元素严格对齐；抽象态整层不透明
         h('div', { className: 'dshl-boardCanvasWrap', ref: canvasRef },
           h('div', { className: 'dshl-boardCanvas' },
@@ -925,7 +959,7 @@ window.__ModuleLoader__.load({
             }))),
         // 骨架漂移提示：只在骨架态、且真实结构与快照对不上时出现
         mode === 'skeleton' && drift !== null
-          ? h('div', { className: 'dshl-boardDrift', style: { top: headTop + headHeight + 8 } },
+          ? h('div', { className: 'dshl-boardDrift' },
             h('span', { className: 'dshl-boardDriftText' },
               h('span', { className: 'dshl-boardDriftTitle' }, t('boardDriftTitle')),
               ' · ',
@@ -939,7 +973,7 @@ window.__ModuleLoader__.load({
               },
             }, t('boardDriftRecapture')))
           : null,
-        h('div', { className: 'dshl-boardHead', ref: headRef, style: { top: headTop } },
+        h('div', { className: 'dshl-boardHead', ref: headRef },
           h('span', { className: 'dshl-boardTitle' }, t('boardTitle')),
           h('span', { className: 'dshl-boardPage', title: pageLabel }, pageLabel),
           h('span', { className: 'dshl-boardGrow' }),
@@ -992,7 +1026,7 @@ window.__ModuleLoader__.load({
           }, selectedNode === null ? t('boardProps') : String(selectedNode.label)),
           h('button', { type: 'button', className: 'dshl-boardScene', onClick: () => host.setBoard(false) }, t('done'))),
         // 左抽屉：四栏
-        drawers.left ? h('div', { className: 'dshl-boardDrawer', 'data-side': 'left', style: { top: headTop + headHeight + 8 } },
+        drawers.left ? h('div', { className: 'dshl-boardDrawer', 'data-side': 'left' },
           h('div', { className: 'dshl-boardSearch' },
             h('input', {
               type: 'search',
@@ -1043,7 +1077,7 @@ window.__ModuleLoader__.load({
                       null)) : null);
             }))) : null,
         // 右抽屉：属性面板
-        drawers.right ? h('div', { className: 'dshl-boardDrawer', 'data-side': 'right', style: { top: headTop + headHeight + 8 } },
+        drawers.right ? h('div', { className: 'dshl-boardDrawer', 'data-side': 'right' },
           h('div', { className: 'dshl-boardProps' },
             selectedNode === null
               ? h('p', { className: 'dshl-boardNote' }, t('boardNoSelection'))
@@ -1069,7 +1103,7 @@ window.__ModuleLoader__.load({
                     h('span', { className: 'dshl-boardNodeLabel' }, String(item.label)),
                     h('span', { className: 'dshl-boardBadge' }, t(LAYER_LABEL[item.layer])))))),
                 ...selectedNode.controls.map((ctl, index) => h(ControlField, { key: `${selectedNode.id}-${index}`, t, ctl }))))) : null,
-        h('div', { className: 'dshl-boardFoot' },
+        h('div', { className: 'dshl-boardFoot', ref: footRef },
           h('span', { className: 'dshl-boardHint' }, t('boardHint')),
           h('button', { type: 'button', className: 'dshl-btn', onClick: () => host.applyPreset('standard') }, t('presetStandard')),
           h('button', { type: 'button', className: 'dshl-btn', onClick: () => host.applyPreset('focus') }, t('presetFocus')),

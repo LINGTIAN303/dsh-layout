@@ -1416,17 +1416,29 @@ window.__ModuleLoader__.load({
       };
       // 入口收纳：三个收纳区各自的条目清单；旧的 storage.tucked（纯标签）迁到 sidebar
       const storageRaw = raw.storage !== null && typeof raw.storage === 'object' ? raw.storage : {};
+      /**
+       * 收纳域条目。
+       *
+       * `id` 只在「非空字符串」时才保留：早期版本写条目时用 `entry.id ?? ''`，把「这个入口没有稳定 id」
+       * 落成了空串；而运行期判定身份走 `storageKeyOf`（有非空 id 用 id，否则 kind+label）。
+       * 两者对不上会导致同一入口在配置里出现两条、开关删不干净——实测 sidebar 域 7 条全是 `id: ''`，
+       * 界面上 74 条误显示为已收纳。这里把空 id 收掉，让两条分支统一走 kind+label。
+       * 补回真实 id 由运行期 StorageCard 按 label 对齐（此时还没有 DOM 可看，不能在这里做）。
+       */
       const storageZone = (list) => {
         const out = [];
         for (const item of Array.isArray(list) ? list : []) {
           if (out.length >= 40) break;
           if (item === null || typeof item !== 'object') continue;
-          const id = typeof item.id === 'string' && item.id.length <= 160 ? item.id : '';
+          const id = typeof item.id === 'string' && item.id.length > 0 && item.id.length <= 160 ? item.id : '';
           const kind = typeof item.kind === 'string' && item.kind.length <= 40 ? item.kind : '';
           const label = typeof item.label === 'string' && item.label.length > 0 && item.label.length <= 60 ? item.label : '';
           if (label === '') continue;
           if (out.some((entry) => entry.label === label && entry.id === id && (entry.kind ?? '') === kind)) continue;
-          out.push(kind === '' ? { id, label } : { id, label, kind });
+          const record = { label };
+          if (id !== '') record.id = id;
+          if (kind !== '') record.kind = kind;
+          out.push(record);
         }
         return out;
       };
@@ -1440,6 +1452,17 @@ window.__ModuleLoader__.load({
         }
         return out;
       };
+      /**
+       * 收纳域：把历史遗留的 `id: ''` 条目收成「无 id」形态。
+       *
+       * 早期版本写条目时用 `entry.id ?? ''`，把「这个入口没有稳定 id」落成了空字符串；
+       * 而运行时判断身份用的是 `storageKeyOf`，它的分支是「有非空 id 用 id，否则用 kind+label」。
+       * 两者对不上，导致同一个入口在配置里出现两条、开关也删不干净
+       * （实测 sidebar 域里 7 条全是 `id: ''`，界面上 74 条误显示为已收纳）。
+       *
+       * 这里只做「空 id → 去掉 id 字段」这一件事，不依赖 DOM：normalizeConfig 在模块加载早期就会跑，
+       * 此时还没有任何界面可以观察。补回真实 id 由运行期的 StorageCard 按 label 对齐（见 syncStorageIds）。
+       */
       const storage = {
         sidebar: storageZone(storageRaw.sidebar),
         views: storageZone(storageRaw.views),
@@ -3702,9 +3725,16 @@ window.__ModuleLoader__.load({
       return false;
     }
 
-    /** 收纳条目的身份：稳定 id 优先；早期只有显示名的条目退回 kind+label。 */
+    /**
+     * 收纳条目的身份：稳定 id 优先；早期只有显示名的条目退回 kind+label。
+     *
+     * 注意必须判「非空字符串」而不是 `!== ''`：收纳域里的入口条目来源不止配置，
+     * 还有运行时发现的（`readPluginCards` / `readButtonEntries` 等），它们多数没有 `id` 字段，
+     * 值是 `undefined`。`undefined !== ''` 为真 → 直接返回 `undefined` → 这类条目互相全等，
+     * 结果整张收纳表都显示成「已收纳」（实测 70+ 条误显示为已开启，而配置里是空的）。
+     */
     function storageKeyOf(entry) {
-      if (entry.id !== '') return entry.id;
+      if (typeof entry.id === 'string' && entry.id !== '') return entry.id;
       return `${entry.kind ?? ''}\u0000${entry.label}`;
     }
 
@@ -6176,8 +6206,45 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       const toggle = (zone, entry, on) => updateConfig((draft) => {
         const list = draft.storage[zone];
         const others = list.filter((item) => !sameStorageEntry(item, entry));
-        draft.storage[zone] = on ? [...others, { id: entry.id ?? '', label: entry.label, ...(entry.kind === undefined ? {} : { kind: entry.kind }) }] : others;
+        // 写回时把身份原样存下来（含运行期发现的条目可能没有 id）：只存有值的字段，
+        // 不要写成 `id: ''` ——读回时 `''` 与「没有 id」走的是两条不同分支，会被判成两个条目。
+        const record = { label: entry.label };
+        if (typeof entry.id === 'string' && entry.id !== '') record.id = entry.id;
+        if (entry.kind !== undefined) record.kind = entry.kind;
+        draft.storage[zone] = on ? [...others, record] : others;
       });
+      /**
+       * 历史条目补 id：旧数据里可能是 `{ label: '任务看板' }`（无 id），而当前发现清单里
+       * 同名的条目有稳定 id（`task-board`）。不补的话两者永远配不上，界面会把它们当成两条，
+       * 开关就出现「点了没反应 / 关不掉」。
+       *
+       * 只补「label 在该域唯一命中」的：同名两条时无法判断对应哪一个，宁可不动。
+       */
+      React.useEffect(() => {
+        const patches = [];
+        for (const section of sections) {
+          const stored = config.storage?.[section.id] ?? [];
+          const byLabel = new Map();
+          for (const entry of section.found) {
+            if (typeof entry.id !== 'string' || entry.id === '') continue;
+            // 同名出现两次时置 null：无法判断该补哪一个，宁可不动
+            byLabel.set(entry.label, byLabel.has(entry.label) ? null : entry.id);
+          }
+          for (const entry of stored) {
+            if (typeof entry.id === 'string' && entry.id !== '') continue;
+            const fixed = byLabel.get(entry.label);
+            if (typeof fixed === 'string' && fixed !== '') patches.push({ zone: section.id, entry, id: fixed });
+          }
+        }
+        if (patches.length === 0) return;
+        updateConfig((draft) => {
+          for (const patch of patches) {
+            const list = draft.storage[patch.zone] ?? [];
+            const at = list.findIndex((item) => item.label === patch.entry.label && (item.kind ?? '') === (patch.entry.kind ?? ''));
+            if (at >= 0) list[at] = { ...list[at], id: patch.id };
+          }
+        });
+      }, [config.storage, targets.storageZones]);
       const hiddenLabels = config.sidebar.panelHidden;
       const renderZone = (section) => {
         const stored = config.storage[section.id] ?? [];
