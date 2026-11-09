@@ -278,6 +278,8 @@ window.__ModuleLoader__.load({
       ruleAreaSettings: '设置页',
       ruleActionHide: '隐藏单元',
       ruleActionArrange: '容器排列',
+      ruleActionScheme: '切换布局方案',
+      ruleSchemeEmpty: '还没有保存的方案',
       ruleColumns: '列数',
       ruleEmptyValue: '当前没有可选项。',
       tabStorage: '入口收纳',
@@ -1745,11 +1747,21 @@ window.__ModuleLoader__.load({
       hostWrite('schemes', JSON.stringify(payload));
     }
 
-    /** 读取即规范：超上限的条目在第一次写回时裁掉，避免存储与界面长期不一致。 */
+    /**
+     * 读取方案表，并在「超出上限」时把截断后的结果写回存储。
+     *
+     * 只有一种情况该写回：存储里的条目数超过 LAYOUTS_MAX（读取时按上限截断，
+     * 写回是为了让存储与内存一致，避免下次再截一遍）。
+     *
+     * 这里的判据**不能**写成「raw 比规范化后的 state 长」。规范化会丢弃非法条目
+     * （id 为空、name 为空、config 不是对象、id 重复），这些被丢弃的条目本来就该丢；
+     * 用它当写回条件会在任何一次「存储里有脏条目」时把整张方案表覆盖成内存里的残缺版本，
+     * 极端情况下（读到的全是脏条目）会把方案表清空 —— 实测切方案规则触发后
+     * localStorage 里 config 与 schemes 双双消失，就是从这类覆盖开始的。
+     */
     function readLayoutsNormalized() {
       const state = readLayouts();
-      const raw = readJsonStore(LAYOUTS_KEY);
-      if (Array.isArray(raw.list) && raw.list.length > state.list.length) writeLayouts(state);
+      if (state.list.length > LAYOUTS_MAX) writeLayouts(state);
       return state;
     }
 
@@ -3616,6 +3628,7 @@ window.__ModuleLoader__.load({
       const state = readLayoutsNormalized();
       const entry = state.list.find((item) => item.id === plan.scheme);
       if (entry === undefined) {
+        // 方案还不存在（规则先建、方案没存 / 方案被删）：记下这次尝试，避免每轮 refresh 都重扫一遍
         schemeApplied = { key: plan.scheme, config: snapshot.config };
         return false;
       }
