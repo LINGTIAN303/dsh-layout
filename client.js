@@ -944,7 +944,6 @@ window.__ModuleLoader__.load({
       if (document.querySelector('[data-plugin-detail]') !== null) return 'pluginDetail';
       return 'plugins';
     }
-
     function writeBoardGeometry() {
       // 页面数量上限：按观测时间淘汰最旧的，避免 localStorage 无界增长
       const keys = Object.keys(boardGeometry);
@@ -1585,14 +1584,29 @@ window.__ModuleLoader__.load({
       notify();
     }
 
-    /** 打开/关闭布局白板；白板与编辑面板互斥（同屏两个全屏层没有意义），编辑模式的虚线框也一并退掉。 */
+    /**
+     * 打开/关闭布局白板。
+     *
+     * 白板与编辑面板互斥（同屏两个全屏层没有意义），编辑模式的虚线框也一并退掉。
+     * 但要记住「白板是从面板进去的」：关闭白板时把面板恢复回来，
+     * 否则用户从面板点「打开白板」、点「完成」之后面板凭空消失，原来的操作位置也丢了。
+     */
+    let boardReturnPanel = false;
     function setBoard(board) {
       if (snapshot.ui.board === board) return;
+      if (board) boardReturnPanel = snapshot.ui.panel;
+      const restorePanel = board === false && boardReturnPanel;
       snapshot = {
         ...snapshot,
-        ui: { ...snapshot.ui, board, panel: board ? false : snapshot.ui.panel, editing: board ? false : snapshot.ui.editing },
+        ui: {
+          ...snapshot.ui,
+          board,
+          panel: board ? false : (restorePanel ? true : snapshot.ui.panel),
+          editing: board ? false : snapshot.ui.editing,
+        },
       };
       if (board) boardGeometryDirty = true;
+      if (board === false) boardReturnPanel = false;
       notify();
     }
 
@@ -4228,7 +4242,10 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
 .dshl-rowLabel { flex:1; min-width:0; font-size:12px; }
 .dshl-num { font-size:11px; color:var(--dsw-alias-label-secondary); min-width:46px; text-align:right; font-variant-numeric:tabular-nums; }
 .dshl-slider { width:100%; margin:0; accent-color:var(--dsw-alias-brand-primary); height:16px; }
+/* 开关：视觉 32×18，热区靠伪元素外扩到 32×24（::before 覆盖整个可点范围）。
+   直接把元素撑到 24 会改变卡片里的行高与对齐，所以用伪元素扩热区而不改视觉盒。 */
 .dshl-switch { position:relative; width:32px; height:18px; flex:none; border-radius:999px; border:1px solid var(--dsw-alias-border-l2); background:var(--dsw-alias-bg-layer-2); padding:0; cursor:pointer; transition:background .15s; }
+.dshl-switch:before { content:''; position:absolute; left:-2px; right:-2px; top:-4px; bottom:-4px; border-radius:999px; }
 .dshl-switch:after { content:''; position:absolute; top:2px; left:2px; width:12px; height:12px; border-radius:50%; background:var(--dsw-alias-label-secondary); transition:transform .15s, background .15s; }
 .dshl-switch[aria-checked="true"] { background:var(--dsw-alias-brand-primary); border-color:var(--dsw-alias-brand-primary); }
 .dshl-switch[aria-checked="true"]:after { transform:translateX(14px); background:var(--dsw-alias-bg-layer-1, #111); }
@@ -4247,7 +4264,9 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
 .dshl-surfaceDot[data-on="true"][data-source="third"] { background:var(--dsw-alias-state-warn-primary); }
 .dshl-itemSub { font-size:11px; color:var(--dsw-alias-label-secondary); flex:none; }
 .dshl-itemCtl { display:inline-flex; align-items:center; gap:2px; flex:none; margin-left:2px; }
-.dshl-iconBtn { width:22px; height:22px; flex:none; display:inline-flex; align-items:center; justify-content:center; padding:0; border:none; border-radius:4px; background:transparent; color:var(--dsw-alias-label-secondary); cursor:pointer; }
+/* 图标按钮：视觉 22×22，热区靠伪元素外扩到 26×26 */
+.dshl-iconBtn { position:relative; width:22px; height:22px; flex:none; display:inline-flex; align-items:center; justify-content:center; padding:0; border:none; border-radius:4px; background:transparent; color:var(--dsw-alias-label-secondary); cursor:pointer; }
+.dshl-iconBtn:before { content:''; position:absolute; inset:-2px; border-radius:6px; }
 .dshl-iconBtn:hover { background:var(--dsw-alias-interactive-bg-hover); color:var(--dsw-alias-label-primary); }
 .dshl-iconBtn:disabled { opacity:.3; cursor:default; }
 .dshl-foot { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
@@ -7027,13 +7046,18 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
         };
       }, []);
 
-      // 面板与编辑模式都能用 Esc 退出：先退编辑模式，再关面板；设置浮层在场时交给它自己处理。
-      // 排除本插件自己的 dialog，否则打开面板后 Esc 永远被自己拦掉。
+      // 面板、白板与编辑模式都能用 Esc 退出：白板 → 编辑模式 → 面板，逐层退。
+      // 设置浮层在场时交给它自己处理；排除本插件自己的 dialog，否则打开面板后 Esc 永远被自己拦掉。
       React.useEffect(() => {
-        if (!ui.editing && !ui.panel) return undefined;
+        if (!ui.editing && !ui.panel && !ui.board) return undefined;
         const onKeyDown = (event) => {
           if (event.key !== 'Escape' || event.defaultPrevented) return;
           if (document.querySelector('[role="dialog"]:not(.dshl-panel)') !== null) return;
+          // 白板是最上层，先关它；它开着时面板与编辑模式本来就被关掉了
+          if (snapshot.ui.board) {
+            setBoard(false);
+            return;
+          }
           if (snapshot.ui.editing) {
             setEditing(false);
             return;
@@ -7042,7 +7066,7 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
         };
         window.addEventListener('keydown', onKeyDown, true);
         return () => window.removeEventListener('keydown', onKeyDown, true);
-      }, [ui.editing, ui.panel]);
+      }, [ui.editing, ui.panel, ui.board]);
 
       // 兜底点击通道：即使按钮被 pointer-events/遮挡问题吃掉，按坐标命中同样能触发
       React.useEffect(() => {
@@ -7303,6 +7327,13 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       readPath,
       writePath,
       pageKindOf,
+      /**
+       * 白板读骨架用的页面 key：**必须与主 bundle 写快照时同一套判定**。
+       * 白板原先自己用 pageKindOf 推导（会话优先），而写快照用 boardPageKey（第三方页优先），
+       * 两套顺序在第三方插件页上会给出不同 key —— 白板于是读不到刚写的那一页骨架。
+       * 这里直接暴露宿主实现，白板不再自己算。
+       */
+      boardPageKey,
       currentPageLabel,
       useStoreSnapshot,
       updateConfig,

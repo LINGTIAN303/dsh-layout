@@ -57,18 +57,21 @@ window.__ModuleLoader__.load({
 .dshl-board[data-mode="trace"] { background:transparent; }
 /* 抽象态：整层遮住界面，成为独立工作台 */
 .dshl-board[data-mode="skeleton"] { background:var(--dsw-alias-bg-layer-2); pointer-events:auto; }
-.dshl-boardHead { position:absolute; top:48px; left:50%; transform:translateX(-50%); z-index:2; display:flex; align-items:center; gap:5px; flex-wrap:wrap; justify-content:center; max-width:calc(100vw - 20px); padding:4px 9px; border-radius:999px; border:1px solid var(--dsw-alias-border-l2); background:color-mix(in srgb, var(--dsw-alias-bg-layer-1) 94%, transparent); box-shadow:0 4px 16px rgba(0,0,0,.24); pointer-events:auto; }
+/* 顶部条：left:0/right:0 + margin auto 居中。
+   不能用 left:50% + translateX(-50%)——绝对定位下 left 定了、right 为 auto 时，
+   可用宽度只有父级的一半，内容会被挤成两行（实测 1391px 视口下顶部条被压到 696px、换行成两行）。 */
+.dshl-boardHead { position:absolute; left:0; right:0; top:48px; margin-inline:auto; width:max-content; z-index:2; display:flex; align-items:center; gap:5px; flex-wrap:wrap; justify-content:center; max-width:calc(100vw - 20px); padding:4px 9px; border-radius:999px; border:1px solid var(--dsw-alias-border-l2); background:color-mix(in srgb, var(--dsw-alias-bg-layer-1) 94%, transparent); box-shadow:0 4px 16px rgba(0,0,0,.24); pointer-events:auto; }
 .dshl-boardTitle { font-size:12px; font-weight:600; white-space:nowrap; }
 .dshl-boardPage { font-size:11px; color:var(--dsw-alias-label-secondary); white-space:nowrap; max-width:150px; overflow:hidden; text-overflow:ellipsis; }
 .dshl-boardScenes { display:flex; align-items:center; gap:3px; flex-wrap:wrap; }
-.dshl-boardScene { height:22px; padding:0 8px; border-radius:999px; border:1px solid var(--dsw-alias-border-l1); background:transparent; color:var(--dsw-alias-label-secondary); font:inherit; font-size:11px; cursor:pointer; white-space:nowrap; }
+.dshl-boardScene { height:26px; padding:0 9px; border-radius:999px; border:1px solid var(--dsw-alias-border-l1); background:transparent; color:var(--dsw-alias-label-secondary); font:inherit; font-size:11px; cursor:pointer; white-space:nowrap; }
 .dshl-boardScene:hover { background:var(--dsw-alias-interactive-bg-hover); color:var(--dsw-alias-label-primary); }
 .dshl-boardScene[data-active="true"] { border-color:var(--dsw-alias-brand-primary); color:var(--dsw-alias-brand-primary); background:color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent); }
 .dshl-boardGrow { flex:1; min-width:0; }
-/* 层级开关：四层各自可开关，描图态默认只开区域层——44 个框叠在一起没法看 */
+/* 层级开关：四层各自可开关。默认关掉的层用虚线边框区分「关」与「开着但没框」 */
 .dshl-boardLayers { display:flex; align-items:center; gap:3px; padding-left:6px; border-left:1px solid var(--dsw-alias-border-l2); }
-.dshl-boardLayer { height:22px; padding:0 8px; border-radius:999px; border:1px solid var(--dsw-alias-border-l1); background:transparent; color:var(--dsw-alias-label-secondary); font:inherit; font-size:11px; cursor:pointer; white-space:nowrap; }
-.dshl-boardLayer[data-on="true"] { color:var(--dsw-alias-label-primary); border-color:currentColor; }
+.dshl-boardLayer { height:26px; padding:0 9px; border-radius:999px; border:1px dashed var(--dsw-alias-border-l1); background:transparent; color:var(--dsw-alias-label-secondary); font:inherit; font-size:11px; cursor:pointer; white-space:nowrap; }
+.dshl-boardLayer[data-on="true"] { border-style:solid; color:var(--dsw-alias-label-primary); border-color:currentColor; background:color-mix(in srgb, currentColor 12%, transparent); }
 .dshl-boardLayer:hover { background:var(--dsw-alias-interactive-bg-hover); }
 /* 画布铺满整层：框用视口坐标减去画布原点，与真实元素严格对齐 */
 .dshl-boardCanvasWrap { position:absolute; inset:0; overflow:hidden; }
@@ -86,14 +89,15 @@ window.__ModuleLoader__.load({
 .dshl-boardBoxTag[data-below="true"] { top:auto; bottom:-14px; }
 .dshl-boardEmpty { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:24px; text-align:center; color:var(--dsw-alias-label-secondary); font-size:12px; }
 /* 骨架漂移提示条：骨架态贴在画布上方，提醒用户看到的是旧结构 */
-.dshl-boardDrift { position:absolute; left:50%; transform:translateX(-50%); z-index:3; display:flex; align-items:center; gap:8px; max-width:calc(100vw - 40px); padding:6px 10px; border-radius:10px; border:1px solid color-mix(in srgb, var(--dsw-alias-state-warning-primary, #d99a2b) 60%, transparent); background:color-mix(in srgb, var(--dsw-alias-state-warning-primary, #d99a2b) 14%, var(--dsw-alias-bg-layer-1)); color:var(--dsw-alias-label-primary); font-size:11px; line-height:16px; box-shadow:0 4px 14px rgba(0,0,0,.22); pointer-events:auto; }
+/* 骨架漂移提示条同理：left/right 都定住再 margin auto，否则文案被压到父级一半宽。 */
+.dshl-boardDrift { position:absolute; left:0; right:0; margin-inline:auto; width:max-content; z-index:3; display:flex; align-items:center; gap:8px; max-width:calc(100vw - 40px); padding:6px 10px; border-radius:10px; border:1px solid color-mix(in srgb, var(--dsw-alias-state-warning-primary, #d99a2b) 60%, transparent); background:color-mix(in srgb, var(--dsw-alias-state-warning-primary, #d99a2b) 14%, var(--dsw-alias-bg-layer-1)); color:var(--dsw-alias-label-primary); font-size:11px; line-height:16px; box-shadow:0 4px 14px rgba(0,0,0,.22); pointer-events:auto; }
 .dshl-boardDriftText { min-width:0; }
 .dshl-boardDriftTitle { font-weight:600; }
-.dshl-boardDriftBtn { flex:none; height:22px; padding:0 8px; border-radius:999px; border:1px solid var(--dsw-alias-border-l1); background:transparent; color:var(--dsw-alias-label-primary); font:inherit; font-size:11px; cursor:pointer; }
+.dshl-boardDriftBtn { flex:none; height:26px; padding:0 10px; border-radius:999px; border:1px solid var(--dsw-alias-border-l1); background:transparent; color:var(--dsw-alias-label-primary); font:inherit; font-size:11px; cursor:pointer; }
 .dshl-boardDriftBtn:hover { background:var(--dsw-alias-interactive-bg-hover); }
 /* 抽屉：描图态默认收起，按需拉出；收起时只剩一条窄标签，不遮挡真实界面 */
 .dshl-boardDrawers { position:absolute; top:0; bottom:0; left:0; right:0; pointer-events:none; }
-.dshl-boardDrawer { position:absolute; top:52px; bottom:52px; display:flex; flex-direction:column; pointer-events:auto; border-radius:10px; border:1px solid var(--dsw-alias-border-l2); background:var(--dsw-alias-bg-layer-1); box-shadow:0 10px 30px rgba(0,0,0,.28); overflow:hidden; }
+.dshl-boardDrawer { position:absolute; top:52px; bottom:52px; box-sizing:border-box; display:flex; flex-direction:column; pointer-events:auto; border-radius:10px; border:1px solid var(--dsw-alias-border-l2); background:var(--dsw-alias-bg-layer-1); box-shadow:0 10px 30px rgba(0,0,0,.28); overflow:hidden; }
 .dshl-boardDrawer[data-side="left"] { left:8px; width:272px; }
 .dshl-boardDrawer[data-side="right"] { right:8px; width:320px; }
 .dshl-boardTabs { display:flex; flex-direction:column; gap:6px; pointer-events:auto; }
@@ -109,7 +113,9 @@ window.__ModuleLoader__.load({
 .dshl-boardCount { margin-left:auto; font-weight:400; font-size:11px; color:var(--dsw-alias-label-secondary); }
 .dshl-boardGroupBody { padding:0 4px 5px; display:flex; flex-direction:column; gap:2px; }
 .dshl-boardSubHead { margin:6px 2px 2px; font-size:10px; line-height:14px; letter-spacing:.02em; color:var(--dsw-alias-label-secondary); }
-.dshl-boardNode { display:flex; align-items:center; gap:6px; width:100%; height:26px; padding:0 7px; border-radius:6px; border:1px solid transparent; background:transparent; color:var(--dsw-alias-label-primary); font:inherit; font-size:12px; cursor:pointer; text-align:left; box-sizing:border-box; }
+/* flex:none 必须加：节点行是 flex item，父级有 max-height（下钻列表 220px）时会被压缩，
+   实测 26px 被压到 22px，点击热区随之变小。 */
+.dshl-boardNode { display:flex; align-items:center; gap:6px; width:100%; height:26px; flex:none; padding:0 7px; border-radius:6px; border:1px solid transparent; background:transparent; color:var(--dsw-alias-label-primary); font:inherit; font-size:12px; cursor:pointer; text-align:left; box-sizing:border-box; }
 /* 窗口化占位：撑住滚动条长度，不显示任何内容 */
 .dshl-boardPad { flex:none; width:100%; }
 /* 长列表自己的滚动区：窗口化按它的 scrollTop 算可见区间，不能与其它列表共用 */
@@ -131,9 +137,11 @@ window.__ModuleLoader__.load({
 .dshl-boardFieldValue { font-size:11px; color:var(--dsw-alias-label-secondary); }
 .dshl-boardNote { margin:0; font-size:11px; line-height:17px; color:var(--dsw-alias-label-secondary); }
 .dshl-boardBtns { display:flex; gap:6px; flex-wrap:wrap; }
-/* 下钻列表：属性面板里列出选中节点内部的直接下级 */
+/* 下钻列表：属性面板里列出选中节点内部的直接下级。
+   父级 max-height + overflow 时子行会被 flex 压缩，所以行本身要 flex:none（见 .dshl-boardNode）。 */
 .dshl-boardDrill { display:flex; flex-direction:column; gap:2px; max-height:220px; overflow:auto; padding:4px; border-radius:8px; background:var(--dsw-alias-bg-layer-2); }
-.dshl-boardFoot { position:absolute; left:50%; bottom:10px; transform:translateX(-50%); display:flex; gap:8px; align-items:center; flex-wrap:wrap; max-width:calc(100vw - 24px); padding:6px 10px; border-radius:999px; border:1px solid var(--dsw-alias-border-l2); background:color-mix(in srgb, var(--dsw-alias-bg-layer-1) 94%, transparent); box-shadow:0 4px 16px rgba(0,0,0,.24); pointer-events:auto; }
+/* 底部条同理：left/right 都定住再 margin auto，否则内容被压到父级一半宽。 */
+.dshl-boardFoot { position:absolute; left:0; right:0; bottom:10px; margin-inline:auto; width:max-content; display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:center; max-width:calc(100vw - 24px); padding:6px 10px; border-radius:999px; border:1px solid var(--dsw-alias-border-l2); background:color-mix(in srgb, var(--dsw-alias-bg-layer-1) 94%, transparent); box-shadow:0 4px 16px rgba(0,0,0,.24); pointer-events:auto; }
 .dshl-boardHint { font-size:11px; color:var(--dsw-alias-label-secondary); }
 `;
 
@@ -384,8 +392,15 @@ window.__ModuleLoader__.load({
               draft.slots.hide = list;
             }));
             if (item.orderable) {
+              // 顺序用上移/下移，不用裸数字滑块：`slots.order` 存的是相对序号，
+              // 用户无法从「拖到 23」推出它会排到第几位；现有六页面板也是用上下移。
               const order = config.slots.order?.[key] ?? item.order ?? 0;
-              controls.push(ctlNum('boardOrder', order, -50, 50, 1, (draft, value) => { draft.slots.order[key] = value; }));
+              controls.push(ctlAction('boardMoveUp', () => {
+                host.updateConfig((draft) => { draft.slots.order[key] = order - 1; });
+              }));
+              controls.push(ctlAction('boardMoveDown', () => {
+                host.updateConfig((draft) => { draft.slots.order[key] = order + 1; });
+              }));
             }
             if (controls.length === 0) controls.push(ctlNote(item.reason === 'overlay' ? host.t('boardReadonlyOverlay') : host.t('boardReadonly')));
             out.push(node({
@@ -469,7 +484,25 @@ window.__ModuleLoader__.load({
       return cx >= outer.x && cx <= outer.x + outer.w && cy >= outer.y && cy <= outer.y + outer.h;
     }
 
-    /** 直接下级：在所有节点里找出中心落在 parentRect 内、且不被另一个同级节点更紧包住的那些。 */
+    /**
+     * 直接下级：找出 parentRect 内「没有被另一个更大的候选整框包住」的节点。
+     *
+     * 两个容易踩错的地方（第一版都踩了）：
+     * 1. **必须用整框包含，不能用中心点包含**。用中心点判断时，容器内部一个恰好盖住
+     *    容器中心的控件会被当成「容器的父级」，把容器自己判成子级剔掉——实测侧栏里
+     *    `block:brand` 整个消失，只剩它内部的品牌标识/收起按钮。
+     * 2. **必须按面积从大到小处理**。大的先被接受，小的若落在大框里就说明它更深一层，
+     *    直接跳过；按面积从小到大处理则相反，会先接受小控件再误判大容器。
+     */
+    function rectContains(outer, inner) {
+      // 留 2px 容差：子元素常因边框/圆角/阴影比父框略大几个像素
+      const pad = 2;
+      return inner.x >= outer.x - pad
+        && inner.y >= outer.y - pad
+        && inner.x + inner.w <= outer.x + outer.w + pad
+        && inner.y + inner.h <= outer.y + outer.h + pad;
+    }
+
     function childrenOf(parentId, parentRect, candidates, rectsOf) {
       const inside = [];
       for (const item of candidates) {
@@ -477,22 +510,40 @@ window.__ModuleLoader__.load({
         const rect = rectsOf(item);
         if (rect === undefined) continue;
         if (!containsCenter(parentRect, rect)) continue;
-        inside.push({ item, rect });
+        // 排除祖先与同尺寸别名：`slot:sidebar` 这类节点与 `region:sidebar` 矩形完全相同，
+        // 它们会把真正的子节点全包住，让结果只剩一个（实测只剩 1 项）。
+        // 判据：候选把父矩形整个包住 → 它是父级的祖先/同层别名，不是子级。
+        if (rectContains(rect, parentRect)) continue;
+        inside.push({ item, rect, area: rect.w * rect.h });
       }
-      // 只保留「最靠上的一层」：若 A 包含 B，B 不是直接下级
-      return inside.filter(({ item, rect }) => !inside.some(({ item: other, rect: otherRect }) => {
-        if (other === item) return false;
-        if (!containsCenter(otherRect, rect)) return false;
-        return otherRect.w * otherRect.h < rect.w * rect.h;
-      })).map(({ item }) => item);
+      inside.sort((a, b) => b.area - a.area);
+      const accepted = [];
+      for (const entry of inside) {
+        // 已被某个更大的直接下级整框包住 → 它是那个子节点的后代，不是父节点的直接下级
+        if (accepted.some((other) => rectContains(other.rect, entry.rect))) continue;
+        accepted.push(entry);
+      }
+      // 输出顺序按「层（区域→容器→槽位→控件）+ 从上到下、从左到右」排：
+      // 面积排序只是判定中间态，直接拿来渲染会让按钮排在容器前面，读起来是乱的。
+      const layerRank = { region: 0, container: 1, slot: 2, control: 3 };
+      accepted.sort((a, b) => {
+        const rank = (layerRank[a.item.layer] ?? 9) - (layerRank[b.item.layer] ?? 9);
+        if (rank !== 0) return rank;
+        if (Math.abs(a.rect.y - b.rect.y) > 2) return a.rect.y - b.rect.y;
+        return a.rect.x - b.rect.x;
+      });
+      return accepted.map((entry) => entry.item);
     }
 
     /* ============================== 画布几何 ============================== */
 
+    /**
+     * 白板用的页面 key。
+     * 直接取宿主实现：写快照与读快照必须用同一套判定，白板自己推一套会在第三方页上对不上
+     * （宿主是「第三方页优先」，白板原来用 pageKindOf 是「会话优先」）。
+     */
     function pageKeyOf(targets) {
-      const kind = host.pageKindOf(targets);
-      if (kind === 'external') return `external:${targets.external?.pageKey ?? '(unknown)'}`;
-      return kind;
+      return host.boardPageKey(targets);
     }
 
     /**
@@ -699,18 +750,28 @@ window.__ModuleLoader__.load({
       const [canvasBox, setCanvasBox] = React.useState({ left: 0, top: 0, width: 0, height: 0 });
       /** 顶部安全偏移：窗口栏（Electron titleBarOverlay）与会话头都在 y 0..40，浮层条必须让开 */
       const [headTop, setHeadTop] = React.useState(48);
+      /** 顶部条实际高度：抽屉要接在它下面，写死偏移会在顶部条换行时压住它 */
+      const [headHeight, setHeadHeight] = React.useState(32);
       /** 骨架漂移诊断：只在骨架态显示提示（描图态看到的就是真实结构，不存在漂移） */
       const [drift, setDrift] = React.useState(null);
       const canvasRef = React.useRef(null);
+      /** 顶部条元素：要量它的实际高度来给抽屉让位 */
+      const headRef = React.useRef(null);
       const tree = React.useMemo(() => buildTree(snapshot), [snapshot]);
       const pageKey = pageKeyOf(targets);
       const pageLabel = host.currentPageLabel(targets, t);
 
-      // 量顶部安全偏移：页面头栏高度会随页面变（插件页 / 设置弹层不同），每次快照变化与 resize 重算
+      // 量顶部安全偏移：页面头栏高度会随页面变（插件页 / 设置弹层不同），每次快照变化与 resize 重算。
+      // 同时量顶部条自身高度：它换行时抽屉必须跟着往下让，写死偏移会压住条。
       React.useLayoutEffect(() => {
         const sync = () => {
           const next = topSafeOffset();
           setHeadTop((current) => (current === next ? current : next));
+          const el = headRef.current;
+          if (el !== null) {
+            const h = Math.round(el.getBoundingClientRect().height);
+            if (h > 0) setHeadHeight((current) => (current === h ? current : h));
+          }
         };
         sync();
         const timer = window.setInterval(sync, 500);
@@ -760,6 +821,19 @@ window.__ModuleLoader__.load({
         return () => host.unfreezeGeometry();
       }, [mode, pageKey, canvasBox, snapshot]);
 
+      /**
+       * 切页清空选中：页面换了，原来选中的节点多半不在这一页上。
+       * 不清的话属性面板会继续显示上一页的节点（还会标「此刻在场」），
+       * 用户以为改的是当前页，实际改的是别处的配置。
+       */
+      const lastPageRef = React.useRef(pageKey);
+      React.useEffect(() => {
+        if (lastPageRef.current === pageKey) return;
+        lastPageRef.current = pageKey;
+        setSelected(null);
+        setDrift(null);
+      }, [pageKey]);
+
       const allNodes = React.useMemo(() => {
         const map = new Map();
         for (const layer of LAYERS) for (const item of tree[layer]) map.set(item.id, item);
@@ -771,25 +845,32 @@ window.__ModuleLoader__.load({
        * 下钻：选中节点后，把它内部的直接下级标成「可继续点」。
        * 先点区域（侧栏），再点区域里的容器（面板导航），再点容器里的控件（某个插件入口）——
        * 三级都是同一套逻辑，不额外维护父子表。
+       *
+       * 候选表只建一次：之前每层都重建一份全量数组，450+ 节点时会做 4 轮 O(n²) 扫描，
+       * 而且「取第一个有下级的子节点」会随节点顺序漂移。改成预建 rect 索引 + 按面积升序，
+       * 每层只在父矩形内扫一遍。
        */
       const drillPath = React.useMemo(() => {
         if (selected === null || rects[selected] === undefined) return [];
+        const candidates = [];
+        for (const layer of LAYERS) for (const item of tree[layer]) candidates.push(item);
+        const rectOf = (item) => rects[item.id];
         const path = [];
         const seen = new Set([selected]);
-        let parentId = selected;
+        let parentRect = rects[selected];
         for (let depth = 0; depth < 4; depth += 1) {
-          const parentRect = rects[parentId];
           if (parentRect === undefined) break;
-          const candidates = [];
-          for (const layer of LAYERS) for (const item of tree[layer]) candidates.push(item);
-          const kids = childrenOf(parentId, parentRect, candidates, (item) => rects[item.id]).filter((item) => !seen.has(item.id));
+          const kids = childrenOf(selected, parentRect, candidates, rectOf).filter((item) => !seen.has(item.id));
           if (kids.length === 0) break;
           path.push(...kids);
           for (const kid of kids) seen.add(kid.id);
-          // 继续往里：取第一个有下级的子节点作为下一层父节点，让整条链都可点
-          const next = kids.find((kid) => childrenOf(kid.id, rects[kid.id], candidates, (item) => rects[item.id]).length > 0);
+          // 继续往里：挑面积最大的那个子节点（通常是容器），避免随节点顺序漂移
+          const next = kids
+            .map((kid) => ({ kid, rect: rectOf(kid) }))
+            .filter((entry) => entry.rect !== undefined)
+            .sort((a, b) => (b.rect.w * b.rect.h) - (a.rect.w * a.rect.h))[0];
           if (next === undefined) break;
-          parentId = next.id;
+          parentRect = next.rect;
         }
         return path;
       }, [selected, rects, tree]);
@@ -844,7 +925,7 @@ window.__ModuleLoader__.load({
             }))),
         // 骨架漂移提示：只在骨架态、且真实结构与快照对不上时出现
         mode === 'skeleton' && drift !== null
-          ? h('div', { className: 'dshl-boardDrift', style: { top: headTop + 34 } },
+          ? h('div', { className: 'dshl-boardDrift', style: { top: headTop + headHeight + 8 } },
             h('span', { className: 'dshl-boardDriftText' },
               h('span', { className: 'dshl-boardDriftTitle' }, t('boardDriftTitle')),
               ' · ',
@@ -858,7 +939,7 @@ window.__ModuleLoader__.load({
               },
             }, t('boardDriftRecapture')))
           : null,
-        h('div', { className: 'dshl-boardHead', style: { top: headTop } },
+        h('div', { className: 'dshl-boardHead', ref: headRef, style: { top: headTop } },
           h('span', { className: 'dshl-boardTitle' }, t('boardTitle')),
           h('span', { className: 'dshl-boardPage', title: pageLabel }, pageLabel),
           h('span', { className: 'dshl-boardGrow' }),
@@ -911,7 +992,7 @@ window.__ModuleLoader__.load({
           }, selectedNode === null ? t('boardProps') : String(selectedNode.label)),
           h('button', { type: 'button', className: 'dshl-boardScene', onClick: () => host.setBoard(false) }, t('done'))),
         // 左抽屉：四栏
-        drawers.left ? h('div', { className: 'dshl-boardDrawer', 'data-side': 'left', style: { top: headTop + 34 } },
+        drawers.left ? h('div', { className: 'dshl-boardDrawer', 'data-side': 'left', style: { top: headTop + headHeight + 8 } },
           h('div', { className: 'dshl-boardSearch' },
             h('input', {
               type: 'search',
@@ -962,7 +1043,7 @@ window.__ModuleLoader__.load({
                       null)) : null);
             }))) : null,
         // 右抽屉：属性面板
-        drawers.right ? h('div', { className: 'dshl-boardDrawer', 'data-side': 'right', style: { top: headTop + 34 } },
+        drawers.right ? h('div', { className: 'dshl-boardDrawer', 'data-side': 'right', style: { top: headTop + headHeight + 8 } },
           h('div', { className: 'dshl-boardProps' },
             selectedNode === null
               ? h('p', { className: 'dshl-boardNote' }, t('boardNoSelection'))
