@@ -64,11 +64,19 @@ window.__ModuleLoader__.load({
       tabStructure: '布局结构',
       tabSidebar: '侧栏',
       tabAreas: '区域拆解',
-      tabRecognition: '识别与外部',
+      tabRecognition: '识别诊断',
+      tabPlugins: '插件与槽位',
       tabStructureHint: '三栏顺序、宽度、显隐，以及底部条与拖动分隔条。',
       tabSidebarHint: '侧栏内部区块、面板导航的排序与显隐。',
       tabAreasHint: '会话区 / 右栏 / 设置页内部的拆解与尺寸。',
-      tabRecognitionHint: '界面结构识别、拆解覆盖，以及外部插件页面的自动拆解。',
+      tabRecognitionHint: '宿主原生界面到手了什么，以及我配的拆解项在这台机器上有没有生效。',
+      tabPluginsHint: '第三方插件贡献了哪些页面、可拆解单元与槽位条目，以及能对它们做什么。',
+      coverageExpand: '展开逐项状态',
+      coverageCollapse: '收起逐项状态',
+      pluginPages: '插件页面',
+      pluginPagesHint: '运行时识别到的插件界面页：官方登记 / 第三方登记 / 自动识别三档。',
+      externalPageNone: '当前不在插件页，也还没有扫描记录。',
+      externalCurrentPage: '扫描的页面：',
       sidebar: '左侧栏',
       center: '会话区',
       rightbar: '右栏',
@@ -487,11 +495,19 @@ window.__ModuleLoader__.load({
       tabStructure: 'Layout',
       tabSidebar: 'Sidebar',
       tabAreas: 'Area parts',
-      tabRecognition: 'Recognition & external',
+      tabRecognition: 'Diagnosis',
+      tabPlugins: 'Plugins & slots',
       tabStructureHint: 'Column order, width, visibility, the bottom bar and the resize handles.',
       tabSidebarHint: 'Order and visibility of sidebar blocks and panel navigation.',
       tabAreasHint: 'Parts and sizes inside the conversation, right column and settings panel.',
-      tabRecognitionHint: 'Interface surfaces, part coverage, and automatic decomposition of external plugin pages.',
+      tabRecognitionHint: 'What the host native interface exposes, and whether the parts you configured actually took effect on this machine.',
+      tabPluginsHint: 'Plugin pages, external units and slot entries contributed by third-party plugins, and what you can do with them.',
+      coverageExpand: 'Show per-item status',
+      coverageCollapse: 'Hide per-item status',
+      pluginPages: 'Plugin pages',
+      pluginPagesHint: 'Plugin interface pages recognized at runtime: officially registered, third-party registered, or auto-detected.',
+      externalPageNone: 'Not on a plugin page, and no scan has been recorded yet.',
+      externalCurrentPage: 'Scanned page: ',
       sidebar: 'Sidebar',
       center: 'Conversation',
       rightbar: 'Right column',
@@ -5129,11 +5145,17 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
     const BLOCK_LABEL_KEYS = { brand: 'blockBrand', 'new-session': 'blockNewSession', panels: 'blockPanels', workspaces: 'blockWorkspaces', footer: 'blockFooter' };
 
     /**
-     * 编辑区分页：把原来平铺的卡片按「类型」分成四页。
-     * - 布局结构（结构类）：三栏骨架与底部条
-     * - 侧栏（容器类）：侧栏内部区块与面板导航
-     * - 区域拆解（区域类）：会话区 / 右栏 / 设置页的拆解与尺寸
-     * - 识别与外部（观测类）：界面结构、拆解覆盖、外部插件单元
+     * 编辑区分页：按「用户要回答的问题」分，不按数据结构分。
+     * - 布局结构：三栏骨架与底部条
+     * - 侧栏：侧栏内部区块与面板导航
+     * - 入口收纳：把入口收进「更多」
+     * - 区域拆解：会话区 / 右栏 / 设置页的拆解与尺寸
+     * - 槽位编排：容器排列、搬移、联动
+     * - 识别诊断：宿主原生界面到手了什么、我配的拆解项生效没
+     * - 插件与槽位：第三方插件贡献了什么、能改哪些
+     *
+     * 前五页回答「我要改什么」，后两页回答「我改的东西对上了没」。
+     * 后两页原来是同一页（7.8 屏，占全部内容 35%），拆开后各 1.6 / 3.0 屏。
      * 分页状态记在 localStorage，刷新后停在原页。
      */
     const EDITOR_TABS = [
@@ -5142,7 +5164,8 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       { id: 'storage', labelKey: 'tabStorage', hintKey: 'tabStorageHint', cards: ['storage'] },
       { id: 'areas', labelKey: 'tabAreas', hintKey: 'tabAreasHint', cards: ['conversation', 'rightbar', 'settings'] },
       { id: 'arrange', labelKey: 'tabArrange', hintKey: 'tabArrangeHint', cards: ['arrange', 'relocate', 'sync', 'rules'] },
-      { id: 'recognition', labelKey: 'tabRecognition', hintKey: 'tabRecognitionHint', cards: ['surfaces', 'coverage', 'pluginSources'] },
+      { id: 'recognition', labelKey: 'tabRecognition', hintKey: 'tabRecognitionHint', cards: ['surfaces', 'coverage'] },
+      { id: 'plugins', labelKey: 'tabPlugins', hintKey: 'tabPluginsHint', cards: ['pluginPages', 'externalUnits', 'pluginSources'] },
     ];
     const UI_STORE_KEY = 'dsh-layout/ui/v1';
 
@@ -5374,20 +5397,10 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       const surfaces = targets.surfaces ?? [];
       const regions = surfaces.filter((surface) => surface.kind === 'region');
       const hostPages = surfaces.filter((surface) => surface.kind === 'page' || surface.kind === 'dialog' || surface.kind === 'official-page');
-      const pluginPages = surfaces.filter((surface) => surface.kind === 'plugin-page');
-      const tierText = (surface) => {
-        if (surface.tier === 'official') return t('tierOfficialShort');
-        if (surface.tier === 'third') return t('tierThirdShort');
-        if (surface.tier === 'pending') return t('surfacePending');
-        return t('tierAutoShort');
-      };
       const renderRow = (surface, extra) => h('div', { key: surface.id, className: 'dshl-item', 'data-active': surface.active === true ? 'true' : undefined },
         h('span', { className: 'dshl-surfaceDot', 'data-on': surface.present === false ? 'false' : 'true', 'data-source': surface.source, 'aria-hidden': true }),
         h('span', { className: 'dshl-itemLabel', title: surface.labelKey === undefined ? surface.label : undefined }, surface.labelKey === undefined ? surface.label : t(surface.labelKey)),
         extra === undefined ? null : h('span', { className: 'dshl-itemSub' }, extra));
-      const officialCount = pluginPages.filter((surface) => surface.tier === 'official').length;
-      const thirdCount = pluginPages.filter((surface) => surface.tier === 'third').length;
-      const autoCount = pluginPages.filter((surface) => surface.tier === 'auto' || surface.tier === 'pending').length;
       const anomalies = targets.anomalies ?? [];
       // 官方页面不在场时用区域快照补上「上次观测」：会话页/设置面板的结构不会常驻 DOM。
       const areaOfSurface = (surface) => (surface.id === 'page.conversation' ? 'center' : surface.id === 'dialog.settings' ? 'settings' : null);
@@ -5444,15 +5457,6 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
           h('div', { className: 'dshl-surfaceGroupTitle' }, t('surfacePages')),
           h('div', { className: 'dshl-list' }, hostPages.map((surface) => renderRow(surface, hostStatus(surface))))),
         h('div', { className: 'dshl-surfaceGroup' },
-          h('div', { className: 'dshl-surfaceGroupTitle' }, `${t('surfacePlugins')} · ${t('surfacesCount')(pluginPages.length)}`),
-          h('div', { className: 'dshl-hint' }, `${t('ownerOfficial')} ${officialCount} · ${t('ownerThird')} ${thirdCount} · ${t('ownerAuto')} ${autoCount}`),
-          pluginPages.length === 0
-            ? h('div', { className: 'dshl-hint' }, t('surfacesEmpty'))
-            : h('div', { className: 'dshl-list dshl-listScroll' }, pluginPages.map((surface) => renderRow(
-              surface,
-              surface.drift === true ? t('surfaceDrift') : `${tierText(surface)}${surface.recognized ? '' : ` · ${t('surfacePending')}`}`,
-            )))),
-        h('div', { className: 'dshl-surfaceGroup' },
           h('div', { className: 'dshl-surfaceGroupTitle' }, `${t('reviewTitle')} · ${anomalies.length}`),
           anomalies.length === 0
             ? h('div', { className: 'dshl-hint' }, t('reviewEmpty'))
@@ -5474,6 +5478,36 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
               onClick: clearReview,
             }, t('reviewClear'))),
           h('p', { className: 'dshl-hint' }, t('reviewHint'))));
+    }
+
+    /**
+     * 插件页面卡片：运行时识别到的第三方 / 官方插件界面页。
+     * 从「界面结构」里拆出来单独成卡：它属于「插件贡献了什么」，
+     * 跟宿主原生区域/页面不是一回事，混在一张表里会让「官方 0」这种计数看着像宿主自己没识别到。
+     */
+    function PluginPagesCard({ targets, t }) {
+      const pluginPages = (targets.surfaces ?? []).filter((surface) => surface.kind === 'plugin-page');
+      const tierText = (surface) => {
+        if (surface.tier === 'official') return t('tierOfficialShort');
+        if (surface.tier === 'third') return t('tierThirdShort');
+        if (surface.tier === 'pending') return t('surfacePending');
+        return t('tierAutoShort');
+      };
+      const officialCount = pluginPages.filter((surface) => surface.tier === 'official').length;
+      const thirdCount = pluginPages.filter((surface) => surface.tier === 'third').length;
+      const autoCount = pluginPages.filter((surface) => surface.tier === 'auto' || surface.tier === 'pending').length;
+      return h(Card, { title: t('pluginPages'), desc: t('pluginPagesHint') },
+        h('div', { className: 'dshl-hint' }, `${t('ownerOfficial')} ${officialCount} · ${t('ownerThird')} ${thirdCount} · ${t('ownerAuto')} ${autoCount}`),
+        pluginPages.length === 0
+          ? h('div', { className: 'dshl-hint' }, t('surfacesEmpty'))
+          : h('div', { className: 'dshl-list dshl-listScroll' }, pluginPages.map((surface) => h('div', {
+            key: surface.id,
+            className: 'dshl-item',
+            'data-active': surface.active === true ? 'true' : undefined,
+          },
+          h('span', { className: 'dshl-surfaceDot', 'data-on': surface.present === false ? 'false' : 'true', 'data-source': surface.source, 'aria-hidden': true }),
+          h('span', { className: 'dshl-itemLabel', title: surface.labelKey === undefined ? surface.label : undefined }, surface.labelKey === undefined ? surface.label : t(surface.labelKey)),
+          h('span', { className: 'dshl-itemSub' }, surface.drift === true ? t('surfaceDrift') : `${tierText(surface)}${surface.recognized ? '' : ` · ${t('surfacePending')}`}`)))));
     }
 
     function FollowField({ label, value, fallback, min, max, step, onChange, t }) {
@@ -5534,10 +5568,15 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
      * 拆解覆盖卡片：把声明表里的单元逐个列出状态。
      * 此刻在场 = 这一秒 DOM 里命中；上次观测 = 上次打开该区域页面时的结构快照（带时间）；
      * 从未识别 = 还没打开过那个页面。不再用「当前为空」混指两种情况。
+     *
+     * 只读状态，没有任何可操作控件——它是诊断用的，改的控制项在「区域拆解」「侧栏」两页。
+     * 24 行全展开占 1.6 屏，但多数时候全绿、没有信息量，所以整体可折叠：
+     * 默认收起，任一区有异常（从未识别 / 上次未出现）才自动展开。
      */
     function CoverageCard({ config, targets, t }) {
       const units = targets.units ?? {};
       const snapshots = targets.areaSnapshots ?? {};
+      const [open, setOpen] = React.useState(null);
       const present = (id) => (units[id]?.length ?? 0) > 0;
       const snapshotFor = (area) => snapshots[area] ?? null;
       const statusOf = (spec) => {
@@ -5572,8 +5611,32 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
         h('span', { className: 'dshl-surfaceDot', 'data-on': row.status === 'detected' ? 'true' : 'false', 'data-source': 'official', 'aria-hidden': true }),
         h('span', { className: 'dshl-itemLabel' }, t(row.spec.labelKey)),
         h('span', { className: 'dshl-itemSub' }, rowStatusText(row)));
-      // 外部插件页面：只读候选清单 + 导出。
-      // 编辑面板是浮层，切到哪个页面就扫哪个页面；不是插件页时回退显示最近一次扫描结果。
+      /* 有异常就默认展开：诊断页收起时只剩一行汇总，用户看不出问题在哪。 */
+      const hasProblem = rows.some((row) => row.status === 'never' || row.status === 'absent');
+      const expanded = open === null ? hasProblem : open;
+      const groups = areas.map(([area, label]) => h('div', { key: area, className: 'dshl-surfaceGroup' },
+        h('div', { className: 'dshl-surfaceGroupTitle' }, label),
+        h('div', { className: 'dshl-list' }, rows.filter((row) => row.spec.area === area).map(unitRow))));
+      return h(Card, { title: t('coverage'), desc: t('coverageHint') },
+        h('div', { className: 'dshl-row' },
+          h('span', { className: 'dshl-rowLabel' }, t('coverageSummary')(detected, observed, never)),
+          h('button', {
+            type: 'button',
+            className: 'dshl-chip',
+            'aria-expanded': expanded ? 'true' : 'false',
+            onClick: () => setOpen(!expanded),
+          }, expanded ? t('coverageCollapse') : t('coverageExpand'))),
+        expanded ? groups : null);
+    }
+
+    /**
+     * 外部插件单元卡片：第三方插件页面的自动拆解结果与可操作项。
+     *
+     * 从「拆解覆盖」里拆出来单独成页：那 13 行带着 6 个开关、23 个按钮，是所有卡片里
+     * 控件最密的一块，混在只读诊断卡里用户根本不知道哪些能点。
+     * 编辑面板是浮层，切到哪个页面就扫哪个页面；不是插件页时回退显示最近一次扫描结果。
+     */
+    function ExternalUnitsCard({ config, targets, t }) {
       const liveExternal = targets.external ?? null;
       const lastScan = (() => {
         if (liveExternal !== null) return null;
@@ -5716,47 +5779,41 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
                     onChange: (on) => hideExternal(key, !on),
                   }) : null));
             });
-      return h(Card, { title: t('coverage'), desc: t('coverageHint') },
-        h('div', { className: 'dshl-hint' }, t('coverageSummary')(detected, observed, never)),
-        ...areas.map(([area, label]) => h('div', { key: area, className: 'dshl-surfaceGroup' },
-          h('div', { className: 'dshl-surfaceGroupTitle' }, label),
-          h('div', { className: 'dshl-list' }, rows.filter((row) => row.spec.area === area).map(unitRow)))),
-        h('div', { className: 'dshl-surfaceGroup' },
-          h('div', { className: 'dshl-surfaceGroupTitle' }, `${t('externalTitle')}${external === null ? '' : ` · ${external.pageKey}`}`),
-          h('div', { className: 'dshl-hint' }, t('externalHint')),
-          externalHistorical ? h('div', { className: 'dshl-hint' }, `${t('externalHistorical')}${external.scannedAt === undefined ? '' : ` · ${String(external.scannedAt).replace('T', ' ').slice(0, 19)}`}`) : null,
-          external !== null && !externalIframe && externalUnits.length > 0
-            ? h('div', { className: 'dshl-hint' }, t('externalCount')(
-              externalUnits.length,
-              externalUnits.filter((unit) => unit.judge.actions.includes('hide')).length,
-              externalUnits.filter((unit) => unit.judge.actions.includes('reorder')).length,
-            ))
-            : null,
-          externalProfile !== null
-            ? h('div', { className: 'dshl-hint' }, `${t('externalKind')}：${t(`extKind${externalProfile.kind[0].toUpperCase()}${externalProfile.kind.slice(1)}`)}${registryEntry === undefined ? '' : ` · ${t('externalRegistered')}`}`)
-            : null,
-          h('div', { className: 'dshl-list dshl-listScroll' }, externalRows),
-          externalProfile !== null && externalProfile.groups.length > 0
-            ? h('div', { className: 'dshl-surfaceGroup' },
-              h('div', { className: 'dshl-surfaceGroupTitle' }, t('externalGroups')),
-              h('div', { className: 'dshl-hint' }, t('externalGroupHint')),
-              h('div', { className: 'dshl-list' }, externalProfile.groups.map((group) => {
-                const state = groupStateOf(group);
-                return h('div', { key: group.id, className: 'dshl-item' },
-                  h('span', { className: 'dshl-itemLabel' }, `${t(group.nameKey)} · ${group.unitKeys.length}`),
-                  h('span', { className: 'dshl-itemSub' }, state === null ? t('externalReadonly') : `${state.hidden}/${state.total}`),
-                  h('span', { className: 'dshl-itemCtl' },
-                    state === null ? null : h(Switch, {
-                      checked: state.hidden === state.total,
-                      label: `${t('externalHideGroup')} ${t(group.nameKey)}`,
-                      onChange: (on) => toggleExternalGroup(group, on),
-                    })));
-              })))
-            : null,
-          h('div', { className: 'dshl-row' },
-            h('button', { type: 'button', className: 'dshl-btn', disabled: external === null || externalUnits.length === 0, onClick: exportExternal }, t('externalExport')),
-            h('button', { type: 'button', className: 'dshl-btn', disabled: external === null || externalIframe || externalUnits.length === 0, onClick: registerPage }, t('externalRegister')),
-            h('button', { type: 'button', className: 'dshl-btn', disabled: registryEntry === undefined, onClick: clearRegistry }, t('externalClearRegistry')))));
+      return h(Card, { title: t('externalTitle'), desc: t('externalHint') },
+        h('div', { className: 'dshl-hint' }, `${t('externalCurrentPage')}${external === null ? t('externalPageNone') : external.pageKey}`),
+        externalHistorical ? h('div', { className: 'dshl-hint' }, `${t('externalHistorical')}${external.scannedAt === undefined ? '' : ` · ${String(external.scannedAt).replace('T', ' ').slice(0, 19)}`}`) : null,
+        external !== null && !externalIframe && externalUnits.length > 0
+          ? h('div', { className: 'dshl-hint' }, t('externalCount')(
+            externalUnits.length,
+            externalUnits.filter((unit) => unit.judge.actions.includes('hide')).length,
+            externalUnits.filter((unit) => unit.judge.actions.includes('reorder')).length,
+          ))
+          : null,
+        externalProfile !== null
+          ? h('div', { className: 'dshl-hint' }, `${t('externalKind')}：${t(`extKind${externalProfile.kind[0].toUpperCase()}${externalProfile.kind.slice(1)}`)}${registryEntry === undefined ? '' : ` · ${t('externalRegistered')}`}`)
+          : null,
+        h('div', { className: 'dshl-list' }, externalRows),
+        externalProfile !== null && externalProfile.groups.length > 0
+          ? h('div', { className: 'dshl-surfaceGroup' },
+            h('div', { className: 'dshl-surfaceGroupTitle' }, t('externalGroups')),
+            h('div', { className: 'dshl-hint' }, t('externalGroupHint')),
+            h('div', { className: 'dshl-list' }, externalProfile.groups.map((group) => {
+              const state = groupStateOf(group);
+              return h('div', { key: group.id, className: 'dshl-item' },
+                h('span', { className: 'dshl-itemLabel' }, `${t(group.nameKey)} · ${group.unitKeys.length}`),
+                h('span', { className: 'dshl-itemSub' }, state === null ? t('externalReadonly') : `${state.hidden}/${state.total}`),
+                h('span', { className: 'dshl-itemCtl' },
+                  state === null ? null : h(Switch, {
+                    checked: state.hidden === state.total,
+                    label: `${t('externalHideGroup')} ${t(group.nameKey)}`,
+                    onChange: (on) => toggleExternalGroup(group, on),
+                  })));
+            })))
+          : null,
+        h('div', { className: 'dshl-row' },
+          h('button', { type: 'button', className: 'dshl-btn', disabled: external === null || externalUnits.length === 0, onClick: exportExternal }, t('externalExport')),
+          h('button', { type: 'button', className: 'dshl-btn', disabled: external === null || externalIframe || externalUnits.length === 0, onClick: registerPage }, t('externalRegister')),
+          h('button', { type: 'button', className: 'dshl-btn', disabled: registryEntry === undefined, onClick: clearRegistry }, t('externalClearRegistry'))));
     }
 
     /**
@@ -6903,6 +6960,8 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
         storage: () => h(StorageCard, { config, targets, t }),
         surfaces: () => h(SurfacesCard, { targets, t }),
         coverage: () => h(CoverageCard, { config, targets, t }),
+        pluginPages: () => h(PluginPagesCard, { targets, t }),
+        externalUnits: () => h(ExternalUnitsCard, { config, targets, t }),
         pluginSources: () => h(PluginSourcesCard, { config, targets, t }),
         arrange: () => h(ArrangeCard, { config, targets, t }),
         relocate: () => h(RelocateCard, { config, targets, t }),
