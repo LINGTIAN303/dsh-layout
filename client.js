@@ -244,6 +244,7 @@ window.__ModuleLoader__.load({
       relocateSourceUnit: '拆解单元',
       relocateSourceSlot: '槽位条目',
       relocateDestBrand: '侧栏 · 品牌行',
+      relocateDestNewSession: '侧栏 · 新建会话',
       relocateDestPanels: '侧栏 · 面板导航',
       relocateDestWorkspaces: '侧栏 · 工作区',
       relocateDestFooter: '侧栏 · 底部操作',
@@ -680,6 +681,7 @@ window.__ModuleLoader__.load({
       relocateSourceUnit: 'Part unit',
       relocateSourceSlot: 'Slot entry',
       relocateDestBrand: 'Sidebar · brand row',
+      relocateDestNewSession: 'Sidebar · new session',
       relocateDestPanels: 'Sidebar · panel list',
       relocateDestWorkspaces: 'Sidebar · workspaces',
       relocateDestFooter: 'Sidebar · footer actions',
@@ -1162,26 +1164,96 @@ window.__ModuleLoader__.load({
     };
 
     /**
-     * 搬移目标容器：只认可枚举的 id，避免配置里出现无处落脚的字符串。
-     * 运行时按 targets 解析节点；目标不在场时搬移自动失效（源回原位）。
+     * 搬移的形状类别。
+     *
+     * 为什么要有这个：搬移原本是「任意源 × 任意目标」，22 × 18 = 396 种组合，
+     * 逐个补形状/链式/窗口栏永远补不完（前几轮已经补了三处，还会继续冒出）。
+     * 业界成熟做法（IntelliJ 的工具窗、Berth 的六槽模型）是**约束优先**：
+     * 先给界面定有限个语义槽位，每个槽位声明它接受哪种形状，配置时只列兼容项——
+     * 不合适的组合在**配置阶段就不出现**，而不是搬完再警告。
+     *
+     * 类别按实测尺寸归纳（侧栏 280 宽、会话区 1260 宽）：
+     * - icon：≤32 见方，只占一个图标位
+     * - narrow：窄且单行（宽度跟随容器，高度 ≤64）
+     * - narrow-stack：窄且可高（侧栏里的块）
+     * - wide-short：宽且矮（会话头 1260×40、标题行 1212×30）
+     * - wide-tall：宽且高（消息区、输入区 1253×238）
+     * - medium：中等宽度（右栏 280–900）
      */
-    const RELOCATE_DESTINATIONS = [
-      { id: 'block:brand', labelKey: 'relocateDestBrand' },
-      { id: 'block:panels', labelKey: 'relocateDestPanels' },
-      { id: 'block:workspaces', labelKey: 'relocateDestWorkspaces' },
-      { id: 'block:footer', labelKey: 'relocateDestFooter' },
-      { id: 'region:sidebar', labelKey: 'relocateDestSidebar' },
-      { id: 'region:center', labelKey: 'relocateDestCenter' },
-      { id: 'region:rightbar', labelKey: 'relocateDestRightbar' },
-      { id: 'unit:conv-header', labelKey: 'relocateDestConvHeader' },
-      { id: 'unit:conv-messages', labelKey: 'relocateDestConvMessages' },
-      { id: 'unit:conv-composer', labelKey: 'relocateDestConvComposer' },
-      { id: 'unit:rb-tabs', labelKey: 'relocateDestRbTabs' },
-      { id: 'unit:rb-content', labelKey: 'relocateDestRbContent' },
-      { id: 'unit:set-header', labelKey: 'relocateDestSettingsHeader' },
-      { id: 'unit:set-nav', labelKey: 'relocateDestSettingsNav' },
-      { id: 'unit:set-options', labelKey: 'relocateDestSettingsOptions' },
+    const SHAPE_ICON = 'icon';
+    const SHAPE_NARROW = 'narrow';
+    const SHAPE_NARROW_STACK = 'narrow-stack';
+    const SHAPE_WIDE_SHORT = 'wide-short';
+    const SHAPE_WIDE_TALL = 'wide-tall';
+    const SHAPE_MEDIUM = 'medium';
+
+    /** 单元（搬移源）的形状类别与能否搬：不在表里的源一律不允许搬。 */
+    const RELOCATE_SOURCE_SHAPES = {
+      'block:brand': SHAPE_NARROW,
+      'block:new-session': SHAPE_NARROW,
+      'block:panels': SHAPE_NARROW_STACK,
+      'block:workspaces': SHAPE_NARROW_STACK,
+      'block:footer': SHAPE_NARROW,
+      'unit:sb-brand': SHAPE_NARROW,
+      'unit:sb-toggle': SHAPE_ICON,
+      'unit:sb-status': SHAPE_NARROW,
+      'unit:sb-account': SHAPE_NARROW,
+      'unit:conv-header': SHAPE_WIDE_SHORT,
+      'unit:conv-title-row': SHAPE_WIDE_SHORT,
+      'unit:conv-messages': SHAPE_WIDE_TALL,
+      'unit:conv-composer': SHAPE_WIDE_TALL,
+      'unit:conv-turn-rail': SHAPE_ICON,
+      'unit:conv-todo-panel': SHAPE_WIDE_SHORT,
+      'unit:conv-dock': SHAPE_WIDE_SHORT,
+      'unit:rb-tabs': SHAPE_WIDE_SHORT,
+      'unit:rb-content': SHAPE_MEDIUM,
+      'unit:set-header': SHAPE_WIDE_SHORT,
+      'unit:set-nav': SHAPE_MEDIUM,
+      'unit:set-options': SHAPE_MEDIUM,
+    };
+
+    /**
+     * 槽位表：每个槽位有形状契约（accepts）与所在容器。
+     * 组合数从 396 降到「每个源 1–4 个合法目标」，且不合法的组合不会出现在下拉里。
+     *
+     * 槽位分得比区域细：`region:center` 整列既能放页头也能放主体，但两者的形状要求
+     * 完全不同（一个要 ≤48 高、一个要撑满），所以拆成页头槽 / 主体槽 / 底槽。
+     */
+    const RELOCATE_SLOTS = [
+      { id: 'block:brand', labelKey: 'relocateDestBrand', accepts: [SHAPE_NARROW, SHAPE_ICON] },
+      { id: 'block:new-session', labelKey: 'relocateDestNewSession', accepts: [SHAPE_NARROW] },
+      { id: 'block:panels', labelKey: 'relocateDestPanels', accepts: [SHAPE_NARROW, SHAPE_NARROW_STACK, SHAPE_ICON] },
+      { id: 'block:workspaces', labelKey: 'relocateDestWorkspaces', accepts: [SHAPE_NARROW_STACK] },
+      { id: 'block:footer', labelKey: 'relocateDestFooter', accepts: [SHAPE_NARROW, SHAPE_ICON] },
+      { id: 'region:sidebar', labelKey: 'relocateDestSidebar', accepts: [SHAPE_NARROW, SHAPE_NARROW_STACK] },
+      { id: 'unit:conv-header', labelKey: 'relocateDestConvHeader', accepts: [SHAPE_WIDE_SHORT] },
+      { id: 'unit:conv-messages', labelKey: 'relocateDestConvMessages', accepts: [SHAPE_WIDE_TALL] },
+      { id: 'unit:conv-composer', labelKey: 'relocateDestConvComposer', accepts: [SHAPE_WIDE_TALL, SHAPE_WIDE_SHORT] },
+      { id: 'region:center', labelKey: 'relocateDestCenter', accepts: [SHAPE_WIDE_SHORT, SHAPE_WIDE_TALL] },
+      { id: 'unit:rb-tabs', labelKey: 'relocateDestRbTabs', accepts: [SHAPE_WIDE_SHORT, SHAPE_MEDIUM] },
+      { id: 'unit:rb-content', labelKey: 'relocateDestRbContent', accepts: [SHAPE_MEDIUM, SHAPE_WIDE_TALL] },
+      { id: 'region:rightbar', labelKey: 'relocateDestRightbar', accepts: [SHAPE_MEDIUM, SHAPE_NARROW, SHAPE_NARROW_STACK] },
+      { id: 'unit:set-header', labelKey: 'relocateDestSettingsHeader', accepts: [SHAPE_WIDE_SHORT, SHAPE_MEDIUM] },
+      { id: 'unit:set-nav', labelKey: 'relocateDestSettingsNav', accepts: [SHAPE_MEDIUM, SHAPE_NARROW_STACK] },
+      { id: 'unit:set-options', labelKey: 'relocateDestSettingsOptions', accepts: [SHAPE_MEDIUM, SHAPE_WIDE_TALL] },
     ];
+
+    /** 某个形状的单元能不能搬进某个槽位。 */
+    function relocateSlotAccepts(slotId, shape) {
+      const slot = RELOCATE_SLOTS.find((item) => item.id === slotId);
+      return slot !== undefined && shape !== undefined && slot.accepts.includes(shape);
+    }
+
+    /** 某个形状的单元有哪些合法去处（下拉只列这些）。 */
+    function relocateSlotsFor(shape) {
+      return RELOCATE_SLOTS.filter((slot) => slot.accepts.includes(shape));
+    }
+
+    /**
+     * 搬移目标：从槽位表派生，避免两处各维护一份 id 列表（漂移必然出事）。
+     * 只保留 id 与标签，形状契约仍在 RELOCATE_SLOTS 里。
+     */
+    const RELOCATE_DESTINATIONS = RELOCATE_SLOTS.map((slot) => ({ id: slot.id, labelKey: slot.labelKey }));
     const RELOCATE_DESTINATION_IDS = new Set(RELOCATE_DESTINATIONS.map((item) => item.id));
 
     /** 联动规则的枚举：条件与动作都只认这几类，配置里出现的其它值一律丢掉。 */
@@ -6228,11 +6300,26 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
      * 「生效」= 源与目标此刻都在场；目标不在场时配置保留但不投影（源保持原样）。
      */
     function RelocateCard({ config, targets, t }) {
-      const sources = relocateSources(targets);
+      // 只把「声明过形状」的源列进下拉：没声明的单元不知道能放哪，列出来只会制造无效配置
+      const allSources = relocateSources(targets);
+      const sources = allSources.filter((source) => RELOCATE_SOURCE_SHAPES[source.id] !== undefined);
       const sourceIds = new Set(sources.map((source) => source.id));
       const [sourceId, setSourceId] = React.useState('');
-      const [targetId, setTargetId] = React.useState(RELOCATE_DESTINATIONS[0].id);
       const [place, setPlace] = React.useState('start');
+      /**
+       * 目标下拉按所选源的形状过滤：这是槽位化的核心——
+       * 会话头（wide-short）的下拉里根本不会出现「侧栏」，而不是搬完再警告形状不适配。
+       * 还没选源时只列出「至少接受一种形状」的槽位，避免空列表吓人。
+       */
+      const currentShape = sourceId === '' ? undefined : RELOCATE_SOURCE_SHAPES[sourceId];
+      const availableSlots = currentShape === undefined
+        ? RELOCATE_SLOTS
+        : relocateSlotsFor(currentShape);
+      const [targetId, setTargetId] = React.useState(RELOCATE_SLOTS[0].id);
+      // 目标不在当前源的合法列表里时，自动落到第一个合法槽位（否则会保留一个非法值）
+      const effectiveTarget = availableSlots.some((slot) => slot.id === targetId)
+        ? targetId
+        : (availableSlots[0]?.id ?? RELOCATE_SLOTS[0].id);
       const resolved = relocateResolve(targets, config);
       const activeList = resolved.active;
       const activeIds = new Set(activeList.map((item) => item.sourceId));
@@ -6240,8 +6327,24 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       const chainedIds = resolved.chained;
       /** 形状不适配的搬移：生效但内容会被压没，行上标警告，用户才知道为什么看不到东西。 */
       const fitById = new Map(activeList.filter((item) => item.fit !== null).map((item) => [item.sourceId, item.fit]));
-      // 槽位出口容器：除了 15 个内置目标，还能把单元搬进任意列表槽位的出口（与槽位编排同一套识别）
-      const slotDests = targets.relocateDests ?? [];
+      // 槽位出口容器：除了内置槽位，还能把单元搬进任意列表槽位的出口（与槽位编排同一套识别）
+      const allSlotDests = targets.relocateDests ?? [];
+      /**
+       * 槽位出口也过一遍形状过滤：它的宽度只有运行时才知道（不同列表槽位宽窄差很多），
+       * 但可以用和内置槽位同一条宽度压缩比判据——目标宽度 / 源原始宽度 < 60% 就不列出来。
+       * 不做这层的话，会话头（1260 宽）照样能选到 `sidebar.panellist`（侧栏图标列表），
+       * 又回到槽位化之前的老问题。
+       */
+      const slotDests = currentShape === undefined
+        ? allSlotDests
+        : allSlotDests.filter((dest) => {
+          const source = allSources.find((item) => item.id === sourceId);
+          if (source === undefined) return true;
+          const sourceBox = source.node.getBoundingClientRect();
+          const destBox = dest.node.getBoundingClientRect();
+          if (sourceBox.width <= 0 || destBox.width <= 0) return true;
+          return destBox.width / sourceBox.width >= RELOCATE_MIN_WIDTH_RATIO;
+        });
       const destLabel = (id) => {
         const dest = RELOCATE_DESTINATIONS.find((item) => item.id === id);
         if (dest !== undefined) return t(dest.labelKey);
@@ -6255,7 +6358,7 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       ];
       const add = () => {
         if (sourceId === '') return;
-        updateConfig((draft) => { draft.relocate[sourceId] = { to: targetId, place }; });
+        updateConfig((draft) => { draft.relocate[sourceId] = { to: effectiveTarget, place }; });
         setSourceId('');
       };
       const configured = Object.entries(config.relocate ?? {});
@@ -6279,16 +6382,17 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
             h('label', { className: 'dshl-relocateField' }, t('relocateTarget'),
               h('select', {
                 className: 'dshl-select',
-                value: targetId,
+                value: effectiveTarget,
                 onChange: (event) => setTargetId(event.target.value),
               },
+              // 只列当前形状能去的槽位：这是槽位化的核心，非法组合在配置阶段就不出现
               h('optgroup', { label: t('relocateTargetBuiltin') },
-                ...RELOCATE_DESTINATIONS.map((dest) => h('option', { key: dest.id, value: dest.id }, t(dest.labelKey)))),
+                ...availableSlots.map((slot) => h('option', { key: slot.id, value: slot.id }, t(slot.labelKey)))),
               slotDests.length === 0 ? null : h('optgroup', { label: t('relocateTargetSlots') },
                 ...slotDests.map((dest) => h('option', { key: dest.id, value: dest.id }, dest.slot))),
               // 已配置但此刻不在场的槽位目标也要能显示名字，否则下拉框会跳到空值
-              ...(targetId.startsWith('slotdest:') && !slotDests.some((dest) => dest.id === targetId)
-                ? [h('option', { key: targetId, value: targetId }, `${t('relocateDestSlot')} ${targetId.slice(9)}`)]
+              ...(effectiveTarget.startsWith('slotdest:') && !slotDests.some((dest) => dest.id === effectiveTarget)
+                ? [h('option', { key: effectiveTarget, value: effectiveTarget }, `${t('relocateDestSlot')} ${effectiveTarget.slice(9)}`)]
                 : []))),
             h('label', { className: 'dshl-relocateField' }, t('relocatePlace'),
               h('select', {
