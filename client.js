@@ -3417,6 +3417,13 @@ window.__ModuleLoader__.load({
     /**
      * 对齐帧循环：占位符是「目标位置」，源节点是「实际位置」。
      * 宽度先对齐（宽度会影响换行与高度），再按矩形差补位移；差值收敛后停帧，等下一次触发。
+     *
+     * **纵向要避开窗口栏**：Electron 原生 `titleBarOverlay` 盖在 Web 层之上（本机 40px），
+     * 那一带的 DOM 收得到 `elementFromPoint` 却收不到真实点击。而侧栏与会话区的顶边都是 y=0，
+     * 所以「放在开头」的搬移必然把源节点顶到窗口栏里——实测会话头搬到侧栏后落在 (0,0) 279×40，
+     * 40px 高度全被盖住，拖拽手柄与按钮在桌面端全部点不动（Web 端看着完全正常）。
+     * 这里把目标位置夹到安全区下沿，占位符仍留在原位（目标容器的布局不受影响），只让源节点下移。
+     * 与恢复按钮用同一套下界判定（launcherTopBound），逻辑见 docs/details/注释/布局引擎.md。
      */
     function projectionStep() {
       projection.raf = 0;
@@ -3424,6 +3431,7 @@ window.__ModuleLoader__.load({
       // 兜底：宽度/高度互相影响导致的抖动最多追 4 秒，避免帧循环常驻
       projection.frames += 1;
       if (projection.frames > 240) return;
+      const topBound = projectionTopBound();
       let moving = false;
       for (const entry of projection.entries.values()) {
         const node = entry.node;
@@ -3444,7 +3452,9 @@ window.__ModuleLoader__.load({
           continue;
         }
         const dx = target.left - box.left;
-        const dy = target.top - box.top;
+        // 安全区夹取：目标在窗口栏里时，实际落点压到窗口栏下沿
+        const desiredTop = Math.max(target.top, topBound);
+        const dy = desiredTop - box.top;
         if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
           entry.tx += dx;
           entry.ty += dy;
@@ -5079,6 +5089,19 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
         if (rect.top <= 4 && rect.height >= 20 && rect.height <= 80) bound = Math.max(bound, Math.round(rect.bottom) + 6);
       }
       return bound;
+    }
+
+    /**
+     * 投影用的顶部安全界：只避开原生窗口栏本身，不避开整个页头。
+     *
+     * `launcherTopBound` 是给恢复按钮用的——按钮要「不压在页头内容上」，所以取页头底边 + 6。
+     * 但搬移的源节点本来就来自页头/页顶区域，用同一个保守下界会把它推到侧栏顶部内容上，
+     * 反而制造新的遮挡。这里只要求整块避开被原生层吃掉的窗口栏。
+     *
+     * 窗口栏高度读不到时退回 44（本机实测 40 + 4 余量）。
+     */
+    function projectionTopBound() {
+      return 44;
     }
 
     /** 候选点是否落在安全区里（水平不出屏、整枚按钮都在窗口栏下面）。 */
