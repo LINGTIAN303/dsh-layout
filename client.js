@@ -38,6 +38,10 @@ window.__ModuleLoader__.load({
       saveConfig: '保存',
       revertConfig: '还原',
       unsavedHint: '有未保存改动',
+      desktopProbe: '桌面端诊断',
+      desktopProbeHint: 'Electron 里 fixed 层可能被原生窗口栏或合成层影响，Web 端看不出来。点一下把环境与几何数据打到控制台。',
+      desktopProbeRun: '运行诊断',
+      desktopProbeConsole: 'F12 控制台看结果',
       editing: '编辑模式',
       editingHint: '在界面上直接拖动分隔条，浮动工具条里可换预设。',
       presets: '预设',
@@ -478,6 +482,10 @@ window.__ModuleLoader__.load({
       saveConfig: 'Save',
       revertConfig: 'Revert',
       unsavedHint: 'unsaved changes',
+      desktopProbe: 'Desktop diagnosis',
+      desktopProbeHint: 'In Electron, fixed layers can be affected by the native title bar or compositing surfaces — invisible on the web. Click to dump environment and geometry to the console.',
+      desktopProbeRun: 'Run diagnosis',
+      desktopProbeConsole: 'see console (F12)',
       editing: 'Edit mode',
       editingHint: 'Drag the dividers on the interface; switch presets from the floating toolbar.',
       presets: 'Presets',
@@ -5765,7 +5773,22 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
               disabled: anomalies.length === 0,
               onClick: clearReview,
             }, t('reviewClear'))),
-          h('p', { className: 'dshl-hint' }, t('reviewHint'))));
+          h('p', { className: 'dshl-hint' }, t('reviewHint'))),
+        /* 桌面端诊断：Electron 里 fixed 层可能被原生窗口栏或合成层影响，
+           Web 端看不出来。点一下把环境与几何数据打到控制台，比来回问快。 */
+        h('div', { className: 'dshl-surfaceGroup' },
+          h('div', { className: 'dshl-surfaceGroupTitle' }, t('desktopProbe')),
+          h('p', { className: 'dshl-hint' }, t('desktopProbeHint')),
+          h('div', { className: 'dshl-row' },
+            h('button', {
+              type: 'button',
+              className: 'dshl-btn',
+              onClick: () => {
+                if (typeof window.__dshlDesktopProbe === 'function') window.__dshlDesktopProbe({ winBarH: 40 });
+                else console.warn('[dsh-layout] 诊断函数未注册');
+              },
+            }, t('desktopProbeRun')),
+            h('span', { className: 'dshl-itemSub' }, t('desktopProbeConsole')))));
     }
 
     /**
@@ -8191,6 +8214,132 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
         window.addEventListener('keydown', onKeyDown, true);
         return () => window.removeEventListener('keydown', onKeyDown, true);
       }, 'dsh-layout: panel shortcut');
+
+      /**
+       * 桌面端诊断：注册到 window 上，用户重载插件后直接在 DevTools 调
+       * `__dshlDesktopProbe({ winBarH: 40 })` 即可，不需要粘贴脚本。
+       *
+       * 为什么要内置：Electron 里没法用 fetch 读本地文件，让用户手动粘贴整个脚本
+       * 容易漏（实测用户只输了一行调用就报 not defined）。注册到 window 上就没有这个摩擦。
+       *
+       * 采集的是「Web 端测不出来、桌面端才可能出问题」的因素：
+       * 祖先链上的 transform/filter/contain（会让 position:fixed 失效或偏移）、
+       * 窗口栏覆盖区、投影与占位符偏差、面板是否被别的东西盖着。
+       */
+      function registerDesktopProbe() {
+        window.__dshlDesktopProbe = function desktopProbe(options = {}) {
+          const winBarH = options.winBarH ?? 40;
+          const report = { at: new Date().toISOString(), env: {}, hijackers: [], windowBarViolations: [], relocation: [], panel: null, verdict: [] };
+          report.env = {
+            electron: /Electron/i.test(navigator.userAgent),
+            devicePixelRatio: window.devicePixelRatio,
+            innerWidth: window.innerWidth,
+            innerHeight: window.innerHeight,
+            outerHeight: window.outerHeight,
+            screenHeight: window.screen.height,
+            bodyClientHeight: document.body.clientHeight,
+            // 面板实际用的下界（投影与恢复按钮各自的下界函数）
+            projectionTopBound: projectionTopBound(),
+            launcherTopBound: launcherTopBound(),
+          };
+          // 1) 祖先样式劫持：position:fixed 的定位基准是视口，但祖先只要有
+          //    transform/filter/perspective/will-change/contain 就会改成相对该祖先定位。
+          const fixedSelectors = ['[data-dshl-teleport]', '.dshl-panel', '[data-dshl-button]', '.dshl-board'];
+          const seen = new Set();
+          for (const sel of fixedSelectors) {
+            for (const el of document.querySelectorAll(sel)) {
+              let node = el.parentElement;
+              let depth = 1;
+              while (node !== null && node !== document.documentElement && depth < 16) {
+                const cs = getComputedStyle(node);
+                const why = [];
+                if (cs.transform !== 'none') why.push(`transform:${cs.transform.slice(0, 28)}`);
+                if (cs.filter !== 'none') why.push(`filter:${cs.filter}`);
+                if (cs.perspective !== 'none') why.push('perspective');
+                if (cs.willChange !== 'auto' && /transform|filter|perspective/.test(cs.willChange)) why.push(`will-change:${cs.willChange}`);
+                if (cs.contain !== 'none' && /paint|layout|strict|content/.test(cs.contain)) why.push(`contain:${cs.contain}`);
+                if (why.length > 0) {
+                  const key = `${sel}|${depth}|${String(node.className).slice(0, 30)}`;
+                  if (!seen.has(key)) {
+                    seen.add(key);
+                    report.hijackers.push({ forSelector: sel, depth, tag: node.tagName, cls: String(node.className).slice(0, 44), why });
+                  }
+                }
+                node = node.parentElement;
+                depth += 1;
+              }
+            }
+          }
+          // 2) 窗口栏覆盖区
+          const checkBar = (sel, kind) => {
+            for (const el of document.querySelectorAll(sel)) {
+              const r = el.getBoundingClientRect();
+              if (r.width === 0 || r.height === 0) continue;
+              const covered = Math.max(0, Math.round(winBarH - r.top));
+              if (covered > 0) {
+                report.windowBarViolations.push({
+                  kind,
+                  id: el.getAttribute('data-dshl-teleport') || el.getAttribute('data-dshl-button') || String(el.className).slice(0, 30),
+                  top: Math.round(r.top), left: Math.round(r.left), w: Math.round(r.width), h: Math.round(r.height), coveredPx: covered,
+                });
+              }
+            }
+          };
+          checkBar('[data-dshl-teleport]', 'teleport');
+          checkBar('[data-dshl-button]', 'launcher');
+          // 3) 投影偏差与内部压扁
+          for (const node of document.querySelectorAll('[data-dshl-teleport]')) {
+            const id = node.getAttribute('data-dshl-teleport');
+            const ph = document.querySelector(`[data-dshl-placeholder="${id}"]`);
+            const nb = node.getBoundingClientRect();
+            const pb = ph === null ? null : ph.getBoundingClientRect();
+            report.relocation.push({
+              id,
+              node: { x: Math.round(nb.x), y: Math.round(nb.y), w: Math.round(nb.width), h: Math.round(nb.height) },
+              placeholder: pb === null ? null : { x: Math.round(pb.x), y: Math.round(pb.y), w: Math.round(pb.width), h: Math.round(pb.height) },
+              dx: pb === null ? null : Math.round(nb.x - pb.x),
+              dy: pb === null ? null : Math.round(nb.y - pb.y),
+              transform: getComputedStyle(node).transform.slice(0, 40),
+              zeroWidthChildren: [...node.querySelectorAll('*')].filter((child) => child.getBoundingClientRect().width === 0 && child.children.length === 0).length,
+            });
+          }
+          // 4) 面板遮挡
+          const panel = document.querySelector('.dshl-panel');
+          if (panel !== null) {
+            const r = panel.getBoundingClientRect();
+            const cs = getComputedStyle(panel);
+            const topEl = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+            report.panel = {
+              rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
+              position: cs.position,
+              zIndex: cs.zIndex,
+              transform: cs.transform.slice(0, 30),
+              topmostAtCenter: topEl === null ? null : `${topEl.tagName}.${String(topEl.className).slice(0, 36)}`,
+              panelIsTopmost: topEl !== null && panel.contains(topEl),
+            };
+          }
+          // 5) 结论
+          if (!report.env.electron) report.verdict.push('注意：当前不在 Electron 里，桌面端字段意义有限');
+          if (report.hijackers.length > 0) report.verdict.push(`发现 ${report.hijackers.length} 处祖先样式会劫持 position:fixed`);
+          if (report.windowBarViolations.length > 0) report.verdict.push(`${report.windowBarViolations.length} 个 fixed 元素落在窗口栏覆盖区（点不到）`);
+          const badReloc = report.relocation.filter((item) => item.dx !== null && (Math.abs(item.dx) > 2 || Math.abs(item.dy) > 2));
+          if (badReloc.length > 0) report.verdict.push(`${badReloc.length} 个搬移投影与占位符不对齐`);
+          const crushed = report.relocation.filter((item) => item.zeroWidthChildren > 0);
+          if (crushed.length > 0) report.verdict.push(`${crushed.length} 个搬移单元内部有子元素被压到 0 宽（内容被挤没）`);
+          if (report.panel !== null && !report.panel.panelIsTopmost) report.verdict.push('面板中心点上不是面板自己：可能有东西盖着它');
+          if (report.verdict.length === 0) report.verdict.push('未发现已知问题模式，请把整份 JSON 贴回');
+          console.log('=== dsh-layout 桌面端诊断 ===');
+          for (const line of report.verdict) console.log('•', line);
+          console.log(JSON.stringify(report, null, 2));
+          return report;
+        };
+        console.log('[dsh-layout] 桌面端诊断已就绪：__dshlDesktopProbe({ winBarH: 40 })');
+      }
+
+      ctx.effect(() => {
+        registerDesktopProbe();
+        return () => { delete window.__dshlDesktopProbe; };
+      }, 'dsh-layout: desktop probe');
 
       ctx.effect(() => ctx.slots.inject('plugins.detail.section', () => ctx.slots.register({
         name: 'plugins.detail.section',
