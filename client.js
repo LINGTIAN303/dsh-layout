@@ -8361,9 +8361,35 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
               zeroWidthChildren: [...node.querySelectorAll('*')].filter((child) => child.getBoundingClientRect().width === 0 && child.children.length === 0).length,
             });
           }
+          /*
+           * 3.5) 背景纹理来源：用户截图里会话区被一层点阵盖住，Web 端完全复现不出来。
+           * 把「有背景图/网格纹理、且尺寸够大」的元素连同它的类名与样式来源一起报出来，
+           * 就能判断是宿主的皮肤、某个插件的 skin，还是本插件误加的。
+           */
+          report.textures = [];
+          for (const el of document.querySelectorAll('body *')) {
+            const cs = getComputedStyle(el);
+            const bg = cs.backgroundImage;
+            if (bg === 'none') continue;
+            if (!/gradient|url\(/.test(bg)) continue;
+            const r = el.getBoundingClientRect();
+            if (r.width < 120 || r.height < 80) continue;
+            // 只报「重复铺开」的纹理（点阵/网格），不要普通的一张大图
+            const repeats = /repeating-/.test(bg) || cs.backgroundRepeat.split(',').some((v) => v.trim() === 'repeat');
+            if (!repeats) continue;
+            report.textures.push({
+              tag: el.tagName,
+              cls: String(el.className).slice(0, 60),
+              id: el.id || null,
+              bgImage: bg.slice(0, 140),
+              bgSize: cs.backgroundSize,
+              rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
+              fromThisPlugin: el.closest('[data-dshl-layer], [data-dshl-teleport]') !== null,
+            });
+            if (report.textures.length > 10) break;
+          }
           // 4) 面板遮挡
-          const panel = document.querySelector('.dshl-panel');
-          if (panel !== null) {
+          const panel = document.querySelector('.dshl-panel');          if (panel !== null) {
             const r = panel.getBoundingClientRect();
             const cs = getComputedStyle(panel);
             const topEl = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
@@ -8380,6 +8406,38 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
           if (!report.env.electron) report.verdict.push('注意：当前不在 Electron 里，桌面端字段意义有限');
           if (report.hijackers.length > 0) report.verdict.push(`发现 ${report.hijackers.length} 处祖先样式会劫持 position:fixed`);
           if (report.windowBarViolations.length > 0) report.verdict.push(`${report.windowBarViolations.length} 个 fixed 元素落在窗口栏覆盖区（点不到）`);
+          if (report.textures.length > 0) {
+            const own = report.textures.filter((t) => t.fromThisPlugin).length;
+            report.verdict.push(`发现 ${report.textures.length} 处平铺背景纹理${own > 0 ? `（其中 ${own} 处来自本插件，需修）` : '（都不是本插件加的，是宿主或其它插件）'}`);
+          }
+          /*
+           * 会话区可见内容体检：用户截图里会话区整块被点阵盖住、看不到正文。
+           * 这里列出会话区每个直接子级的位置/尺寸与「中心点上最上层是谁」，
+           * 一眼能看出是「内容被压没」还是「被别的东西盖住」。
+           */
+          const center = document.querySelector('[data-dshl-region="center"]');
+          if (center !== null) {
+            report.centerArea = [...center.children].map((child) => {
+              const r = child.getBoundingClientRect();
+              const cx = r.left + r.width / 2;
+              const cy = r.top + r.height / 2;
+              const hit = (r.width > 0 && r.height > 0) ? document.elementFromPoint(cx, cy) : null;
+              return {
+                tag: child.tagName,
+                cls: String(child.className).slice(0, 44),
+                isPlaceholder: child.hasAttribute('data-dshl-placeholder'),
+                rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
+                topmostAtCenter: hit === null ? null : `${hit.tagName}.${String(hit.className).slice(0, 32)}`,
+                coveredByOthers: hit !== null && !child.contains(hit) && hit !== child,
+              };
+            });
+            const covered = report.centerArea.filter((row) => row.coveredByOthers);
+            if (covered.length > 0) report.verdict.push(`会话区有 ${covered.length} 个子块中心点被别的东西盖住`);
+            const placeholders = report.centerArea.filter((row) => row.isPlaceholder);
+            for (const ph of placeholders) {
+              if (ph.rect.w === 0 || ph.rect.h === 0) report.verdict.push(`会话区里有 ${ph.rect.w}×${ph.rect.h} 的零尺寸占位符（会留空白条）`);
+            }
+          }
           /*
            * 对齐判定要排除「安全区夹取」这个合法偏移：
            * 目标落在窗口栏里时投影会被主动下推到 winBarH，此时 dy 恰好等于下推量，
