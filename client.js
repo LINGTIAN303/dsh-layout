@@ -237,6 +237,9 @@ window.__ModuleLoader__.load({
       relocateGone: '源单元不在场',
       relocateSqueeze: (pct, from, to) => `宽度压到 ${pct}%（${from} → ${to}px）`,
       relocateSqueezeHint: '目标容器比源单元窄很多，搬过去后内部内容会被挤压甚至看不见。宽度比例低于 60% 时提示。',
+      relocateChained: '目标被搬走，暂不生效',
+      relocateChainedShort: '目标容器本身也被搬走了',
+      relocateChainedHint: '这条搬移的目标容器自己也在被搬到别处，占位符会跟着飞走、和另一条搬移叠在一起，所以不建立投影。删掉其中一条即可。',
       relocateSourceBlock: '侧栏块',
       relocateSourceUnit: '拆解单元',
       relocateSourceSlot: '槽位条目',
@@ -670,6 +673,9 @@ window.__ModuleLoader__.load({
       relocateGone: 'source not present',
       relocateSqueeze: (pct, from, to) => `width squeezed to ${pct}% (${from} → ${to}px)`,
       relocateSqueezeHint: 'The destination is much narrower than the source, so its inner content will be crushed or hidden. Warned when the width ratio drops below 60%.',
+      relocateChained: 'target moved away, inactive',
+      relocateChainedShort: 'the destination is moved away too',
+      relocateChainedHint: 'The destination container itself is being moved elsewhere, so the placeholder would fly along and stack on top of the other move. No projection is created; remove one of the two moves.',
       relocateSourceBlock: 'Sidebar block',
       relocateSourceUnit: 'Part unit',
       relocateSourceSlot: 'Slot entry',
@@ -3331,10 +3337,19 @@ window.__ModuleLoader__.load({
       return { ratio, sourceWidth: Math.round(sourceBox.width), destWidth: Math.round(destBox.width) };
     }
 
-    /** 当前真正生效的搬移：源与目标都在场，且目标不包含源时才成立。 */
-    function relocateActiveList(targets, config) {
+    /**
+     * 搬移的解析结果：`active` 是要建立投影的条目，`chained` 是目标被别的搬移带走、
+     * 因此无法建立投影的源 id（面板要把它标出来，否则用户以为搬移坏了）。
+     *
+     * 剔除链式的理由：占位符插进目标容器内部，而目标容器自己也在被搬走
+     * （`position:fixed`），占位符会跟着飞过去，两个源于是叠在同一处。实测
+     * 「品牌行 → 面板导航」+「面板导航 → 会话区」时，品牌行 1260×60 与面板导航
+     * 1260×212 在 (280,0) 完全重合，品牌行被盖住 60px、内容不可见。
+     * 这类链式搬移没有正确落点——目标是个浮动层，里面放不了东西。
+     */
+    function relocateResolve(targets, config) {
       const byId = new Map(relocateSources(targets).map((source) => [source.id, source]));
-      const out = [];
+      const candidates = [];
       for (const [sourceId, spec] of Object.entries(config.relocate ?? {})) {
         const source = byId.get(sourceId);
         if (source === undefined) continue;
@@ -3344,9 +3359,24 @@ window.__ModuleLoader__.load({
         if (dest === source.node || dest.contains(source.node)) continue;
         // 形状评估要在投影改写节点之前量：投影会把源压到目标宽度，之后再量就没意义了
         const fit = relocateFit(relocateSourceBox(source.node), readableBox(dest));
-        out.push({ sourceId, node: source.node, dest, place: spec.place, fit });
+        candidates.push({ sourceId, node: source.node, dest, place: spec.place, fit });
       }
-      return out;
+      const chained = new Set();
+      for (const item of candidates) {
+        for (const other of candidates) {
+          if (other === item) continue;
+          // 目标被另一个搬移源整个带走，或目标落在它内部——两种情况占位符都会飞走
+          if (other.node === item.dest || other.node.contains(item.dest)) {
+            chained.add(item.sourceId);
+            break;
+          }
+        }
+      }
+      return { active: candidates.filter((item) => !chained.has(item.sourceId)), chained };
+    }
+
+    function relocateActiveList(targets, config) {
+      return relocateResolve(targets, config).active;
     }
 
     const projection = { entries: new Map(), raf: 0, frames: 0 };
@@ -4416,6 +4446,20 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
 .dshl-groupToggle svg { flex:none; }
 .dshl-groupToggleLabel { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .dshl-groupToggle[data-open="true"] { color:var(--dsw-alias-label-primary); }
+.dshl-surfaceGroup[data-open="true"], .dshl-groupToggle[data-open="true"] { color:var(--dsw-alias-label-primary); }
+/* 入口收纳的七个分区：每区一块、块间有分隔线，标题行同时是折叠按钮。
+   原来七区连成一串、每区各带独立滚动框，看不出边界，嵌套感也重。 */
+.dshl-zoneList { display:flex; flex-direction:column; gap:0; }
+.dshl-zone { display:flex; flex-direction:column; border-top:1px solid var(--dsw-alias-border-l1); }
+.dshl-zone:first-child { border-top:none; }
+.dshl-zoneHead { display:flex; align-items:center; gap:6px; width:100%; min-height:30px; padding:5px 4px; margin:0; border:none; border-radius:6px; background:transparent; color:var(--dsw-alias-label-secondary); font:inherit; font-size:12px; text-align:left; cursor:pointer; }
+.dshl-zoneHead:hover { background:var(--dsw-alias-interactive-bg-hover); color:var(--dsw-alias-label-primary); }
+.dshl-zoneHead svg { flex:none; }
+.dshl-zone[data-open="true"] .dshl-zoneHead { color:var(--dsw-alias-label-primary); font-weight:600; }
+.dshl-zoneTitle { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dshl-zoneCount { flex:none; font-size:11px; font-variant-numeric:tabular-nums; color:var(--dsw-alias-label-secondary); }
+.dshl-zoneList .dshl-zoneList { padding:0 0 4px 17px; }
+.dshl-zoneEmpty { margin:0 0 6px 17px; }
 .dshl-surfaceDot { width:6px; height:6px; border-radius:50%; flex:none; background:var(--dsw-alias-label-secondary); opacity:.45; }
 .dshl-surfaceDot[data-on="true"] { opacity:1; background:var(--dsw-alias-state-success-primary); }
 .dshl-surfaceDot[data-on="true"][data-source="official"] { background:var(--dsw-alias-brand-primary); }
@@ -6166,8 +6210,11 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       const [sourceId, setSourceId] = React.useState('');
       const [targetId, setTargetId] = React.useState(RELOCATE_DESTINATIONS[0].id);
       const [place, setPlace] = React.useState('start');
-      const activeList = relocateActiveList(targets, config);
+      const resolved = relocateResolve(targets, config);
+      const activeList = resolved.active;
       const activeIds = new Set(activeList.map((item) => item.sourceId));
+      /** 链式搬移：目标本身被另一条搬移带走，占位符会跟着飞，所以没有建立投影。 */
+      const chainedIds = resolved.chained;
       /** 形状不适配的搬移：生效但内容会被压没，行上标警告，用户才知道为什么看不到东西。 */
       const fitById = new Map(activeList.filter((item) => item.fit !== null).map((item) => [item.sourceId, item.fit]));
       // 槽位出口容器：除了 15 个内置目标，还能把单元搬进任意列表槽位的出口（与槽位编排同一套识别）
@@ -6232,13 +6279,18 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
         configured.length === 0
           ? h('p', { className: 'dshl-hint' }, t('relocateNone'))
           : h('div', { className: 'dshl-list' }, configured.map(([id, spec]) => {
+            const chained = chainedIds.has(id);
             const live = activeIds.has(id);
-            const stateKey = live ? 'relocateActive' : sourceIds.has(id) ? 'relocatePending' : 'relocateGone';
+            // 链式搬移优先说明：它目标是「目标在场」但投影建不起来，比 pending/gone 更需要解释
+            const stateKey = chained ? 'relocateChained' : live ? 'relocateActive' : sourceIds.has(id) ? 'relocatePending' : 'relocateGone';
             const fit = fitById.get(id) ?? null;
-            return h('div', { key: id, className: 'dshl-relocateRow', 'data-squeezed': fit === null ? undefined : 'true' },
-              h('span', { className: 'dshl-relocateState', 'data-active': live ? 'true' : undefined, 'data-squeezed': fit === null ? undefined : 'true' }, t(stateKey)),
+            const warn = fit === null ? null : t('relocateSqueeze')(Math.round(fit.ratio * 100), fit.sourceWidth, fit.destWidth);
+            return h('div', { key: id, className: 'dshl-relocateRow', 'data-squeezed': fit === null && !chained ? undefined : 'true' },
+              h('span', { className: 'dshl-relocateState', 'data-active': live ? 'true' : undefined, 'data-squeezed': fit === null && !chained ? undefined : 'true' }, t(stateKey)),
               h('span', { className: 'dshl-itemLabel', title: id }, `${relocateSourceLabel(t, id)} → ${destLabel(spec.to)} · ${spec.place === 'end' ? t('relocateEnd') : t('relocateStart')}`),
-              fit === null ? null : h('span', { className: 'dshl-itemSub dshl-relocateFitWarn', title: t('relocateSqueezeHint') }, t('relocateSqueeze')(Math.round(fit.ratio * 100), fit.sourceWidth, fit.destWidth)),
+              chained
+                ? h('span', { className: 'dshl-itemSub dshl-relocateFitWarn', title: t('relocateChainedHint') }, t('relocateChainedShort'))
+                : (warn === null ? null : h('span', { className: 'dshl-itemSub dshl-relocateFitWarn', title: t('relocateSqueezeHint') }, warn)),
               h('button', {
                 type: 'button',
                 className: 'dshl-iconBtn',
@@ -6442,6 +6494,7 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
      */
     function StorageCard({ config, targets, t }) {
       const zones = targets.storageZones ?? { sidebar: [], views: [], guide: [], settings: [], plugins: [] };
+      const [collapsed, setCollapsed] = React.useState({});
       const sections = [
         { id: 'sidebar', titleKey: 'storageZoneSidebar', found: zones.sidebar ?? [], emptyKey: 'storageZoneEmpty' },
         { id: 'views', titleKey: 'storageZoneViews', found: zones.views ?? [], emptyKey: 'storageZoneEmpty' },
@@ -6501,25 +6554,43 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
           if (rows.some((row) => sameStorageEntry(row, entry))) continue;
           rows.push({ ...entry, offline: true });
         }
-        return h('div', { key: section.id, className: 'dshl-surfaceGroup' },
-          h('div', { className: 'dshl-surfaceGroupTitle' }, t(section.titleKey)),
-          rows.length === 0
-            ? h('p', { className: 'dshl-hint' }, t(section.emptyKey))
-            : h('div', { className: 'dshl-listScroll' }, h('div', { className: 'dshl-list' }, ...rows.map((entry) => {
-              const storedEntry = stored.find((item) => sameStorageEntry(item, entry));
-              return h('div', { key: storageKeyOf(entry), className: 'dshl-row' },
-                h('span', { className: 'dshl-rowLabel' }, entry.label),
-                section.id === 'sidebar' && hiddenLabels.includes(entry.label) ? h('span', { className: 'dshl-itemSub' }, t('storageHiddenHint')) : null,
-                entry.offline ? h('span', { className: 'dshl-itemSub' }, t('storageZoneOffline')) : null,
-                h(Switch, {
-                  checked: storedEntry !== undefined,
-                  label: entry.label,
-                  onChange: (on) => toggle(section.id, entry, on),
-                }));
-            }))));
+        /* 七个区原来是一串连着的标题 + 列表，分区之间没有分隔，用户看不出边界；
+           而且每区各带一个独立滚动框，嵌套感很重。改成可折叠分区：
+           标题行同时是折叠按钮，右侧给「已收纳/总数」的计数，折叠后只留一行。
+           默认只展开还有未收纳项的分区——全绿的分区展开也没有可做的事，
+           七区全展开会有 2915px、六屏多。 */
+        const storedCount = rows.filter((entry) => stored.some((item) => sameStorageEntry(item, entry))).length;
+        const defaultOpen = rows.length > 0 && storedCount < rows.length;
+        const open = collapsed[section.id] === undefined ? defaultOpen : collapsed[section.id] !== true;
+        return h('section', { key: section.id, className: 'dshl-zone', 'data-open': open ? 'true' : 'false' },
+          h('button', {
+            type: 'button',
+            className: 'dshl-zoneHead',
+            'aria-expanded': open ? 'true' : 'false',
+            onClick: () => setCollapsed((prev) => ({ ...prev, [section.id]: open })),
+          },
+          icon(open ? ICON_DOWN : ICON_CARET, 11),
+          h('span', { className: 'dshl-zoneTitle' }, t(section.titleKey)),
+          h('span', { className: 'dshl-zoneCount' }, storedCount === 0 ? `${rows.length}` : `${storedCount}/${rows.length}`)),
+          open
+            ? (rows.length === 0
+              ? h('p', { className: 'dshl-hint dshl-zoneEmpty' }, t(section.emptyKey))
+              : h('div', { className: 'dshl-list dshl-zoneList' }, ...rows.map((entry) => {
+                const storedEntry = stored.find((item) => sameStorageEntry(item, entry));
+                return h('div', { key: storageKeyOf(entry), className: 'dshl-row' },
+                  h('span', { className: 'dshl-rowLabel' }, entry.label),
+                  section.id === 'sidebar' && hiddenLabels.includes(entry.label) ? h('span', { className: 'dshl-itemSub' }, t('storageHiddenHint')) : null,
+                  entry.offline ? h('span', { className: 'dshl-itemSub' }, t('storageZoneOffline')) : null,
+                  h(Switch, {
+                    checked: storedEntry !== undefined,
+                    label: entry.label,
+                    onChange: (on) => toggle(section.id, entry, on),
+                  }));
+              })))
+            : null);
       };
       return h(Card, { title: t('storage'), desc: t('storageHint') },
-        ...sections.map(renderZone));
+        h('div', { className: 'dshl-zoneList' }, ...sections.map(renderZone)));
     }
 
     /** 「更多」菜单行：宿主渲染菜单，我们只贡献行；样式优先用宿主 MenuItemButton，缺失时退化为普通按钮。 */
