@@ -235,6 +235,8 @@ window.__ModuleLoader__.load({
       relocatePending: '目标不在场，暂不生效',
       relocateActive: '已生效',
       relocateGone: '源单元不在场',
+      relocateSqueeze: (pct, from, to) => `宽度压到 ${pct}%（${from} → ${to}px）`,
+      relocateSqueezeHint: '目标容器比源单元窄很多，搬过去后内部内容会被挤压甚至看不见。宽度比例低于 60% 时提示。',
       relocateSourceBlock: '侧栏块',
       relocateSourceUnit: '拆解单元',
       relocateSourceSlot: '槽位条目',
@@ -666,6 +668,8 @@ window.__ModuleLoader__.load({
       relocatePending: 'target not present, inactive',
       relocateActive: 'active',
       relocateGone: 'source not present',
+      relocateSqueeze: (pct, from, to) => `width squeezed to ${pct}% (${from} → ${to}px)`,
+      relocateSqueezeHint: 'The destination is much narrower than the source, so its inner content will be crushed or hidden. Warned when the width ratio drops below 60%.',
       relocateSourceBlock: 'Sidebar block',
       relocateSourceUnit: 'Part unit',
       relocateSourceSlot: 'Slot entry',
@@ -3294,6 +3298,39 @@ window.__ModuleLoader__.load({
       return sourceId;
     }
 
+    /**
+     * 搬移的形状兼容性：投影只做「宽度对齐 + 平移」，不改变源节点的内部布局。
+     * 所以横向铺开的单元（会话头 1260×40）搬进窄列（侧栏 280×732）时，宽度只剩 22%，
+     * 内部 grid/flex 会把内容压没——实测会话头里 `headerLeading` 直接变 0px，
+     * 标题、视图标签、操作组全部不可见。这类搬移能配上、也能「生效」，但结果没用。
+     *
+     * 判定用宽度压缩比：目标可用宽 / 源原始宽。低于 MIN_WIDTH_RATIO 视为不适配。
+     * 只做提示，不阻断——投影的语义是「用户说了算」，强行拦掉会让一些真能用的情况也做不了。
+     */
+    const RELOCATE_MIN_WIDTH_RATIO = 0.6;
+    /**
+     * 源单元的原始尺寸缓存：投影会把节点压到目标宽度，之后再量就得到压缩后的值，
+     * 宽度压缩比会永远接近 1.0，判定失效。以节点为键记第一次（未投影时）量到的尺寸。
+     * 用 WeakMap，节点被 React 重建后自然失效。
+     */
+    const relocateSourceBoxCache = new WeakMap();
+    function relocateSourceBox(node) {
+      if (node === null || node === undefined) return null;
+      const cached = relocateSourceBoxCache.get(node);
+      if (cached !== undefined) return cached;
+      const box = readableBox(node);
+      if (box === null) return null;
+      relocateSourceBoxCache.set(node, box);
+      return box;
+    }
+    function relocateFit(sourceBox, destBox) {
+      if (sourceBox === null || destBox === null) return null;
+      if (sourceBox.width <= 0 || destBox.width <= 0) return null;
+      const ratio = destBox.width / sourceBox.width;
+      if (ratio >= RELOCATE_MIN_WIDTH_RATIO) return null;
+      return { ratio, sourceWidth: Math.round(sourceBox.width), destWidth: Math.round(destBox.width) };
+    }
+
     /** 当前真正生效的搬移：源与目标都在场，且目标不包含源时才成立。 */
     function relocateActiveList(targets, config) {
       const byId = new Map(relocateSources(targets).map((source) => [source.id, source]));
@@ -3305,7 +3342,9 @@ window.__ModuleLoader__.load({
         if (dest === null || dest.isConnected !== true) continue;
         if (readableBox(dest) === null) continue;
         if (dest === source.node || dest.contains(source.node)) continue;
-        out.push({ sourceId, node: source.node, dest, place: spec.place });
+        // 形状评估要在投影改写节点之前量：投影会把源压到目标宽度，之后再量就没意义了
+        const fit = relocateFit(relocateSourceBox(source.node), readableBox(dest));
+        out.push({ sourceId, node: source.node, dest, place: spec.place, fit });
       }
       return out;
     }
@@ -4327,8 +4366,11 @@ window.__ModuleLoader__.load({
 .dshl-relocateForm { display:grid; grid-template-columns:repeat(auto-fit, minmax(132px, 1fr)); gap:8px; align-items:end; }
 .dshl-relocateField { display:flex; flex-direction:column; gap:4px; min-width:0; font-size:12px; color:var(--dsw-alias-label-secondary); }
 .dshl-relocateRow { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:var(--dsw-radius-md, 8px); background:var(--dsw-alias-bg-layer-2); }
+.dshl-relocateRow[data-squeezed="true"] { border:1px solid color-mix(in srgb, var(--dsw-alias-state-warn-primary) 55%, transparent); }
 .dshl-relocateState { flex:none; font-size:11px; color:var(--dsw-alias-label-secondary); }
 .dshl-relocateState[data-active="true"] { color:var(--dsw-alias-state-success-primary); }
+/* 形状不适配警告：搬过去能「生效」但内容会被压没，行上直接说明压缩比 */
+.dshl-relocateFitWarn { flex:none; font-size:11px; color:var(--dsw-alias-state-warn-primary); }
 [data-dshl-teleport] { position:fixed !important; left:0 !important; top:0 !important; right:auto !important; bottom:auto !important; margin:0 !important; z-index:1100 !important; width:var(--dshl-tw, auto) !important; max-width:none !important; box-sizing:border-box; transform:translate(var(--dshl-tx, 0px), var(--dshl-ty, 0px)) !important; }
 [data-dshl-placeholder] { display:block !important; width:100% !important; box-sizing:border-box; pointer-events:none; }
 body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in srgb, var(--dsw-alias-brand-primary) 45%, transparent); outline-offset:-1px; border-radius:var(--dsw-radius-md, 8px); }
@@ -6124,7 +6166,10 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       const [sourceId, setSourceId] = React.useState('');
       const [targetId, setTargetId] = React.useState(RELOCATE_DESTINATIONS[0].id);
       const [place, setPlace] = React.useState('start');
-      const activeIds = new Set(relocateActiveList(targets, config).map((item) => item.sourceId));
+      const activeList = relocateActiveList(targets, config);
+      const activeIds = new Set(activeList.map((item) => item.sourceId));
+      /** 形状不适配的搬移：生效但内容会被压没，行上标警告，用户才知道为什么看不到东西。 */
+      const fitById = new Map(activeList.filter((item) => item.fit !== null).map((item) => [item.sourceId, item.fit]));
       // 槽位出口容器：除了 15 个内置目标，还能把单元搬进任意列表槽位的出口（与槽位编排同一套识别）
       const slotDests = targets.relocateDests ?? [];
       const destLabel = (id) => {
@@ -6189,9 +6234,11 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
           : h('div', { className: 'dshl-list' }, configured.map(([id, spec]) => {
             const live = activeIds.has(id);
             const stateKey = live ? 'relocateActive' : sourceIds.has(id) ? 'relocatePending' : 'relocateGone';
-            return h('div', { key: id, className: 'dshl-relocateRow' },
-              h('span', { className: 'dshl-relocateState', 'data-active': live ? 'true' : undefined }, t(stateKey)),
+            const fit = fitById.get(id) ?? null;
+            return h('div', { key: id, className: 'dshl-relocateRow', 'data-squeezed': fit === null ? undefined : 'true' },
+              h('span', { className: 'dshl-relocateState', 'data-active': live ? 'true' : undefined, 'data-squeezed': fit === null ? undefined : 'true' }, t(stateKey)),
               h('span', { className: 'dshl-itemLabel', title: id }, `${relocateSourceLabel(t, id)} → ${destLabel(spec.to)} · ${spec.place === 'end' ? t('relocateEnd') : t('relocateStart')}`),
+              fit === null ? null : h('span', { className: 'dshl-itemSub dshl-relocateFitWarn', title: t('relocateSqueezeHint') }, t('relocateSqueeze')(Math.round(fit.ratio * 100), fit.sourceWidth, fit.destWidth)),
               h('button', {
                 type: 'button',
                 className: 'dshl-iconBtn',
