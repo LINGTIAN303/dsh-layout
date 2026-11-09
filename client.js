@@ -352,9 +352,9 @@ window.__ModuleLoader__.load({
       follow: '默认',
       disabledHint: '启用后才会改变界面；右侧预览不需要重启。',
       recoveryHint: '自定义布局可能挡住插件入口；这个按钮始终能打开编辑浮层并恢复默认。',
-      recoveryShortcut: '布局：打开编辑浮层（恢复入口）',
+      panelShortcut: '布局：打开编辑面板',
       openPlugins: '插件页',
-      riskyHint: '注意：侧栏或面板入口已被隐藏，界面上会留一个「布局」恢复按钮（位置随留白走）。快捷键也能打开编辑浮层。',
+      riskyHint: '注意：侧栏或面板入口已被隐藏，界面上会留一个「布局」恢复按钮（位置随留白走）。快捷键也能打开编辑面板。',
       shortcutHint: '快捷键：Ctrl/⌘+Alt+L 打开编辑面板；再加 Shift 直接恢复默认布局。',
       panelTitle: '布局编辑面板',
       panelOpen: '打开编辑面板',
@@ -783,9 +783,9 @@ window.__ModuleLoader__.load({
       follow: 'Default',
       disabledHint: 'Nothing changes until enabled; preview applies immediately.',
       recoveryHint: 'A custom layout can hide the plugin entry; this button always opens the edit overlay and can restore defaults.',
-      recoveryShortcut: 'Layout: open the edit overlay (recovery)',
+      panelShortcut: 'Layout: open the editor panel',
       openPlugins: 'Plugins page',
-      riskyHint: 'Heads up: the sidebar or panel entry is hidden, so a "Layout" recovery button floats in a clear spot. The shortcut also opens the edit overlay.',
+      riskyHint: 'Heads up: the sidebar or panel entry is hidden, so a "Layout" recovery button floats in a clear spot. The shortcut also opens the editor panel.',
       shortcutHint: 'Shortcuts: Ctrl/⌘+Alt+L opens the editor panel; add Shift to restore the default layout.',
       panelTitle: 'Layout editor panel',
       panelOpen: 'Open editor panel',
@@ -7773,17 +7773,17 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       }, 'dsh-layout: host more menu');
 
       ctx.effect(() => {
-        const activate = () => {
-          openPanel();
-          setEditing(true);
-        };
+        /* 快捷键只开面板，不再顺带进编辑模式：编辑模式是「直接在界面上拖分隔条」的
+           另一种工作方式，跟面板是并列的两条路径。原先一起触发，按一次快捷键会同时
+           打开面板并在界面上铺一层可拖的虚线框，两套交互叠在一起。 */
+        const activate = () => openPanel();
         const shortcuts = typeof ctx.get === 'function' ? ctx.get('shortcuts') : undefined;
         if (shortcuts !== null && shortcuts !== undefined && typeof shortcuts.register === 'function') {
           try {
             return shortcuts.register({
-              id: 'dsh-layout.recovery',
-              label: () => t('recoveryShortcut'),
-              aliases: ['layout', 'recovery', '布局'],
+              id: 'dsh-layout.panel',
+              label: () => t('panelShortcut'),
+              aliases: ['layout', 'panel', '布局'],
               defaults: {
                 'desktop:macos': { code: 'KeyL', modifiers: ['primary', 'alt'] },
                 'desktop:windows': { code: 'KeyL', modifiers: ['primary', 'alt'] },
@@ -7808,7 +7808,7 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
         };
         window.addEventListener('keydown', onKeyDown, true);
         return () => window.removeEventListener('keydown', onKeyDown, true);
-      }, 'dsh-layout: recovery shortcut');
+      }, 'dsh-layout: panel shortcut');
 
       ctx.effect(() => ctx.slots.inject('plugins.detail.section', () => ctx.slots.register({
         name: 'plugins.detail.section',
