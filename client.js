@@ -432,11 +432,15 @@ window.__ModuleLoader__.load({
       boardReadonly: '这一项只读（入口类槽位只允许排序，隐藏会切断回页面的路径）。',
       boardReadonlyOverlay: '浮层 / 菜单类条目只读。',
       boardGeometryDrift: '结构快照可能已过期，建议重新抓取。',
+      boardDriftTitle: '骨架可能已过期',
+      boardDriftDetail: (added, removed) => `与上次抓取相比：新增 ${added} 个节点、少了 ${removed} 个。骨架按旧结构画，位置可能对不上。`,
+      boardDriftRecapture: '重新抓取这一页',
       boardLoading: '正在加载白板…',
       boardLoadFail: '白板模块加载失败，已回落到编辑面板。',
       boardShowMore: '显示更多',
       boardLayers: '结构',
       boardProps: '属性',
+      boardDrillIn: '区域内可选的控件',
       boardBucketUnit: '拆解单元',
       boardBucketEntry: '槽位条目',
       boardBucketXunit: '第三方单元',
@@ -850,11 +854,15 @@ window.__ModuleLoader__.load({
       boardReadonly: 'Read-only: entry-like slots may only be reordered; hiding one cuts the way back to its page.',
       boardReadonlyOverlay: 'Overlay and menu entries are read-only.',
       boardGeometryDrift: 'The structure snapshot may be stale; capture again.',
+      boardDriftTitle: 'The skeleton may be stale',
+      boardDriftDetail: (added, removed) => `Compared with the last capture: ${added} nodes added, ${removed} missing. The skeleton uses the old structure, so positions may not match.`,
+      boardDriftRecapture: 'Capture this page again',
       boardLoading: 'Loading the board…',
       boardLoadFail: 'The board module failed to load; fell back to the editor panel.',
       boardShowMore: 'Show more',
       boardLayers: 'Structure',
       boardProps: 'Properties',
+      boardDrillIn: 'Controls inside this node',
       boardBucketUnit: 'Decomposed units',
       boardBucketEntry: 'Slot entries',
       boardBucketXunit: 'Third-party units',
@@ -919,7 +927,12 @@ window.__ModuleLoader__.load({
         }
       }
       for (const unit of targets.external?.units ?? []) push(`xunit:${targets.external.pageKey}::${unit.key}`, 'control', unit.node);
-      return { at: Date.now(), frame: { width: Math.round(frameRect.width), height: Math.round(frameRect.height) }, nodes };
+      // 结构签名：骨架漂移校验的判据。只取「有哪些节点 + 各层数量」，不取坐标——
+      // 坐标随窗口尺寸变化是正常的，节点增删与层级变化才是结构变了。
+      const byLayer = {};
+      for (const item of nodes) byLayer[item.layer] = (byLayer[item.layer] ?? 0) + 1;
+      const signature = `${Object.keys(byLayer).sort().map((layer) => `${layer}:${byLayer[layer]}`).join(',')}|${nodes.length}`;
+      return { at: Date.now(), frame: { width: Math.round(frameRect.width), height: Math.round(frameRect.height) }, nodes, signature };
     }
 
     /** 页面 key：白板按页面分桶，与联动规则的页面枚举同一套词。 */
@@ -946,11 +959,17 @@ window.__ModuleLoader__.load({
      * 记录当前页几何。
      * 只在「这一页还没有快照」或「超过刷新间隔」时重量，避免每次 DOM 变动都量一遍
      * （refresh 由 MutationObserver 驱动，流式输出时非常频繁）。
+     *
+     * 冻结：白板处于骨架态时，主 bundle 通过 boardHost.freezeGeometry(pageKey) 把该页钉住。
+     * 否则每 5 秒自动重量一次，快照永远是新鲜的，漂移校验就永远检测不到东西
+     * （这正是第一版实现里的真实缺陷）。冻结后骨架保持稳定，用户点「重新抓取」才解冻更新。
      */
+    let boardFrozenPage = null;
     let boardGeometryDirty = false;
     function recordBoardGeometry(targets, force) {
       if (targets.ok !== true) return;
       const key = boardPageKey(targets);
+      if (force !== true && boardFrozenPage === key) return;
       const previous = boardGeometry[key];
       const now = Date.now();
       if (force !== true && previous !== undefined && now - Number(previous.at ?? 0) < BOARD_GEOMETRY_REFRESH_MS) return;
@@ -960,6 +979,38 @@ window.__ModuleLoader__.load({
       boardGeometryDirty = true;
       writeBoardGeometry();
       boardGeometryDirty = false;
+    }
+
+    /**
+     * 骨架漂移校验：当前页的真实结构与快照对不上时返回诊断，否则 null。
+     *
+     * 为什么需要：骨架是「上次看见这一页时」记下的，宿主升级、插件增删都会让它与真实结构脱节；
+     * 而用户这时正在骨架态编辑，看到的是过期结构却毫无提示。
+     *
+     * 判据只用「节点集合的差集」：多出来的节点说明新增了东西，缺的说明结构被改了。
+     * 坐标变化不算漂移（窗口尺寸、DPI、内容长度都会影响），否则每次都会误报。
+     */
+    function boardGeometryDrift(targets) {
+      if (targets.ok !== true) return null;
+      const key = boardPageKey(targets);
+      const saved = boardGeometry[key];
+      if (saved === undefined || !Array.isArray(saved.nodes) || saved.nodes.length === 0) return null;
+      const current = collectBoardGeometry(targets);
+      if (current === null || current.nodes.length === 0) return null;
+      const savedIds = new Set(saved.nodes.map((item) => item.id));
+      const currentIds = new Set(current.nodes.map((item) => item.id));
+      const added = [...currentIds].filter((id) => !savedIds.has(id));
+      const removed = [...savedIds].filter((id) => !currentIds.has(id));
+      // 少量变动（一两个条目随内容出现/消失）是正常的，不报漂移
+      if (added.length + removed.length < 3) return null;
+      return {
+        pageKey: key,
+        savedAt: Number(saved.at ?? 0),
+        added: added.length,
+        removed: removed.length,
+        addedSample: added.slice(0, 5),
+        removedSample: removed.slice(0, 5),
+      };
     }
 
     /* ============================== 配置 ============================== */
@@ -7284,8 +7335,21 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       readGeometry(key) {
         return boardGeometry[key] ?? null;
       },
+      /** 白板查漂移：骨架与真实结构对不上时返回诊断（null = 一致）。 */
+      readDrift() {
+        return boardGeometryDrift(snapshot.targets);
+      },
+      /** 白板切到骨架态时冻结该页快照：否则自动刷新会让漂移永远检测不到。 */
+      freezeGeometry(key) {
+        boardFrozenPage = key;
+      },
+      unfreezeGeometry() {
+        boardFrozenPage = null;
+      },
       /** 白板「重新抓取」：立刻重量当前页并落盘。 */
       recordGeometryNow() {
+        // 重新抓取要先解冻，否则 recordBoardGeometry 会因冻结直接返回
+        boardFrozenPage = null;
         recordBoardGeometry(snapshot.targets, true);
         notify();
       },

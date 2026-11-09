@@ -34,13 +34,30 @@ window.__ModuleLoader__.load({
     /** 被当成「容器」的拆解单元；其余拆解单元落到「控件」栏，避免同一块结构在两栏各出现一次。 */
     const CONTAINER_PART_IDS = new Set(['conv-header', 'conv-messages', 'conv-composer', 'rb-tabs', 'rb-content', 'set-nav-hide', 'set-header', 'set-options']);
 
+    /**
+     * 顶部安全偏移：窗口栏是 Electron 原生 titleBarOverlay（本机实测高度 40px），
+     * 它盖在 Web 层之上，DOM 里点不到那一带——浮层条原先放在 top:8px，整排按钮点不动。
+     * 同时会话头也占 y 0..40，所以往下让到「页面头栏底边 + 间距」，两头都不压。
+     * 用运行时测量而不是写死 48px：不同页面（插件页 / 设置弹层）头栏高度不一样。
+     */
+    function topSafeOffset() {
+      const floor = 44;
+      let offset = floor;
+      const bar = document.querySelector('header');
+      if (bar !== null) {
+        const rect = bar.getBoundingClientRect();
+        if (rect.top <= 4 && rect.height >= 20 && rect.height <= 80) offset = Math.max(offset, Math.round(rect.bottom) + 6);
+      }
+      return offset;
+    }
+
     const BOARD_CSS = `
 .dshl-board { position:fixed; inset:0; z-index:1260; display:flex; flex-direction:column; color:var(--dsw-alias-label-primary); font-size:13px; line-height:20px; pointer-events:none; }
 /* 描图态：整层透明、点击穿透，只有框与工具条吃事件——这样真实界面既能看见也能操作 */
 .dshl-board[data-mode="trace"] { background:transparent; }
 /* 抽象态：整层遮住界面，成为独立工作台 */
 .dshl-board[data-mode="skeleton"] { background:var(--dsw-alias-bg-layer-2); pointer-events:auto; }
-.dshl-boardHead { position:absolute; top:8px; left:50%; transform:translateX(-50%); z-index:2; display:flex; align-items:center; gap:5px; flex-wrap:wrap; justify-content:center; max-width:calc(100vw - 20px); padding:4px 9px; border-radius:999px; border:1px solid var(--dsw-alias-border-l2); background:color-mix(in srgb, var(--dsw-alias-bg-layer-1) 94%, transparent); box-shadow:0 4px 16px rgba(0,0,0,.24); pointer-events:auto; }
+.dshl-boardHead { position:absolute; top:48px; left:50%; transform:translateX(-50%); z-index:2; display:flex; align-items:center; gap:5px; flex-wrap:wrap; justify-content:center; max-width:calc(100vw - 20px); padding:4px 9px; border-radius:999px; border:1px solid var(--dsw-alias-border-l2); background:color-mix(in srgb, var(--dsw-alias-bg-layer-1) 94%, transparent); box-shadow:0 4px 16px rgba(0,0,0,.24); pointer-events:auto; }
 .dshl-boardTitle { font-size:12px; font-weight:600; white-space:nowrap; }
 .dshl-boardPage { font-size:11px; color:var(--dsw-alias-label-secondary); white-space:nowrap; max-width:150px; overflow:hidden; text-overflow:ellipsis; }
 .dshl-boardScenes { display:flex; align-items:center; gap:3px; flex-wrap:wrap; }
@@ -60,11 +77,20 @@ window.__ModuleLoader__.load({
 .dshl-boardBox { position:absolute; border:1px solid; border-radius:4px; pointer-events:auto; cursor:pointer; background:transparent; padding:0; }
 .dshl-boardBox:hover { background:color-mix(in srgb, currentColor 14%, transparent); }
 .dshl-boardBox[data-active="true"] { border-width:2px; background:color-mix(in srgb, currentColor 20%, transparent); }
+/* 下钻出来的子节点：虚线 + 呼吸感，提示「这些可以继续点」 */
+.dshl-boardBox[data-drill="true"] { border-style:dashed; border-width:1.5px; }
+.dshl-boardBox[data-drill="true"]:hover { border-style:solid; background:color-mix(in srgb, currentColor 22%, transparent); }
 .dshl-boardBoxTag { position:absolute; left:0; top:-14px; font-size:10px; line-height:13px; padding:0 3px; border-radius:3px; white-space:nowrap; color:var(--dsw-alias-bg-layer-1); background:currentColor; }
 /* 只在框够宽时才显示标签：窄框上挂标签会互相压住（实测侧栏里十几个框的标签叠成一团） */
 .dshl-boardBoxTag[data-tight="true"] { display:none; }
 .dshl-boardBoxTag[data-below="true"] { top:auto; bottom:-14px; }
 .dshl-boardEmpty { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:24px; text-align:center; color:var(--dsw-alias-label-secondary); font-size:12px; }
+/* 骨架漂移提示条：骨架态贴在画布上方，提醒用户看到的是旧结构 */
+.dshl-boardDrift { position:absolute; left:50%; transform:translateX(-50%); z-index:3; display:flex; align-items:center; gap:8px; max-width:calc(100vw - 40px); padding:6px 10px; border-radius:10px; border:1px solid color-mix(in srgb, var(--dsw-alias-state-warning-primary, #d99a2b) 60%, transparent); background:color-mix(in srgb, var(--dsw-alias-state-warning-primary, #d99a2b) 14%, var(--dsw-alias-bg-layer-1)); color:var(--dsw-alias-label-primary); font-size:11px; line-height:16px; box-shadow:0 4px 14px rgba(0,0,0,.22); pointer-events:auto; }
+.dshl-boardDriftText { min-width:0; }
+.dshl-boardDriftTitle { font-weight:600; }
+.dshl-boardDriftBtn { flex:none; height:22px; padding:0 8px; border-radius:999px; border:1px solid var(--dsw-alias-border-l1); background:transparent; color:var(--dsw-alias-label-primary); font:inherit; font-size:11px; cursor:pointer; }
+.dshl-boardDriftBtn:hover { background:var(--dsw-alias-interactive-bg-hover); }
 /* 抽屉：描图态默认收起，按需拉出；收起时只剩一条窄标签，不遮挡真实界面 */
 .dshl-boardDrawers { position:absolute; top:0; bottom:0; left:0; right:0; pointer-events:none; }
 .dshl-boardDrawer { position:absolute; top:52px; bottom:52px; display:flex; flex-direction:column; pointer-events:auto; border-radius:10px; border:1px solid var(--dsw-alias-border-l2); background:var(--dsw-alias-bg-layer-1); box-shadow:0 10px 30px rgba(0,0,0,.28); overflow:hidden; }
@@ -83,7 +109,11 @@ window.__ModuleLoader__.load({
 .dshl-boardCount { margin-left:auto; font-weight:400; font-size:11px; color:var(--dsw-alias-label-secondary); }
 .dshl-boardGroupBody { padding:0 4px 5px; display:flex; flex-direction:column; gap:2px; }
 .dshl-boardSubHead { margin:6px 2px 2px; font-size:10px; line-height:14px; letter-spacing:.02em; color:var(--dsw-alias-label-secondary); }
-.dshl-boardNode { display:flex; align-items:center; gap:6px; width:100%; padding:4px 7px; border-radius:6px; border:1px solid transparent; background:transparent; color:var(--dsw-alias-label-primary); font:inherit; font-size:12px; cursor:pointer; text-align:left; }
+.dshl-boardNode { display:flex; align-items:center; gap:6px; width:100%; height:26px; padding:0 7px; border-radius:6px; border:1px solid transparent; background:transparent; color:var(--dsw-alias-label-primary); font:inherit; font-size:12px; cursor:pointer; text-align:left; box-sizing:border-box; }
+/* 窗口化占位：撑住滚动条长度，不显示任何内容 */
+.dshl-boardPad { flex:none; width:100%; }
+/* 长列表自己的滚动区：窗口化按它的 scrollTop 算可见区间，不能与其它列表共用 */
+.dshl-boardScroll { max-height:320px; overflow:auto; display:flex; flex-direction:column; gap:2px; }
 .dshl-boardNode:hover { background:var(--dsw-alias-interactive-bg-hover); }
 .dshl-boardNode[data-active="true"] { border-color:var(--dsw-alias-brand-primary); background:color-mix(in srgb, var(--dsw-alias-brand-primary) 14%, transparent); }
 .dshl-boardNode[data-offline="true"] { opacity:.5; }
@@ -101,6 +131,8 @@ window.__ModuleLoader__.load({
 .dshl-boardFieldValue { font-size:11px; color:var(--dsw-alias-label-secondary); }
 .dshl-boardNote { margin:0; font-size:11px; line-height:17px; color:var(--dsw-alias-label-secondary); }
 .dshl-boardBtns { display:flex; gap:6px; flex-wrap:wrap; }
+/* 下钻列表：属性面板里列出选中节点内部的直接下级 */
+.dshl-boardDrill { display:flex; flex-direction:column; gap:2px; max-height:220px; overflow:auto; padding:4px; border-radius:8px; background:var(--dsw-alias-bg-layer-2); }
 .dshl-boardFoot { position:absolute; left:50%; bottom:10px; transform:translateX(-50%); display:flex; gap:8px; align-items:center; flex-wrap:wrap; max-width:calc(100vw - 24px); padding:6px 10px; border-radius:999px; border:1px solid var(--dsw-alias-border-l2); background:color-mix(in srgb, var(--dsw-alias-bg-layer-1) 94%, transparent); box-shadow:0 4px 16px rgba(0,0,0,.24); pointer-events:auto; }
 .dshl-boardHint { font-size:11px; color:var(--dsw-alias-label-secondary); }
 `;
@@ -417,6 +449,44 @@ window.__ModuleLoader__.load({
       };
     }
 
+    /* ============================== 下钻：区域内部的节点 ============================== */
+
+    /**
+     * 某个节点的下级节点：选中区域后要能继续点选它内部的控件
+     * （例：选中侧栏 → 点「面板导航」容器 → 点里面某个插件入口）。
+     *
+     * 判定用**几何包含**而不是维护一张父子表：宿主结构随时变，父子关系跟着 DOM 变，
+     * 单独维护一份树必然与识别结果漂移。两个坐标源都支持：
+     * - 描图态：元素矩形（getBoundingClientRect）
+     * - 骨架态：快照归一化矩形换算后的画布矩形
+     * 用「中心点落在父矩形内」而不是整框包含：子元素常常超出父框几个像素（阴影、溢出），
+     * 整框包含会把它们误判成外部。
+     */
+    function containsCenter(outer, inner) {
+      if (outer === undefined || inner === undefined) return false;
+      const cx = inner.x + inner.w / 2;
+      const cy = inner.y + inner.h / 2;
+      return cx >= outer.x && cx <= outer.x + outer.w && cy >= outer.y && cy <= outer.y + outer.h;
+    }
+
+    /** 直接下级：在所有节点里找出中心落在 parentRect 内、且不被另一个同级节点更紧包住的那些。 */
+    function childrenOf(parentId, parentRect, candidates, rectsOf) {
+      const inside = [];
+      for (const item of candidates) {
+        if (item.id === parentId) continue;
+        const rect = rectsOf(item);
+        if (rect === undefined) continue;
+        if (!containsCenter(parentRect, rect)) continue;
+        inside.push({ item, rect });
+      }
+      // 只保留「最靠上的一层」：若 A 包含 B，B 不是直接下级
+      return inside.filter(({ item, rect }) => !inside.some(({ item: other, rect: otherRect }) => {
+        if (other === item) return false;
+        if (!containsCenter(otherRect, rect)) return false;
+        return otherRect.w * otherRect.h < rect.w * rect.h;
+      })).map(({ item }) => item);
+    }
+
     /* ============================== 画布几何 ============================== */
 
     function pageKeyOf(targets) {
@@ -512,6 +582,58 @@ window.__ModuleLoader__.load({
 
     /* ============================== 组件 ============================== */
 
+    /**
+     * 长列表窗口化：只渲染视口附近的行。
+     *
+     * 为什么需要：控件层全展开时可达 451 行，全渲染实测约 79ms（build 9.8 + layout 69.3），
+     * 滚动时会明显掉帧。
+     *
+     * 为什么用「React onScroll + 渲染期算区间」而不是「effect 里 addEventListener」：
+     * 后者实测拿不到滚动更新（effect 挂监听后窗口区间始终停在首屏），
+     * 而 onScroll 是 React 自己管理的合成事件，时序确定；区间在渲染期直接算，
+     * 不需要额外 state 同步，也不会漏掉程序化滚动。
+     *
+     * 每桶独立滚动容器：多个桶共用一个外层滚动容器时，各自的 scrollTop 相同，
+     * 窗口会互相错位、行凭空出现或消失。
+     */
+    const ROW_HEIGHT = 26;
+    const OVERSCAN = 8;
+    /** 超过这个行数才窗口化；短列表直接平铺，省一层滚动区。 */
+    const VIRTUAL_THRESHOLD = 80;
+    /** 窗口化列表的高度上限：太高会挤掉同抽屉里的其它分组。 */
+    const VIRTUAL_MAX_HEIGHT = 320;
+
+    function BucketList({ t, items, selected, onSelect }) {
+      const [scrollTop, setScrollTop] = React.useState(0);
+      const virtual = items.length > VIRTUAL_THRESHOLD;
+      const renderRow = (item) => h('button', {
+        key: item.id,
+        type: 'button',
+        className: 'dshl-boardNode',
+        'data-active': selected === item.id ? 'true' : undefined,
+        'data-offline': item.present ? undefined : 'true',
+        title: item.id,
+        onClick: () => onSelect(item.id),
+      },
+      h('span', { className: 'dshl-boardNodeLabel' }, String(item.label)),
+      item.source === 'official' ? null : h('span', { className: 'dshl-boardBadge', 'data-tier': item.source }, t(item.source === 'third' ? 'ownerThird' : 'ownerAuto')));
+      if (!virtual) return h(React.Fragment, null, ...items.map(renderRow));
+      // 渲染期直接算可见区间：不依赖 ref 与 effect 的时序
+      const visible = Math.ceil(VIRTUAL_MAX_HEIGHT / ROW_HEIGHT);
+      const first = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
+      const last = Math.min(items.length, first + visible + OVERSCAN * 2);
+      const rows = [];
+      for (let index = first; index < last; index += 1) rows.push(renderRow(items[index]));
+      return h('div', {
+        className: 'dshl-boardScroll',
+        style: { maxHeight: VIRTUAL_MAX_HEIGHT },
+        onScroll: (event) => setScrollTop(event.currentTarget.scrollTop),
+      },
+      h('div', { className: 'dshl-boardPad', style: { height: first * ROW_HEIGHT } }),
+      ...rows,
+      h('div', { className: 'dshl-boardPad', style: { height: Math.max(0, (items.length - last) * ROW_HEIGHT) } }));
+    }
+
     function ControlField({ t, ctl }) {
       if (ctl.kind === 'note') return h('p', { className: 'dshl-boardNote' }, ctl.text);
       if (ctl.kind === 'action') {
@@ -575,10 +697,29 @@ window.__ModuleLoader__.load({
       const [layerOn, setLayerOn] = React.useState({ region: true, container: true, slot: false, control: false });
       const [rects, setRects] = React.useState({});
       const [canvasBox, setCanvasBox] = React.useState({ left: 0, top: 0, width: 0, height: 0 });
+      /** 顶部安全偏移：窗口栏（Electron titleBarOverlay）与会话头都在 y 0..40，浮层条必须让开 */
+      const [headTop, setHeadTop] = React.useState(48);
+      /** 骨架漂移诊断：只在骨架态显示提示（描图态看到的就是真实结构，不存在漂移） */
+      const [drift, setDrift] = React.useState(null);
       const canvasRef = React.useRef(null);
       const tree = React.useMemo(() => buildTree(snapshot), [snapshot]);
       const pageKey = pageKeyOf(targets);
       const pageLabel = host.currentPageLabel(targets, t);
+
+      // 量顶部安全偏移：页面头栏高度会随页面变（插件页 / 设置弹层不同），每次快照变化与 resize 重算
+      React.useLayoutEffect(() => {
+        const sync = () => {
+          const next = topSafeOffset();
+          setHeadTop((current) => (current === next ? current : next));
+        };
+        sync();
+        const timer = window.setInterval(sync, 500);
+        window.addEventListener('resize', sync);
+        return () => {
+          window.clearInterval(timer);
+          window.removeEventListener('resize', sync);
+        };
+      }, [snapshot]);
 
       // 描图态量真实矩形：快照变化、窗口尺寸变化、以及 400ms 定时（过渡动画与延迟渲染）
       React.useLayoutEffect(() => {
@@ -605,9 +746,18 @@ window.__ModuleLoader__.load({
 
       // 抽象态：从几何快照铺骨架
       React.useLayoutEffect(() => {
-        if (mode !== 'skeleton') return;
+        if (mode !== 'skeleton') {
+          setDrift(null);
+          host.unfreezeGeometry();
+          return;
+        }
+        // 冻结该页快照：否则主 bundle 每 5 秒自动重量，快照永远新鲜、漂移永远检测不到
+        host.freezeGeometry(pageKey);
         const geometry = host.readGeometry(pageKey);
         setRects(layoutSkeleton(geometry, canvasBox));
+        // 漂移校验只在骨架态做：描图态看到的就是真实结构，没有「过期」这回事
+        setDrift(host.readDrift());
+        return () => host.unfreezeGeometry();
       }, [mode, pageKey, canvasBox, snapshot]);
 
       const allNodes = React.useMemo(() => {
@@ -616,6 +766,34 @@ window.__ModuleLoader__.load({
         return map;
       }, [tree]);
       const selectedNode = selected === null ? null : (allNodes.get(selected) ?? null);
+
+      /**
+       * 下钻：选中节点后，把它内部的直接下级标成「可继续点」。
+       * 先点区域（侧栏），再点区域里的容器（面板导航），再点容器里的控件（某个插件入口）——
+       * 三级都是同一套逻辑，不额外维护父子表。
+       */
+      const drillPath = React.useMemo(() => {
+        if (selected === null || rects[selected] === undefined) return [];
+        const path = [];
+        const seen = new Set([selected]);
+        let parentId = selected;
+        for (let depth = 0; depth < 4; depth += 1) {
+          const parentRect = rects[parentId];
+          if (parentRect === undefined) break;
+          const candidates = [];
+          for (const layer of LAYERS) for (const item of tree[layer]) candidates.push(item);
+          const kids = childrenOf(parentId, parentRect, candidates, (item) => rects[item.id]).filter((item) => !seen.has(item.id));
+          if (kids.length === 0) break;
+          path.push(...kids);
+          for (const kid of kids) seen.add(kid.id);
+          // 继续往里：取第一个有下级的子节点作为下一层父节点，让整条链都可点
+          const next = kids.find((kid) => childrenOf(kid.id, rects[kid.id], candidates, (item) => rects[item.id]).length > 0);
+          if (next === undefined) break;
+          parentId = next.id;
+        }
+        return path;
+      }, [selected, rects, tree]);
+      const drillSet = React.useMemo(() => new Set(drillPath.map((item) => item.id)), [drillPath]);
 
       const needle = filter.trim().toLowerCase();
       const matches = (item) => needle === '' || item.id.toLowerCase().includes(needle) || String(item.label).toLowerCase().includes(needle);
@@ -638,16 +816,23 @@ window.__ModuleLoader__.load({
             ...Object.entries(rects).map(([id, rect]) => {
               const item = allNodes.get(id);
               if (item === undefined) return null;
-              if (layerOn[item.layer] !== true) return null;
+              // 下钻出来的子节点即使所属层关着也显示：否则「选中区域后点里面控件」在默认层级下看不见
+              const drilled = drillSet.has(id);
+              if (layerOn[item.layer] !== true && !drilled) return null;
               const color = LAYER_COLOR[item.layer];
               return h('button', {
                 key: id,
                 type: 'button',
                 className: 'dshl-boardBox',
                 'data-active': selected === id ? 'true' : undefined,
+                'data-drill': drilled ? 'true' : undefined,
                 style: { left: rect.x, top: rect.y, width: rect.w, height: rect.h, borderColor: color, color },
                 title: `${id} · ${Math.round(rect.w)}×${Math.round(rect.h)}`,
-                onClick: () => { setSelected(id); setDrawer('right', true); },
+                onClick: (event) => {
+                  event.stopPropagation();
+                  setSelected(id);
+                  setDrawer('right', true);
+                },
               },
               rect.h > 22
                 ? h('span', {
@@ -657,7 +842,23 @@ window.__ModuleLoader__.load({
                 }, String(item.label))
                 : null);
             }))),
-        h('div', { className: 'dshl-boardHead' },
+        // 骨架漂移提示：只在骨架态、且真实结构与快照对不上时出现
+        mode === 'skeleton' && drift !== null
+          ? h('div', { className: 'dshl-boardDrift', style: { top: headTop + 34 } },
+            h('span', { className: 'dshl-boardDriftText' },
+              h('span', { className: 'dshl-boardDriftTitle' }, t('boardDriftTitle')),
+              ' · ',
+              t('boardDriftDetail')(drift.added, drift.removed)),
+            h('button', {
+              type: 'button',
+              className: 'dshl-boardDriftBtn',
+              onClick: () => {
+                host.recordGeometryNow();
+                setDrift(null);
+              },
+            }, t('boardDriftRecapture')))
+          : null,
+        h('div', { className: 'dshl-boardHead', style: { top: headTop } },
           h('span', { className: 'dshl-boardTitle' }, t('boardTitle')),
           h('span', { className: 'dshl-boardPage', title: pageLabel }, pageLabel),
           h('span', { className: 'dshl-boardGrow' }),
@@ -710,7 +911,7 @@ window.__ModuleLoader__.load({
           }, selectedNode === null ? t('boardProps') : String(selectedNode.label)),
           h('button', { type: 'button', className: 'dshl-boardScene', onClick: () => host.setBoard(false) }, t('done'))),
         // 左抽屉：四栏
-        drawers.left ? h('div', { className: 'dshl-boardDrawer', 'data-side': 'left' },
+        drawers.left ? h('div', { className: 'dshl-boardDrawer', 'data-side': 'left', style: { top: headTop + 34 } },
           h('div', { className: 'dshl-boardSearch' },
             h('input', {
               type: 'search',
@@ -744,17 +945,13 @@ window.__ModuleLoader__.load({
                     : h(React.Fragment, null,
                       ...buckets.map((bucket) => h(React.Fragment, { key: `${layer}-${bucket.key}` },
                         bucket.label === null ? null : h('p', { className: 'dshl-boardSubHead' }, `${t(bucket.label)} · ${bucket.total}`),
-                        ...bucket.items.map((item) => h('button', {
-                          key: item.id,
-                          type: 'button',
-                          className: 'dshl-boardNode',
-                          'data-active': selected === item.id ? 'true' : undefined,
-                          'data-offline': item.present ? undefined : 'true',
-                          title: item.id,
-                          onClick: () => { setSelected(item.id); setDrawer('right', true); },
-                        },
-                        h('span', { className: 'dshl-boardNodeLabel' }, String(item.label)),
-                        item.source === 'official' ? null : h('span', { className: 'dshl-boardBadge', 'data-tier': item.source }, t(item.source === 'third' ? 'ownerThird' : 'ownerAuto')))),
+                        // 长列表走窗口化（每桶独立滚动容器），短列表直接平铺
+                        h(BucketList, {
+                          t,
+                          items: bucket.items,
+                          selected,
+                          onSelect: (id) => { setSelected(id); setDrawer('right', true); },
+                        }),
                         bucket.hidden > 0
                           ? h('button', {
                             type: 'button',
@@ -765,7 +962,7 @@ window.__ModuleLoader__.load({
                       null)) : null);
             }))) : null,
         // 右抽屉：属性面板
-        drawers.right ? h('div', { className: 'dshl-boardDrawer', 'data-side': 'right' },
+        drawers.right ? h('div', { className: 'dshl-boardDrawer', 'data-side': 'right', style: { top: headTop + 34 } },
           h('div', { className: 'dshl-boardProps' },
             selectedNode === null
               ? h('p', { className: 'dshl-boardNote' }, t('boardNoSelection'))
@@ -774,6 +971,22 @@ window.__ModuleLoader__.load({
                   h('span', { className: 'dshl-boardPropPath' }, `${t(LAYER_LABEL[selectedNode.layer])} · ${selectedNode.present ? t('boardPresent') : t('boardAbsent')}`),
                   h('span', { className: 'dshl-boardPropTitle' }, String(selectedNode.label)),
                   h('span', { className: 'dshl-boardPropPath' }, selectedNode.id)),
+                // 下钻入口：列出这个节点内部的直接下级，点一行就选中它（等价于在画布上点那个框）
+                drillPath.length === 0 ? null : h('div', { className: 'dshl-boardField' },
+                  h('div', { className: 'dshl-boardFieldRow' },
+                    h('span', { className: 'dshl-boardFieldLabel' }, t('boardDrillIn')),
+                    h('span', { className: 'dshl-boardFieldValue' }, String(drillPath.length))),
+                  h('div', { className: 'dshl-boardDrill' },
+                    ...drillPath.map((item) => h('button', {
+                      key: item.id,
+                      type: 'button',
+                      className: 'dshl-boardNode',
+                      title: item.id,
+                      onClick: () => setSelected(item.id),
+                    },
+                    h('span', { className: 'dshl-boardDot', style: { background: LAYER_COLOR[item.layer] } }),
+                    h('span', { className: 'dshl-boardNodeLabel' }, String(item.label)),
+                    h('span', { className: 'dshl-boardBadge' }, t(LAYER_LABEL[item.layer])))))),
                 ...selectedNode.controls.map((ctl, index) => h(ControlField, { key: `${selectedNode.id}-${index}`, t, ctl }))))) : null,
         h('div', { className: 'dshl-boardFoot' },
           h('span', { className: 'dshl-boardHint' }, t('boardHint')),
