@@ -2912,9 +2912,20 @@ window.__ModuleLoader__.load({
       return node;
     }
 
-    /** 条目的可操作目标：顶层节点；纯图标条目上探到按钮/菜单行；只有一个目标时才允许排序。 */
+    /** 不可渲染的标签：槽位里注入的 <style>/<script> 会被 fiber 当成宿主节点，但它们既不可见也不能搬。 */
+    const UNRENDERABLE_TAG = /^(STYLE|SCRIPT|LINK|META|TEMPLATE|NOSCRIPT)$/;
+
+    /** 有真实尺寸才算可操作：零尺寸节点是未展开的挂载点或占位，搬它没有意义（且会污染下拉清单）。 */
+    function hasBox(node) {
+      if (node === null || node === undefined || typeof node.getBoundingClientRect !== 'function') return false;
+      const rect = node.getBoundingClientRect();
+      return rect.width >= 2 && rect.height >= 2;
+    }
+
     function operationTargetOf(nodes) {
-      const tops = [...new Set(topHostNodes(nodes).map(slotRowOf))];
+      // 先剔掉 <style>/<script> 这类不可渲染节点：它们有 fiber 但没有布局盒
+      const renderable = nodes.filter((node) => node instanceof Element && !UNRENDERABLE_TAG.test(node.tagName));
+      const tops = [...new Set(topHostNodes(renderable).map(slotRowOf))];
       // 弹层类条目（对话框 / 菜单 / 浮层）隐藏后可能让功能入口彻底消失，一律只读
       const overlay = tops.some((node) => node.matches?.('[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], dialog') === true
         || node.querySelector?.('[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], dialog') !== null);
@@ -3225,6 +3236,10 @@ window.__ModuleLoader__.load({
             if (!item.rendered || item.tops.length !== 1) continue;
             if (!item.hideable && !item.orderable) continue;
             if (item.reason === 'overlay') continue;
+            // 零尺寸条目不能搬：它们的矩形是 0×0，投影后既看不到也定位不到位，
+            // 而且会往下拉清单里塞进一堆 `shell.overlay · xxx` 这类无意义选项
+            // （实测混进了 context-menu / pet / baifan / 两个 <style>）。
+            if (!hasBox(item.tops[0])) continue;
             list.push({ id: item.entryKey, labelKey: null, name: `${group.slot} · ${item.id}`, group: 'slot', node: item.tops[0] });
           }
         }
@@ -4862,6 +4877,32 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
     /** 恢复按钮的近似尺寸（半宽 / 半高）：自由落点用小号按钮，空白页用大号按钮。 */
     const LAUNCHER_HALF = { free: [36, 16], blank: [120, 60], corner: [36, 16] };
 
+    /**
+     * 顶部安全区：Electron 原生 titleBarOverlay 盖在 Web 层之上（本机高度 40px），
+     * 那一带的 DOM 收得到 elementFromPoint 却收不到真实点击。
+     *
+     * 恢复按钮是「界面被改坏」时的最后一道安全网，绝不能落在那里——
+     * 实测落点算法把按钮放到 y=11（依附在头部工具行上方），Web 端看着正常、Electron 里点不动。
+     * 这里按页面头栏底边算一个下界，所有候选点都要满足。
+     */
+    function launcherTopBound() {
+      let bound = 44;
+      const bar = document.querySelector('header');
+      if (bar !== null) {
+        const rect = bar.getBoundingClientRect();
+        if (rect.top <= 4 && rect.height >= 20 && rect.height <= 80) bound = Math.max(bound, Math.round(rect.bottom) + 6);
+      }
+      return bound;
+    }
+
+    /** 候选点是否落在安全区里（水平不出屏、整枚按钮都在窗口栏下面）。 */
+    function launcherPointAllowed(x, y, halfWidth, halfHeight) {
+      if (x - halfWidth < 4 || x + halfWidth > window.innerWidth - 4) return false;
+      if (y - halfHeight < launcherTopBound()) return false;
+      if (y + halfHeight > window.innerHeight - 4) return false;
+      return true;
+    }
+
     /** 依附落点：贴在锚点控件旁侧的空隙里，返回按「贴合度」排序的候选。完全由几何决定，不认识任何插件。 */
     function anchorCandidates(anchors, rects, halfWidth, halfHeight) {
       const gap = 10;
@@ -4919,8 +4960,8 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
           if (!inRow && !candidate.horizontal) continue;
           const x = Math.round(candidate.x);
           const y = Math.round(candidate.y);
-          if (x - halfWidth < 4 || x + halfWidth > window.innerWidth - 4) continue;
-          if (y - halfHeight < 4 || y + halfHeight > window.innerHeight - 4) continue;
+          // 安全区统一校验：水平不出屏 + 整枚按钮都在窗口栏下面（见 launcherPointAllowed）
+          if (!launcherPointAllowed(x, y, halfWidth, halfHeight)) continue;
           // 用矩形碰撞而不是点采样：点采样会从圆角和窄缝漏过去
           if (collidesRects(x, y, halfWidth, halfHeight, rects, 6)) continue;
           // 反方向是否还有控件贴着：两侧都有控件说明落在一个真正的「缝」里，最协调
@@ -5004,6 +5045,8 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
         const step = 40;
         for (let x = left; x <= right; x += step) {
           for (let y = top; y <= bottom; y += step) {
+            // 不进窗口栏辆射区（Electron 原生 titleBarOverlay 盖在 Web 层上）
+            if (!launcherPointAllowed(Math.round(x), Math.round(y), halfWidth, halfHeight)) continue;
             grid.push({ x: Math.round(x), y: Math.round(y), region: region.name });
           }
         }
@@ -5020,6 +5063,7 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       }
       const clear = [];
       for (const candidate of probes) {
+        if (!launcherPointAllowed(candidate.x, candidate.y, halfWidth, halfHeight)) continue;
         if (collidesRects(candidate.x, candidate.y, halfWidth, halfHeight, rects, 6)) continue;
         clear.push({ ...candidate, clearance: probeClearance(candidate.x, candidate.y) });
       }

@@ -428,6 +428,14 @@ flowchart TD
 
 配套两条：写入时不要把「没有 id」落成 `id: ''`（读回时 `''` 与「无 id」走不同分支，会产生分叉条目）；`normalizeConfig` 只负责把空 id 收掉，补回真实 id 由运行期按 label 唯一匹配（normalize 执行时还没有 DOM 可观察）。
 
+### 恢复按钮落点：三条坐标产出口都要过安全区
+
+恢复按钮是「界面被改坏」时的最后一道安全网。它由 `computeLauncherPlacement` 产出坐标，共三条路径：anchor 候选（依附现有控件）、free 网格（在可见区域扫空格）、越界兜底（corner/blank）。
+
+**三条都要过 `launcherPointAllowed`**。原因是 Electron 原生 `titleBarOverlay`（本机 40px）盖在 Web 层之上：`elementFromPoint` 在那一带仍会命中元素，但真实点击被原生层吃掉。实测漏掉这一步时，依附算法会把按钮放到 **y=11**（头部工具行上方），Web 端看着完全正常、Electron 里点不动。
+
+安全边界用 `launcherTopBound()` 按页面头栏底边算（下限 44），不用写死像素。
+
 ### 区域下钻
 
 选中任一节点后，算出它的直接下级（画布上虚线标出、属性面板列清单），点哪个都能继续下钻（区域 → 容器 → 控件）。判定用几何，不维护父子表（宿主结构随时变，单独维护一份树必然与识别结果漂移）。
