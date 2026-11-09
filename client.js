@@ -34,7 +34,10 @@ window.__ModuleLoader__.load({
       notDetected: '未识别界面结构',
       enable: '启用自定义布局',
       enableHint: '关闭后立即恢复 DSH 默认布局，配置保留。',
-      footHint: '关闭立即还原；也可拖分隔条调宽。',
+      footHint: '改动先预览，按保存才写入。',
+      saveConfig: '保存',
+      revertConfig: '还原',
+      unsavedHint: '有未保存改动',
       editing: '编辑模式',
       editingHint: '在界面上直接拖动分隔条，浮动工具条里可换预设。',
       presets: '预设',
@@ -471,7 +474,10 @@ window.__ModuleLoader__.load({
       notDetected: 'Interface not detected',
       enable: 'Enable custom layout',
       enableHint: 'Turning this off restores the DSH default layout; your settings are kept.',
-      footHint: 'Off restores defaults; dividers also resize.',
+      footHint: 'Changes preview live; press Save to persist.',
+      saveConfig: 'Save',
+      revertConfig: 'Revert',
+      unsavedHint: 'unsaved changes',
       editing: 'Edit mode',
       editingHint: 'Drag the dividers on the interface; switch presets from the floating toolbar.',
       presets: 'Presets',
@@ -1609,6 +1615,8 @@ window.__ModuleLoader__.load({
       })(),
       /** 落点重算信号：界面变化（新插件出现、布局重排）导致按钮被遮挡时递增。 */
       reposition: 0,
+      /** 是否有未保存的配置改动（显式保存模式）：面板据此显示保存/还原按钮与提示。 */
+      dirty: false,
     };
     const listeners = new Set();
     let persistTimer = null;
@@ -1677,22 +1685,85 @@ window.__ModuleLoader__.load({
       return true;
     }
 
+    /**
+     * 配置草稿：所有界面操作先落在内存里，由「保存」决定何时提交到持久化层。
+     *
+     * 为什么改成显式保存（第十五轮）：
+     * 原本每次改动都立刻写 localStorage + 宿主，而宿主写是异步的，落地前它还会推回旧快照。
+     * 实测「点一下收纳 → 280ms 后被宿主旧值盖回 → 再点 → 又盖回」，用户看到的是回退甚至循环。
+     * 第十四轮用「写入在途」拦住了大部分，但那是**对抗竞态**，不是消除竞态。
+     *
+     * 改成显式保存后，竞态从根上消失：宿主永远收不到中间态，只在用户按「保存」时收到一份完整配置。
+     *
+     * 预览仍然实时：`updateConfig` 立刻改内存并重算样式，界面马上能看到效果，
+     * 只是不落盘。关掉插件/刷新页面会丢弃未保存的草稿——这是显式保存的代价，
+     * 面板上会一直显示「有未保存改动」提示。
+     */
+    let configBase = null;   // 上次保存（或刚从宿主读回）的配置，用于「还原」
+    /** 草稿是否与已保存版本不同；放在 snapshot 里让面板能感知（模块级变量 React 看不见）。 */
+    function configIsDirty() {
+      return snapshot.dirty === true;
+    }
+
+    function setDirty(dirty) {
+      if (snapshot.dirty === dirty) return;
+      snapshot = { ...snapshot, dirty };
+    }
+
     function updateConfig(mutator, options = {}) {
       const draft = clone(snapshot.config);
       mutator(draft);
       if (options.capture === true) captureGeometry(draft);
+      // 记「改动前」的配置供还原用：必须在覆盖 snapshot.config 之前拿，
+      // 否则 configBase 记的是改完之后的值，还原就成了原地不动（实测踩过）。
+      const before = options.silent === true ? null : snapshot.config;
       snapshot = { ...snapshot, config: normalizeConfig(draft) };
-      schedulePersist();
+      // 只标记脏，不落盘：等用户按「保存」
+      if (before !== null) markDirty(before);
       annotateStored();
       applyDynamicCss();
       notify();
     }
 
-    function replaceConfig(next) {
+    function replaceConfig(next, options = {}) {
+      const before = options.silent === true ? null : snapshot.config;
       snapshot = { ...snapshot, config: normalizeConfig(next) };
-      schedulePersist();
+      if (before !== null) markDirty(before);
       annotateStored();
       applyDynamicCss();
+      notify();
+    }
+
+    /** 记脏：`before` 是这次改动之前的配置，第一次变脏时保存下来供「还原」。 */
+    function markDirty(before) {
+      if (configIsDirty()) return;
+      if (configBase === null) configBase = before;
+      setDirty(true);
+    }
+
+    /**
+     * 保存：把当前内存配置提交到持久化层（localStorage 缓存 + 宿主设置文档）。
+     * 这是**唯一**的持久化入口——其他所有配置改动都只改内存。
+     */
+    function saveConfig() {
+      configBase = null;
+      setDirty(false);
+      schedulePersist();
+      notify();
+    }
+
+    /** 还原：丢弃未保存的改动，回到已保存的配置。 */
+    function revertConfig() {
+      if (configBase === null) {
+        setDirty(false);
+        notify();
+        return;
+      }
+      snapshot = { ...snapshot, config: configBase, dirty: false };
+      configBase = null;
+      annotateStored();
+      applyDynamicCss();
+      applyRelocations();
       notify();
     }
 
@@ -3727,8 +3798,10 @@ window.__ModuleLoader__.load({
         migrateLocalToHost(documentText === '', schemesText === '');
         return;
       }
-      // 有写入在途时，宿主推来的一律是它自己的旧值（宿主写是异步的，本客户端已经先改了内存
-      // 与 localStorage）。此时应用快照必然把刚改的配置盖回去，所以整份跳过。
+      // 有未保存改动时，宿主推来的一律不采用：本地草稿是用户正在编辑的东西，
+      // 被宿主的旧值盖掉就变成「改一下回退一下」甚至循环。显式保存之后不存在这个问题——
+      // 用户按「保存」时才会写宿主，写之前宿主手里那份本来就是旧的。
+      if (configIsDirty()) return;
       if (hostPending.document === null && documentText !== hostLastWritten.document) applyHostDocument(documentText);
       if (hostPending.schemes === null && schemesText !== hostLastWritten.schemes) applyHostSchemes(schemesText);
     }
@@ -6621,7 +6694,6 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
      */
     function StorageCard({ config, targets, t }) {
       const zones = targets.storageZones ?? { sidebar: [], views: [], guide: [], settings: [], plugins: [] };
-      const [collapsed, setCollapsed] = React.useState({});
       const sections = [
         { id: 'sidebar', titleKey: 'storageZoneSidebar', found: zones.sidebar ?? [], emptyKey: 'storageZoneEmpty' },
         { id: 'views', titleKey: 'storageZoneViews', found: zones.views ?? [], emptyKey: 'storageZoneEmpty' },
@@ -6631,6 +6703,22 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
         { id: 'headerUtilities', titleKey: 'storageZoneHeaderUtilities', found: zones.headerUtilities ?? [], emptyKey: 'storageHeaderUtilitiesUnavailable' },
         { id: 'settingsActions', titleKey: 'storageZoneSettingsActions', found: zones.settingsActions ?? [], emptyKey: 'storageSettingsActionsUnavailable' },
       ];
+      /**
+       * 折叠态**惰性初始化一次**，之后只由用户点击改动。
+       * 早先每帧按「还有未收纳项吗」实时算，于是收完最后一个入口的瞬间该区自己收起——
+       * 表现为「收了又弹回去」。默认展开有未收纳项的区，全绿的就收起。
+       */
+      const [collapsed, setCollapsed] = React.useState(() => {
+        const init = {};
+        for (const section of sections) {
+          const stored = config.storage?.[section.id] ?? [];
+          const rows = section.found ?? [];
+          const storedCount = rows.filter((entry) => stored.some((item) => sameStorageEntry(item, entry))).length;
+          const shouldOpen = rows.length > 0 && storedCount < rows.length;
+          if (!shouldOpen) init[section.id] = true;
+        }
+        return init;
+      });
       const toggle = (zone, entry, on) => updateConfig((draft) => {
         const list = draft.storage[zone];
         const others = list.filter((item) => !sameStorageEntry(item, entry));
@@ -6684,11 +6772,11 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
         /* 七个区原来是一串连着的标题 + 列表，分区之间没有分隔，用户看不出边界；
            而且每区各带一个独立滚动框，嵌套感很重。改成可折叠分区：
            标题行同时是折叠按钮，右侧给「已收纳/总数」的计数，折叠后只留一行。
-           默认只展开还有未收纳项的分区——全绿的分区展开也没有可做的事，
-           七区全展开会有 2915px、六屏多。 */
+           默认展开态由首次挂载时算一次写进 state（见上面的初始化 effect），之后完全由用户点击掌握。
+           早先写成「每次渲染按 storedCount < rows.length 实时算」，于是收纳完最后一个入口的
+           瞬间该区自动收起——用户看到的是「收了又自己弹回去」。 */
         const storedCount = rows.filter((entry) => stored.some((item) => sameStorageEntry(item, entry))).length;
-        const defaultOpen = rows.length > 0 && storedCount < rows.length;
-        const open = collapsed[section.id] === undefined ? defaultOpen : collapsed[section.id] !== true;
+        const open = collapsed[section.id] !== true;
         return h('section', { key: section.id, className: 'dshl-zone', 'data-open': open ? 'true' : 'false' },
           h('button', {
             type: 'button',
@@ -7205,7 +7293,7 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
      * 这样滚到哪一页都还能切分页、导出配置。浮层面板与详情页入口共用这一份正文。
      */
     function EditorBody({ t }) {
-      const { config, targets, ui } = useStoreSnapshot();
+      const { config, targets, ui, dirty } = useStoreSnapshot();
       const [message, setMessage] = React.useState(null);
       const [activeTab, setActiveTab] = React.useState(readStoredEditorTab);
       const fileRef = React.useRef(null);
@@ -7362,10 +7450,25 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
           h('p', { className: 'dshl-hint dshl-tabHint' }, t(activeTabSpec.hintKey)),
           h('div', { className: 'dshl-cards' }, activeTabSpec.cards.map((cardId) => cardRenderers[cardId]())))),
         h('div', { className: 'dshl-panelFoot' },
+          /* 保存 / 还原：所有布局改动先落在内存里，按「保存」才写进宿主与本地缓存。
+             这样宿主永远收不到中间态，也就没有「被旧快照盖回去」的回退与循环。 */
+          h('button', {
+            type: 'button',
+            className: 'dshl-btn',
+            'data-primary': dirty ? 'true' : undefined,
+            disabled: !dirty,
+            onClick: saveConfig,
+          }, t('saveConfig')),
+          h('button', {
+            type: 'button',
+            className: 'dshl-btn',
+            disabled: !dirty,
+            onClick: revertConfig,
+          }, t('revertConfig')),
+          dirty ? h('span', { className: 'dshl-dirtyBadge' }, t('unsavedHint')) : null,
           h('button', { type: 'button', className: 'dshl-btn', onClick: exportFile }, t('exportData')),
           h('button', { type: 'button', className: 'dshl-btn', onClick: () => fileRef.current !== null && fileRef.current.click() }, t('importData')),
           h('input', { ref: fileRef, type: 'file', accept: 'application/json,.json', style: { display: 'none' }, onChange: importFile }),
-          h('span', { className: 'dshl-hint' }, t('footHint')),
           message === null ? null : h('span', { className: 'dshl-message', 'data-error': message.ok ? 'false' : 'true' }, message.text)));
     }
 
