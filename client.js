@@ -34,6 +34,7 @@ window.__ModuleLoader__.load({
       notDetected: '未识别界面结构',
       enable: '启用自定义布局',
       enableHint: '关闭后立即恢复 DSH 默认布局，配置保留。',
+      footHint: '关闭立即还原；也可拖分隔条调宽。',
       editing: '编辑模式',
       editingHint: '在界面上直接拖动分隔条，浮动工具条里可换预设。',
       presets: '预设',
@@ -456,6 +457,7 @@ window.__ModuleLoader__.load({
       notDetected: 'Interface not detected',
       enable: 'Enable custom layout',
       enableHint: 'Turning this off restores the DSH default layout; your settings are kept.',
+      footHint: 'Off restores defaults; dividers also resize.',
       editing: 'Edit mode',
       editingHint: 'Drag the dividers on the interface; switch presets from the floating toolbar.',
       presets: 'Presets',
@@ -4316,6 +4318,12 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
 .dshl-item[data-active="true"] { border-color:var(--dsw-alias-brand-primary); background:color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, var(--dsw-alias-bg-layer-2)); }
 .dshl-surfaceGroup { display:flex; flex-direction:column; gap:4px; }
 .dshl-surfaceGroupTitle { font-size:11px; line-height:16px; color:var(--dsw-alias-label-secondary); }
+/* 可折叠分组标题：整行可点，默认折叠。12 个槽位全展开有 92 行、占三屏。 */
+.dshl-groupToggle { display:flex; align-items:center; gap:4px; width:100%; min-height:22px; padding:2px 4px; margin-left:-4px; border:none; border-radius:6px; background:transparent; color:var(--dsw-alias-label-secondary); font:inherit; font-size:11px; line-height:16px; text-align:left; cursor:pointer; }
+.dshl-groupToggle:hover { background:var(--dsw-alias-interactive-bg-hover); color:var(--dsw-alias-label-primary); }
+.dshl-groupToggle svg { flex:none; }
+.dshl-groupToggleLabel { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dshl-groupToggle[data-open="true"] { color:var(--dsw-alias-label-primary); }
 .dshl-surfaceDot { width:6px; height:6px; border-radius:50%; flex:none; background:var(--dsw-alias-label-secondary); opacity:.45; }
 .dshl-surfaceDot[data-on="true"] { opacity:1; background:var(--dsw-alias-state-success-primary); }
 .dshl-surfaceDot[data-on="true"][data-source="official"] { background:var(--dsw-alias-brand-primary); }
@@ -4327,11 +4335,14 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
 .dshl-iconBtn:before { content:''; position:absolute; inset:-2px; border-radius:6px; }
 .dshl-iconBtn:hover { background:var(--dsw-alias-interactive-bg-hover); color:var(--dsw-alias-label-primary); }
 .dshl-iconBtn:disabled { opacity:.3; cursor:default; }
-.dshl-foot { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .dshl-btn { height:28px; padding:0 12px; border-radius:var(--dsw-radius-md, 8px); border:1px solid var(--dsw-alias-border-l1); background:transparent; color:var(--dsw-alias-label-primary); font-size:12px; font-family:inherit; cursor:pointer; }
 .dshl-btn:hover { background:var(--dsw-alias-interactive-bg-hover); }
 .dshl-btn[data-primary="true"] { background:var(--dsw-alias-brand-primary); border-color:var(--dsw-alias-brand-primary); color:var(--dsw-alias-bg-layer-1, #111); }
 .dshl-btn[data-primary="true"]:hover { filter:brightness(1.08); }
+/* 禁用态：按钮本来就置灰，但 :hover 仍会亮起来，看着像能点。 */
+.dshl-btn:disabled { opacity:.4; cursor:default; }
+.dshl-btn:disabled:hover { background:transparent; }
+.dshl-btn[data-primary="true"]:disabled:hover { filter:none; }
 .dshl-hint { font-size:11px; line-height:17px; color:var(--dsw-alias-label-secondary); }
 .dshl-message { font-size:11px; color:var(--dsw-alias-state-success-primary); }
 .dshl-message[data-error="true"] { color:var(--dsw-alias-state-error-primary); }
@@ -4360,24 +4371,49 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
 .dshl-launcher { display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 12px 0 9px; border-radius:999px; border:1px solid var(--dsw-alias-border-l2); background:var(--dsw-alias-bg-overlay); color:var(--dsw-alias-label-primary); font-size:12px; font-family:inherit; cursor:pointer; pointer-events:auto; box-shadow:var(--dsw-elevation-prominent, 0 6px 18px rgba(0,0,0,.25)); opacity:.72; transition:opacity .15s; }
 .dshl-launcher:hover { opacity:1; }
 .dshl-warn { margin:0; font-size:11px; line-height:17px; color:var(--dsw-alias-state-warn-primary); }
-.dshl-panel { position:fixed; top:52px; bottom:16px; z-index:1250; width:min(480px, calc(100vw - 32px)); display:flex; flex-direction:column; border-radius:14px; border:1px solid var(--dsw-alias-border-l2); background:var(--dsw-alias-bg-overlay); box-shadow:0 16px 40px rgba(0,0,0,.28); pointer-events:auto; color:var(--dsw-alias-label-primary); overflow:hidden; }
+/* 面板外壳用 layer-2 而不是 bg-overlay：overlay 是中灰 #61666b，比卡片还亮两个层级，
+   层次会倒过来；宿主设置弹层也用 layer-2，这里跟它对齐。 */
+.dshl-panel { position:fixed; top:52px; bottom:16px; z-index:1250; width:min(480px, calc(100vw - 32px)); display:flex; flex-direction:column; border-radius:16px; border:1px solid var(--dsw-alias-border-l2); background:var(--dsw-alias-bg-layer-2); box-shadow:0 16px 40px rgba(0,0,0,.28); pointer-events:auto; color:var(--dsw-alias-label-primary); overflow:hidden; font-size:13px; line-height:20px; }
 /* 白板加载中 / 加载失败的兜底层：与白板同层，不留白屏也不挡住恢复通道 */
 .dshl-boardFallback { position:fixed; inset:0; z-index:1260; display:flex; align-items:center; justify-content:center; padding:24px; background:color-mix(in srgb, var(--dsw-alias-bg-overlay, #1b1b1f) 88%, transparent); color:var(--dsw-alias-label-primary); pointer-events:auto; }
 .dshl-boardFallbackBox { display:flex; flex-direction:column; gap:10px; max-width:420px; padding:16px; border-radius:12px; border:1px solid var(--dsw-alias-border-l2); background:var(--dsw-alias-bg-layer-1); }
 .dshl-boardFallbackBox p { margin:0; font-size:13px; line-height:20px; }
 .dshl-panel[data-side="right"] { right:16px; }
 .dshl-panel[data-side="left"] { left:16px; }
-.dshl-panelHead { display:flex; align-items:center; gap:6px; padding:9px 10px 9px 12px; border-bottom:1px solid var(--dsw-alias-border-l1); flex:none; }
+/* 四段骨架：头 / 工具区 / 分页条 / 滚动正文 / 底栏。
+   工具区与分页条固定在面板上，只有正文滚——否则滚到深处就没有导航了（实测分页条会滚到 y=-210）。 */
+.dshl-panelHead { display:flex; align-items:center; gap:6px; padding:8px 8px 8px 12px; border-bottom:1px solid var(--dsw-alias-border-l1); flex:none; }
 .dshl-panelTitle { font-size:13px; font-weight:600; white-space:nowrap; }
 .dshl-panelPage { flex:1; min-width:0; font-size:11px; line-height:16px; color:var(--dsw-alias-label-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right; }
-.dshl-panelBody { flex:1; min-height:0; overflow-y:auto; padding:12px; }
-.dshl-panel .dshl-cards { grid-template-columns:minmax(0,1fr); }
-.dshl-panel .dshl-tab { padding:8px 9px 9px; font-size:12px; }
+.dshl-panelTool { flex:none; display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:8px 12px; border-bottom:1px solid var(--dsw-alias-border-l1); }
+.dshl-panelTool .dshl-presets { flex:1 1 100%; gap:4px; }
+.dshl-panelTool .dshl-presetsLabel { font-size:11px; }
+.dshl-panelTool .dshl-controlRow { gap:8px 16px; flex:1 1 100%; }
+.dshl-panelTool .dshl-control .dshl-rowLabel { font-size:12px; }
+.dshl-panelTool .dshl-chip { height:24px; padding:0 9px; font-size:11px; }
+.dshl-panelTool .dshl-btn { height:26px; padding:0 10px; }
+.dshl-panelTabs { flex:none; padding:0 12px; }
+.dshl-panelBody { flex:1; min-height:0; overflow-y:auto; padding:12px; font-size:13px; line-height:20px; color:var(--dsw-alias-label-primary); }
+.dshl-panelFoot { flex:none; display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:8px 12px; border-top:1px solid var(--dsw-alias-border-l1); }
+.dshl-panelFoot .dshl-message { flex:1 1 100%; }
+.dshl-panel .dshl-cards { grid-template-columns:minmax(0,1fr); gap:10px; }
+.dshl-panel .dshl-tabs { flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; }
+.dshl-panel .dshl-tabs::-webkit-scrollbar { display:none; }
+.dshl-panel .dshl-tab { padding:8px 8px 9px; font-size:12px; flex:none; }
+.dshl-panel .dshl-tabPanel { padding-top:10px; }
+.dshl-panel .dshl-card { padding:10px; gap:8px; border-radius:var(--dsw-radius-md, 12px); background:var(--dsw-alias-bg-layer-1); }
 .dshl-panel .dshl-presets { gap:6px; }
 .dshl-panel .dshl-listScroll { max-height:200px; }
+.dshl-panel .dshl-list { gap:2px; }
+.dshl-panel .dshl-item { padding:3px 6px; }
+.dshl-panel .dshl-hint, .dshl-panel .dshl-cardDesc { color:var(--dsw-alias-label-secondary); }
 .dshl-sourcesList { max-height:340px; overflow-y:auto; padding-right:2px; display:flex; flex-direction:column; gap:8px; }
 @media (max-width: 900px) {
-  .dshl-panel { left:12px !important; right:12px !important; width:auto; top:auto; bottom:12px; max-height:66vh; }
+  /* 窄屏改底部抽屉：五段固定部分吃掉 197px，66vh 时正文只剩 267px，抬到 82vh 才够用。 */
+  .dshl-panel { left:12px !important; right:12px !important; width:auto; top:auto; bottom:12px; max-height:82vh; }
+  .dshl-panelTool { gap:6px; padding:6px 10px; }
+  .dshl-panelTool .dshl-presets { gap:4px; }
+  .dshl-panelFoot { padding:6px 10px; }
 }
 `;
 
@@ -4661,6 +4697,7 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
     const ICON_DOWN = ['M8 3.5v9', 'M4.6 8.4 8 11.8l3.4-3.4'];
     const ICON_SWAP = ['M3 5.5h7', 'M7.5 3 10 5.5 7.5 8', 'M13 10.5H6', 'M8.5 8 6 10.5 8.5 13'];
     const ICON_CLOSE = ['M4.5 4.5l7 7', 'M11.5 4.5l-7 7'];
+    const ICON_CARET = ['M6 4l4 4-4 4'];
 
     function Switch({ checked, onChange, label }) {
       return h('button', {
@@ -5730,6 +5767,7 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
     function PluginSourcesCard({ config, targets, t }) {
       const [showAll, setShowAll] = React.useState(false);
       const [search, setSearch] = React.useState('');
+      const [collapsed, setCollapsed] = React.useState({});
       const [dragId, setDragId] = React.useState('');
       const [overId, setOverId] = React.useState('');
       const sources = targets.slotSources ?? null;
@@ -5902,12 +5940,27 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
             visibleGroups.length === 0
               ? h('p', { className: 'dshl-hint' }, t('slotSearchEmpty'))
               : h('div', { className: 'dshl-sourcesList' },
-                ...visibleGroups.map(({ group, items }) => h('div', { key: group.slot, className: 'dshl-surfaceGroup' },
-                  h('div', { className: 'dshl-surfaceGroupTitle' }, `${group.slot} · ${kindLabel(group.kind)} · ${group.rendered}/${group.items.length}`),
-                  h('div', { className: 'dshl-list' },
-                    ...visualItems(group)
-                      .filter((item) => items.includes(item))
-                      .map((item) => itemRow(group, item))))))));
+                ...visibleGroups.map(({ group, items }) => {
+                  /* 12 个槽位全展开有 92 行、占三屏；默认折叠，点标题展开。
+                     搜索时强制展开命中组，否则搜到了还看不见。 */
+                  const open = query !== '' || collapsed[group.slot] !== true;
+                  return h('div', { key: group.slot, className: 'dshl-surfaceGroup' },
+                    h('button', {
+                      type: 'button',
+                      className: 'dshl-groupToggle',
+                      'data-open': open ? 'true' : 'false',
+                      'aria-expanded': open ? 'true' : 'false',
+                      onClick: () => setCollapsed((prev) => ({ ...prev, [group.slot]: open })),
+                    },
+                    icon(open ? ICON_DOWN : ICON_CARET, 11),
+                    h('span', { className: 'dshl-groupToggleLabel' }, `${group.slot} · ${kindLabel(group.kind)} · ${group.rendered}/${group.items.length}`)),
+                    open
+                      ? h('div', { className: 'dshl-list' },
+                        ...visualItems(group)
+                          .filter((item) => items.includes(item))
+                          .map((item) => itemRow(group, item)))
+                      : null);
+                }))));
     }
 
     /**
@@ -6811,18 +6864,36 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
     }
 
     /**
-     * 面板正文：开关、预设、四类分页与卡片。
-     * 浮层面板与详情页入口分开渲染，正文只留一份，避免两处各写一套卡片。
+     * 面板正文：工具区、分页条、滚动卡片区、底栏四段。
+     * 四段都是 `.dshl-panel` 的直接子节点（靠 flex 排），只有卡片区滚动，
+     * 这样滚到哪一页都还能切分页、导出配置。浮层面板与详情页入口共用这一份正文。
      */
     function EditorBody({ t }) {
       const { config, targets, ui } = useStoreSnapshot();
       const [message, setMessage] = React.useState(null);
       const [activeTab, setActiveTab] = React.useState(readStoredEditorTab);
       const fileRef = React.useRef(null);
+      const tabRefs = React.useRef({});
       const activeTabSpec = EDITOR_TABS.find((item) => item.id === activeTab) ?? EDITOR_TABS[0];
       const selectTab = (tabId) => {
         setActiveTab(tabId);
         writeStoredEditorTab(tabId);
+      };
+      /* 分页条按 WAI-ARIA tabs 模式走 roving tabindex：只有激活项进 Tab 序列，
+         ←/→ 切相邻页，Home/End 跳到首尾。否则六个页签各占一个 Tab 位、方向键无效。 */
+      const onTabKeyDown = (event) => {
+        const index = EDITOR_TABS.findIndex((item) => item.id === activeTab);
+        const count = EDITOR_TABS.length;
+        let next = -1;
+        if (event.key === 'ArrowRight') next = (index + 1) % count;
+        else if (event.key === 'ArrowLeft') next = (index - 1 + count) % count;
+        else if (event.key === 'Home') next = 0;
+        else if (event.key === 'End') next = count - 1;
+        if (next === -1) return;
+        event.preventDefault();
+        const spec = EDITOR_TABS[next];
+        selectTab(spec.id);
+        tabRefs.current[spec.id]?.focus();
       };
       const cardRenderers = {
         schemes: () => h(SchemesCard, { config, t }),
@@ -6882,77 +6953,82 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
           || config.sidebar.panelHidden.length > 0
           || config.sidebar.hidden.length >= BLOCKS.length);
 
-      return h('div', { className: 'dshl-root' },
-        h('div', { className: 'dshl-controlRow' },
-          h('div', { className: 'dshl-control' },
-            h('span', { className: 'dshl-rowLabel' }, t('enable')),
-            h(Switch, {
-              checked: config.enabled,
-              label: t('enable'),
-              onChange: (on) => updateConfig((draft) => { draft.enabled = on; }, { capture: on }),
-            })),
-          h('div', { className: 'dshl-control' },
-            h('span', { className: 'dshl-rowLabel' }, t('editing')),
-            h(Switch, {
-              checked: ui.editing,
-              label: t('editing'),
-              onChange: (on) => {
-                if (on && !snapshot.config.enabled) updateConfig((draft) => { draft.enabled = true; }, { capture: true });
-                setEditing(on);
+      return h(React.Fragment, null,
+        h('div', { className: 'dshl-panelTool' },
+          h('div', { className: 'dshl-controlRow' },
+            h('div', { className: 'dshl-control' },
+              h('span', { className: 'dshl-rowLabel' }, t('enable')),
+              h(Switch, {
+                checked: config.enabled,
+                label: t('enable'),
+                onChange: (on) => updateConfig((draft) => { draft.enabled = on; }, { capture: on }),
+              })),
+            h('div', { className: 'dshl-control' },
+              h('span', { className: 'dshl-rowLabel' }, t('editing')),
+              h(Switch, {
+                checked: ui.editing,
+                label: t('editing'),
+                onChange: (on) => {
+                  if (on && !snapshot.config.enabled) updateConfig((draft) => { draft.enabled = true; }, { capture: true });
+                  setEditing(on);
+                },
+              })),
+            h('div', { className: 'dshl-control' },
+              h('button', { type: 'button', className: 'dshl-btn', 'data-primary': 'true', onClick: openBoard }, t('boardOpen')))),
+          h('div', { className: 'dshl-presets' },
+            h('span', { className: 'dshl-presetsLabel' }, t('presets')),
+            ...presetLabels.map(([name, label]) => h('button', {
+              key: name,
+              type: 'button',
+              className: 'dshl-chip',
+              onClick: () => applyPreset(name),
+            }, label)),
+            h('button', {
+              type: 'button',
+              className: 'dshl-chip',
+              onClick: () => {
+                replaceConfig(null);
+                setEditing(false);
+                setMessage(null);
               },
-            })),
-          h('div', { className: 'dshl-control' },
-            h('button', { type: 'button', className: 'dshl-btn', 'data-primary': 'true', onClick: openBoard }, t('boardOpen')))),
-        risky ? h('p', { className: 'dshl-warn' }, t('riskyHint')) : null,
-        h('div', { className: 'dshl-presets' },
-          h('span', { className: 'dshl-presetsLabel' }, t('presets')),
-          ...presetLabels.map(([name, label]) => h('button', {
-            key: name,
-            type: 'button',
-            className: 'dshl-chip',
-            onClick: () => applyPreset(name),
-          }, label)),
-          h('button', {
-            type: 'button',
-            className: 'dshl-chip',
-            onClick: () => {
-              replaceConfig(null);
-              setEditing(false);
-              setMessage(null);
+            }, t('reset'))),
+          risky ? h('p', { className: 'dshl-warn' }, t('riskyHint')) : null),
+        h('div', { className: 'dshl-panelTabs' },
+          h('div', { className: 'dshl-tabs', role: 'tablist', 'aria-label': t('title'), onKeyDown: onTabKeyDown },
+            ...EDITOR_TABS.map((tabSpec) => h('button', {
+              key: tabSpec.id,
+              type: 'button',
+              role: 'tab',
+              id: `dshl-tab-${tabSpec.id}`,
+              ref: (node) => { tabRefs.current[tabSpec.id] = node; },
+              className: 'dshl-tab',
+              tabIndex: activeTab === tabSpec.id ? 0 : -1,
+              'data-active': activeTab === tabSpec.id ? 'true' : undefined,
+              'aria-selected': activeTab === tabSpec.id ? 'true' : 'false',
+              'aria-controls': `dshl-tabpanel-${tabSpec.id}`,
+              onClick: () => selectTab(tabSpec.id),
             },
-          }, t('reset'))),
-        h('div', { className: 'dshl-tabs', role: 'tablist', 'aria-label': t('title') },
-          ...EDITOR_TABS.map((tabSpec) => h('button', {
-            key: tabSpec.id,
-            type: 'button',
-            role: 'tab',
-            id: `dshl-tab-${tabSpec.id}`,
-            className: 'dshl-tab',
-            'data-active': activeTab === tabSpec.id ? 'true' : undefined,
-            'aria-selected': activeTab === tabSpec.id ? 'true' : 'false',
-            'aria-controls': `dshl-tabpanel-${tabSpec.id}`,
-            onClick: () => selectTab(tabSpec.id),
+            h('span', { className: 'dshl-tabLabel' }, t(tabSpec.labelKey)),
+            tabSpec.id === 'recognition' && (targets.anomalies?.length ?? 0) > 0
+              ? h('span', { className: 'dshl-tabBadge' }, String(targets.anomalies.length))
+              : null)))),
+        h('div', { className: 'dshl-panelBody' },
+          h('div', {
+            className: 'dshl-tabPanel',
+            role: 'tabpanel',
+            id: `dshl-tabpanel-${activeTab}`,
+            'aria-labelledby': `dshl-tab-${activeTab}`,
+            tabIndex: 0,
+            'data-tab': activeTab,
           },
-          h('span', { className: 'dshl-tabLabel' }, t(tabSpec.labelKey)),
-          tabSpec.id === 'recognition' && (targets.anomalies?.length ?? 0) > 0
-            ? h('span', { className: 'dshl-tabBadge' }, String(targets.anomalies.length))
-            : null))),
-        h('div', {
-          className: 'dshl-tabPanel',
-          role: 'tabpanel',
-          id: `dshl-tabpanel-${activeTab}`,
-          'aria-labelledby': `dshl-tab-${activeTab}`,
-          'data-tab': activeTab,
-        },
-        h('p', { className: 'dshl-hint dshl-tabHint' }, t(activeTabSpec.hintKey)),
-        h('div', { className: 'dshl-cards' }, activeTabSpec.cards.map((cardId) => cardRenderers[cardId]()))),
-        h('div', { className: 'dshl-divider' }),
-        h('div', { className: 'dshl-foot' },
+          h('p', { className: 'dshl-hint dshl-tabHint' }, t(activeTabSpec.hintKey)),
+          h('div', { className: 'dshl-cards' }, activeTabSpec.cards.map((cardId) => cardRenderers[cardId]())))),
+        h('div', { className: 'dshl-panelFoot' },
           h('button', { type: 'button', className: 'dshl-btn', onClick: exportFile }, t('exportData')),
           h('button', { type: 'button', className: 'dshl-btn', onClick: () => fileRef.current !== null && fileRef.current.click() }, t('importData')),
           h('input', { ref: fileRef, type: 'file', accept: 'application/json,.json', style: { display: 'none' }, onChange: importFile }),
-          message === null ? null : h('span', { className: 'dshl-message', 'data-error': message.ok ? 'false' : 'true' }, message.text)),
-        h('p', { className: 'dshl-hint' }, `${t('enableHint')} ${t('editingHint')}`));
+          h('span', { className: 'dshl-hint' }, t('footHint')),
+          message === null ? null : h('span', { className: 'dshl-message', 'data-error': message.ok ? 'false' : 'true' }, message.text)));
     }
 
     /** 面板标题上的当前页面：设置浮层 > 会话页 > 插件详情页 > 外部插件页 > 侧栏面板名。 */
@@ -6994,7 +7070,7 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
           'aria-label': t('panelClose'),
           onClick: () => setPanel(false),
         }, icon(ICON_CLOSE, 14))),
-      h('div', { className: 'dshl-panelBody' }, h(EditorBody, { t })));
+      h(EditorBody, { t }));
     }
 
     /** 插件详情页入口：编辑器搬进全局浮层后，这里只留开关、入口与约束说明。 */
