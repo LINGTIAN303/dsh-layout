@@ -1492,11 +1492,23 @@ window.__ModuleLoader__.load({
         }
         return out;
       };
-      // 开始页卡片的稳定身份就是 kind：早期条目 id 为空时在此补成 id=kind（docs/plans/2026-11-08-身份键收口.md）
+      /**
+       * 开始页卡片的稳定身份就是 kind：早期条目没有 id 时在此补成 id=kind。
+       *
+       * 判空**必须判非空字符串**，不能写 `entry.id === ''`：
+       * 上面 storageZone 已经把空 id 整个删掉了（`if (id !== '') record.id = id`），
+       * 所以运行期历史条目的 `id` 是 `undefined` 而不是 `''`，`undefined === ''` 恒假 →
+       * 补 id 永不发生。后果是一整条链：
+       *   身份键变成 `kind\0label`，与当前发现条目（`id=kind`）配不上 →
+       *   开关永远显示「未收纳」→ 用户点一下写进第二条重复条目（实测 1 条变 2 条）。
+       *
+       * 这与第二十一轮修的 8 处 `entry.id !== ''` 是同一个坑，那轮漏了这里
+       * （docs/plans/已完成/2026-11-10-全量回归.md）。
+       */
       const guideZone = () => {
         const out = [];
         for (const entry of storageZone(storageRaw.guide)) {
-          const upgraded = entry.id === '' && (entry.kind ?? '') !== '' ? { ...entry, id: entry.kind } : entry;
+          const upgraded = !hasStorageId(entry) && (entry.kind ?? '') !== '' ? { ...entry, id: entry.kind } : entry;
           if (out.some((item) => item.id === upgraded.id && item.label === upgraded.label)) continue;
           out.push(upgraded);
         }
