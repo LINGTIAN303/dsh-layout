@@ -1782,8 +1782,12 @@ window.__ModuleLoader__.load({
      * 位置由框本身给出，目标容器只在运行时做碰撞判定、不进配置。
      *
      * 进入时**临时收起编辑面板**并记下它原来是否开着：面板贴在左/右会盖住要画的位置，
-     * 而画框是「对着真实界面指位置」的操作，视野越干净越好。退出时恢复原状，
-     * 否则用户「调整一下」之后面板凭空消失，还得重新找入口。
+     * 而画框是「对着真实界面指位置」的操作，视野越干净越好。
+     *
+     * 退出时的恢复规则是「只还原我们收起的，不动用户后来自己开的」：
+     * 进画框时面板原本开着 → 我们把它收了 → 退出要放回来；
+     * 进画框时面板本来就关着 → 用户期间自己按快捷键开了 → 退出**不能**关掉它。
+     * 如果无条件写成 `panel: panelBeforeFramer`，第二种情况会把用户刚打开的面板吞掉。
      */
     let panelBeforeFramer = false;
     function setFramer(sourceId) {
@@ -1794,7 +1798,8 @@ window.__ModuleLoader__.load({
         panelBeforeFramer = snapshot.ui.panel;
         snapshot = { ...snapshot, ui: { ...snapshot.ui, framer: sourceId, panel: false } };
       } else if (leaving) {
-        snapshot = { ...snapshot, ui: { ...snapshot.ui, framer: sourceId, panel: panelBeforeFramer } };
+        // 面板要么本来开着（该还原），要么用户在画框期间自己开了（保留）；两者都 false 才保持关闭
+        snapshot = { ...snapshot, ui: { ...snapshot.ui, framer: sourceId, panel: snapshot.ui.panel || panelBeforeFramer } };
         panelBeforeFramer = false;
       } else {
         snapshot = { ...snapshot, ui: { ...snapshot.ui, framer: sourceId } };
@@ -1814,7 +1819,20 @@ window.__ModuleLoader__.load({
     function commitFrame(sourceId, rect, mode) {
       if (typeof sourceId !== 'string' || sourceId === '') return;
       const source = relocateSources(snapshot.targets).find((item) => item.id === sourceId);
-      const sourceBox = source === undefined ? null : relocateSourceBox(source.node);
+      /*
+       * 源此刻不在场就**不写配置**。
+       *
+       * FrameLayer 有「源消失就自动退出」的守卫，但那要等下一轮渲染；
+       * 这条路径仍可能在竞争窗口里被走到（画完松手的同时页面切走了）。
+       * 写进去的会是一条永远不生效的搬移：面板上标「源单元不在场」，
+       * 用户以为画成功了，其实它对着一个已经不存在的东西。
+       * 什么都不做 + 退出画框，比制造一条幽灵配置好。
+       */
+      if (source === undefined) {
+        setFramer('');
+        return;
+      }
+      const sourceBox = relocateSourceBox(source.node);
       const raw = Math.max(FRAME_MIN_WIDTH, Math.round(rect.w));
       const width = mode === 'nudge' ? raw : Math.max(raw, sourceBox === null ? 0 : Math.ceil(sourceBox.width));
       updateConfig((draft) => {
@@ -7874,7 +7892,10 @@ window.__ModuleLoader__.load({
             return;
           }
           if (event.key === 'Enter' && rect !== null && rect.w >= 8) {
+            // stopPropagation 必须加：Enter 在宿主里通常是「提交输入框」，
+            // 画框时按下会让会话输入框也收到一次——用户以为只是确认了框，结果消息发出去了
             event.preventDefault();
+            event.stopPropagation();
             commitFrame(sourceId, rect, 'nudge');
             return;
           }
@@ -7884,6 +7905,7 @@ window.__ModuleLoader__.load({
            */
           if (rect !== null && (event.key === '+' || event.key === '=' || event.key === '-' || event.key === '_')) {
             event.preventDefault();
+            event.stopPropagation();
             const grow = event.key === '+' || event.key === '=';
             const stepW = event.shiftKey ? 40 : 10;
             const next = { ...rect, w: Math.max(8, rect.w + (grow ? stepW : -stepW)) };
@@ -7904,6 +7926,7 @@ window.__ModuleLoader__.load({
            */
           if (rect === null) {
             event.preventDefault();
+            event.stopPropagation();
             const node = source === null ? null : source.node;
             const box = node === null ? null : node.getBoundingClientRect();
             const base = box === null
@@ -7916,6 +7939,8 @@ window.__ModuleLoader__.load({
             return;
           }
           event.preventDefault();
+          // 方向键也要拦：宿主拿它做列表导航 / 光标移动，画框时误动界面很困惑
+          event.stopPropagation();
           const next = { ...rect, x: rect.x + delta[0], y: rect.y + delta[1] };
           setRect(next);
           describe(next);
@@ -8617,6 +8642,12 @@ window.__ModuleLoader__.load({
           if (event.ctrlKey !== true || event.altKey !== true || event.shiftKey !== true || event.metaKey === true) return;
           if (event.code !== 'KeyL') return;
           event.preventDefault();
+          /*
+           * 恢复通道**永远不能被编辑态挡住**——这是安全底线：用户可能正卡在一个
+           * 自己调坏了的界面上，任何「先退出某个模式才能恢复」的设计都是陷阱。
+           * 所以这里不检查、不等待，直接恢复；同时把编辑态一并收干净。
+           */
+          setFramer('');
           replaceConfig(null);
           setEditing(false);
         };
@@ -8632,6 +8663,8 @@ window.__ModuleLoader__.load({
           if (at === -1) return;
           const value = hash.slice(at + 'dsh-layout='.length).split('&')[0];
           if (value !== 'reset' && value !== 'off') return;
+          // 与快捷键同理：先退出画框，再恢复；恢复动作本身不被任何编辑态阻断
+          setFramer('');
           replaceConfig(null);
           setEditing(false);
           try {
