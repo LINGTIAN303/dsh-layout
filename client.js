@@ -1905,6 +1905,16 @@ window.__ModuleLoader__.load({
      */
     const LAYOUTS_KEY = 'dsh-layout/layouts/v1';
     const LAYOUTS_MAX = 20;
+    /**
+     * 方案表版本号：方案表每次写入（覆盖保存、改名、删除、切 active）都递增。
+     *
+     * 用途是给「切方案」规则做「这次该不该重新应用」的判据（见 applySchemeRule）：
+     * 判据必须是「方案表变了没有」，而不是「配置对象引用变没变」——后者会被用户的
+     * 任何一次普通改动破坏，导致方案反复覆盖用户的操作。
+     *
+     * 声明在这里而不是持久化段：writeLayouts 要用它，声明晚于使用会踩 TDZ。
+     */
+    let layoutsVersion = 0;
 
     /**
      * 方案表：只认结构完整的条目，name 去空白、config 走 normalizeConfig，上限 20 套。
@@ -1941,6 +1951,8 @@ window.__ModuleLoader__.load({
       const payload = { active: state.active, list: state.list };
       writeJsonStore(LAYOUTS_KEY, payload);
       hostWrite('schemes', JSON.stringify(payload));
+      // 方案表变了：让「切方案」规则可以在下一轮重新应用（覆盖保存 / 换方案后应当生效）
+      layoutsVersion += 1;
     }
 
     /**
@@ -4038,8 +4050,6 @@ window.__ModuleLoader__.load({
     let hostPendingTimer = null;
     /** 写发出后多久还没被宿主确认，就放弃拦截（宿主写失败时不能让界面永远收不到外部改动）。 */
     const HOST_PENDING_TIMEOUT = 4000;
-    /** 方案表版本号：宿主读回方案后让卡片重取。 */
-    let layoutsVersion = 0;
 
     /** 取宿主配置表单并订阅；服务不在场时保持 null（此后全程走 localStorage）。 */
     function bindHostForm(ctx) {
@@ -4221,24 +4231,39 @@ window.__ModuleLoader__.load({
 
     /**
      * 「切方案」动作的执行器。
-     * 两个必须处理的陷阱：
+     * 三个必须处理的陷阱：
      * 1. 回环：切方案会整体替换配置，而配置里就带着这条规则；直接应用会反复触发。
-     *    解法是记录「上次应用发生在哪一份配置上」，同一份配置上同一目标只应用一次。
      * 2. 规则被吃掉：方案是整套配置，里面通常没有这条规则，替换后规则消失就再也不会触发。
      *    所以应用方案时先暂存当前 rules，替换后写回——规则是「触发条件」，方案是「布局内容」，两者分开。
+     * 3. **不能覆盖用户的后续改动**（第二十四轮修）：见下方 schemeApplied 的说明。
      */
-    let schemeApplied = { key: '', config: null };
+    let schemeApplied = { key: '', stamp: '' };
     function applySchemeRule(plan) {
       if (plan.scheme === '') {
-        schemeApplied = { key: '', config: null };
+        schemeApplied = { key: '', stamp: '' };
         return false;
       }
-      if (schemeApplied.key === plan.scheme && schemeApplied.config === snapshot.config) return false;
+      /*
+       * 「已应用过」的判据是「方案 id + 方案表版本」，**不是配置对象引用**。
+       *
+       * 早先写成 `schemeApplied.config === snapshot.config`，用配置对象引用判断
+       * 「同一份配置上只应用一次」。这在纸面上成立（应用后记下新引用），实际有洞：
+       * 用户应用方案之后任何一次操作（点开关、拖排序）都会走 updateConfig → 新的
+       * snapshot.config → 引用不匹配 → 下一轮 refresh 规则再次触发 → **用户的改动被方案覆盖**。
+       * 而且会无限重复：用户每改一次就被覆盖一次。
+       *
+       * 改用「方案表版本 + 方案 id」。注意 stamp 必须取**应用之前**的版本：
+       * 应用本身会调 writeLayouts（切 active），它会让 layoutsVersion 递增；
+       * 若 stamp 取应用之后的版本，下一轮 refresh 算出的 stamp 又变了，判据仍然失效。
+       * 判据要稳定地表达「这份方案内容我应用过了」，就不能把「应用动作自身造成的版本变化」算进去。
+       */
+      const stamp = `${layoutsVersion}:${plan.scheme}`;
+      if (schemeApplied.key === plan.scheme && (schemeApplied.stamp === stamp || schemeApplied.stampAfter === stamp)) return false;
       const state = readLayoutsNormalized();
       const entry = state.list.find((item) => item.id === plan.scheme);
       if (entry === undefined) {
         // 方案还不存在（规则先建、方案没存 / 方案被删）：记下这次尝试，避免每轮 refresh 都重扫一遍
-        schemeApplied = { key: plan.scheme, config: snapshot.config };
+        schemeApplied = { key: plan.scheme, stamp };
         return false;
       }
       const rules = clone(snapshot.config.rules ?? []);
@@ -4247,7 +4272,13 @@ window.__ModuleLoader__.load({
         updateConfig((draft) => { draft.rules = rules; });
       }
       writeLayouts({ ...state, active: entry.id });
-      schemeApplied = { key: plan.scheme, config: snapshot.config };
+      /*
+       * 记录「应用前的版本 + 应用后的版本」两个端点：下一轮 refresh 算出的 stamp
+       * 若等于其中任一个，都说明「这份方案已经应用过」，不再重复。
+       * 应用后版本之所以也要认，是因为 writeLayouts 让版本前进了；不认它就会在
+       * 「应用 → 下一轮」时判成未应用，形成无限重复（实测正是这样）。
+       */
+      schemeApplied = { key: plan.scheme, stamp, stampAfter: `${layoutsVersion}:${plan.scheme}` };
       return true;
     }
 
@@ -4630,10 +4661,26 @@ window.__ModuleLoader__.load({
     }
 
 
+    /**
+     * 面板导航顺序 → 插件来源条目的顺序（排序同步）。
+     *
+     * **不要先全删再全写**：早先的写法是
+     *   `for (const link of links) delete draft.slots.order[link.key];`
+     * 然后只给「label 能在 panelOrder 里找到」的 link 写回。
+     * 于是 label 找不到的那些 link，它们的 order **被永久删掉**，而且这类条目
+     * 往往也不在排序列表里（列表只合并 config.panelOrder + 当前已渲染的面板），
+     * 用户看不到它、也就无从恢复。
+     *
+     * 触发条件：插件已渲染过（link 已建立）但此刻不在场（面板被隐藏、插件临时卸载），
+     * 同时它的 label 从未写进 panelOrder。这时用户拖动任意一个其它面板就会清掉它。
+     *
+     * 正确做法：只重写能定位到的 link，定位不到的原样保留——顺序值多留一条无害，
+     * 丢了就是用户排序丢失。
+     */
     function syncSlotsFromPanelOrder(draft, links) {
-      for (const link of links) delete draft.slots.order[link.key];
       for (const link of links) {
         const at = draft.sidebar.panelOrder.indexOf(link.label);
+        // 找不到位置就跳过，不删原值
         if (at >= 0) draft.slots.order[link.key] = at;
       }
     }
