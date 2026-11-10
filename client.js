@@ -253,8 +253,8 @@ window.__ModuleLoader__.load({
       frameCancel: '取消',
       frameApply: '应用',
       frameTitle: (label) => `正在为「${label}」画框：按下并拖出一个矩形`,
-      frameUsage: '松手即应用；Esc 或右键取消。框的左上角就是落位，框宽就是宽度。',
-      frameUsageExisting: '已有框：框内拖可整体移动，拖右边缘可改宽度，方向键微调（Shift 加大步长），Enter 应用，Esc 取消。',
+      frameUsage: '松手即应用；Esc 或右键取消。框的左上角就是落位，框宽就是宽度。没有鼠标时：直接按方向键生成一个框。',
+      frameUsageExisting: '已有框：框内拖可整体移动，拖右边缘可改宽度，方向键微调（Shift 加大步长），+/- 改宽度（Shift 加大步长），Enter 应用，Esc 取消。',
       frameTooSmall: '框太小了，再拉大一点。',
       frameClean: '空白处',
       frameNoHost: '不在任何区域内，按视口定位',
@@ -694,8 +694,8 @@ window.__ModuleLoader__.load({
       frameCancel: 'Cancel',
       frameApply: 'Apply',
       frameTitle: (label) => `Drawing a frame for "${label}": press and drag a rectangle`,
-      frameUsage: 'Release to apply; Esc or right click to cancel. The top-left corner is the placement, the frame width is the width.',
-      frameUsageExisting: 'Existing frame: drag inside to move, drag the right edge to resize, arrow keys nudge (Shift for bigger steps), Enter applies, Esc cancels.',
+      frameUsage: 'Release to apply; Esc or right click to cancel. The top-left corner is the placement, the frame width is the width. No mouse? Just press an arrow key to spawn a frame.',
+      frameUsageExisting: 'Existing frame: drag inside to move, drag the right edge to resize, arrow keys nudge (Shift for bigger steps), +/- resize width (Shift for bigger steps), Enter applies, Esc cancels.',
       frameTooSmall: 'The frame is too small, drag a bit further.',
       frameClean: 'free space',
       frameNoHost: 'outside any region, placed against the viewport',
@@ -3599,6 +3599,12 @@ window.__ModuleLoader__.load({
     /**
      * 搬移解析：把配置里的框换算成一次落位。
      * `active` 是要建立投影的条目，`legacy` 是旧形态（{to, place}）需要重画的源 id。
+     *
+     * 这里有个容易漏的协作关系：**多个搬移源互相看不见**。
+     * 障碍表来自「区域的子元素矩形」，而一个已经被搬走的源虽然仍是子元素，
+     * 它的矩形已经变成投影位置；同一轮里首次落位的两个源则都还是原始位置——
+     * 于是两个源搬到同一处时，A 看 B 在原位、B 看 A 在原位，谁也不让，直接叠在一起。
+     * 解法是把「本轮其它源的落位框」显式并入障碍表：源之间互相避让，而不是靠下一轮投影后的 DOM 巧合收敛。
      */
     function relocateResolve(targets, config) {
       const byId = new Map(relocateSources(targets).map((source) => [source.id, source]));
@@ -3606,6 +3612,7 @@ window.__ModuleLoader__.load({
       const viewport = { width: window.innerWidth, height: window.innerHeight };
       const active = [];
       const legacy = new Set();
+      const specs = Object.entries(config.relocate ?? {}).filter(([, spec]) => spec !== null && typeof spec === 'object' && spec.legacy !== true);
       for (const [sourceId, spec] of Object.entries(config.relocate ?? {})) {
         if (spec === null || typeof spec !== 'object') continue;
         if (spec.legacy === true) {
@@ -3634,13 +3641,39 @@ window.__ModuleLoader__.load({
           ? Math.max(1, Math.round(live.node.getBoundingClientRect().height))
           : Math.max(1, Math.round(sourceBox.height));
         const probe = { x: frame.x, y: frame.y, width: size.width, height: currentHeight };
-        // 目标容器 = 框落进去的那个区域；障碍 = 该区域内已被占用的同级内容
+        // 目标容器 = 框落进去的那个区域；障碍 = 该区域内已被占用的同级内容 + 本轮其它源的落位框
         const host = relocateHostOf(probe, targets);
         const obstacles = relocateObstacles(host, source.node);
+        for (const box of peerFrames(specs, sourceId, byId)) obstacles.push(box);
         const resolved = relocateResolveFrame(probe, obstacles, topBound, viewport);
         active.push({ sourceId, node: source.node, frame, resolved, host: host === null ? '' : host.name });
       }
       return { active, legacy };
+    }
+
+    /**
+     * 本轮其它搬移源的预计落位框：作为显式障碍参与避让。
+     *
+     * 只取它们**配置的框**（不是解析后的位置）——解析后的位置依赖本轮结果，
+     * 拿它做障碍会形成顺序依赖：先解析的源影响后解析的，换个遍历顺序结果就变。
+     * 用配置框是稳定的：用户画在哪，就是它「名义上」占的地方；实际让位后再挪一点也无妨，
+     * 因为下一轮解析会以对方的实际 height 重新对齐。
+     */
+    function peerFrames(specs, selfId, byId) {
+      const out = [];
+      for (const [sourceId, spec] of specs) {
+        if (sourceId === selfId) continue;
+        const frame = normalizeFrame(spec.frame);
+        if (frame === null) continue;
+        const source = byId.get(sourceId);
+        if (source === undefined) continue;
+        // 对方此刻不在场就不占位
+        const sourceBox = relocateSourceBox(source.node);
+        if (sourceBox === null) continue;
+        const width = Math.max(FRAME_MIN_WIDTH, frame.w, Math.ceil(sourceBox.width));
+        out.push({ left: frame.x, top: frame.y, right: frame.x + width, bottom: frame.y + Math.max(8, sourceBox.height) });
+      }
+      return out;
     }
 
     function relocateActiveList(targets, config) {
@@ -7704,13 +7737,23 @@ window.__ModuleLoader__.load({
        * 用户画的框高只是个视觉指示。若预览用画框高度、落位用源高度，两者判定就会不一致
        * （典型：用户画了个矮框，预览说「空白」，实际源更高、压住了内容）。
        * 这里跟 relocateResolve 完全对齐，取 sourceHeight。
+       *
+       * **障碍表要按 host 缓存**：pointermove 每次都会触发这里，而 relocateObstacles 会为
+       * 区域内每个子元素做 getComputedStyle + getBoundingClientRect（强制同步布局）。
+       * 拖一次鼠标几百个事件，每个都全量量一遍就是几百次布局抖动，拖起来会明显发涩。
+       * 障碍只依赖「落在哪个区域」，同一次拖拽里 host 不变就用缓存。
        */
+      const obstacleCache = React.useRef({ key: '', boxes: [] });
       const evaluate = (candidate) => {
         if (candidate === null) return null;
         const width = Math.max(FRAME_MIN_WIDTH, candidate.w, sourceWidth);
         const probe = { x: candidate.x, y: candidate.y, width, height: Math.max(8, sourceHeight) };
         const host = relocateHostOf(probe, targets);
-        const boxes = relocateObstacles(host, source === null ? null : source.node);
+        const cacheKey = host === null ? '' : host.name;
+        if (obstacleCache.current.key !== cacheKey) {
+          obstacleCache.current = { key: cacheKey, boxes: relocateObstacles(host, source === null ? null : source.node) };
+        }
+        const boxes = obstacleCache.current.boxes;
         const hits = boxes.some((box) => frameHitsContainer(probe, box));
         const resolved = relocateResolveFrame(probe, boxes, projectionTopBound(), { width: window.innerWidth, height: window.innerHeight });
         return { probe, host, boxes, resolved, hits };
@@ -7835,9 +7878,43 @@ window.__ModuleLoader__.load({
             commitFrame(sourceId, rect, 'nudge');
             return;
           }
+          /*
+           * 改宽度也要有键盘入口：只有方向键的话，纯键盘用户建出框之后改不了宽度，
+           * 想变宽只能整个重来。用 +/= 变宽、- 变窄（Shift 加大步长）。
+           */
+          if (rect !== null && (event.key === '+' || event.key === '=' || event.key === '-' || event.key === '_')) {
+            event.preventDefault();
+            const grow = event.key === '+' || event.key === '=';
+            const stepW = event.shiftKey ? 40 : 10;
+            const next = { ...rect, w: Math.max(8, rect.w + (grow ? stepW : -stepW)) };
+            setRect(next);
+            describe(next);
+            return;
+          }
           const step = event.shiftKey ? 10 : 1;
           const delta = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[event.key];
-          if (delta === undefined || rect === null) return;
+          if (delta === undefined) return;
+          /*
+           * 没有框时按方向键 → 以源当前位置为起点生成一个默认框。
+           *
+           * 没有这条的话，键盘 / 触屏用户进了画框层就**没有任何办法建出第一个框**——
+           * 方向键、Enter 全都要求「已有框」才生效，唯一的建框方式是拖鼠标。
+           * 默认框直接取源的现有矩形（位置与宽度都是它此刻真实的位置），
+           * 于是「不改位置只改宽」或「纯键盘微调」这两类需求都能走下去。
+           */
+          if (rect === null) {
+            event.preventDefault();
+            const node = source === null ? null : source.node;
+            const box = node === null ? null : node.getBoundingClientRect();
+            const base = box === null
+              ? { x: Math.round(window.innerWidth / 2 - 120), y: Math.round(window.innerHeight / 3), w: FRAME_MIN_WIDTH, h: Math.max(8, sourceHeight) }
+              : { x: Math.round(box.left), y: Math.round(box.top), w: Math.max(FRAME_MIN_WIDTH, Math.round(box.width)), h: Math.max(8, Math.round(box.height)) };
+            // 方向键本身也生效：生成的同时按一下，符合「按了就动」的直觉
+            const next = { ...base, x: base.x + delta[0], y: base.y + delta[1] };
+            setRect(next);
+            describe(next);
+            return;
+          }
           event.preventDefault();
           const next = { ...rect, x: rect.x + delta[0], y: rect.y + delta[1] };
           setRect(next);
