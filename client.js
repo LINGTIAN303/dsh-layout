@@ -4082,17 +4082,28 @@ window.__ModuleLoader__.load({
       const value = snap.value ?? {};
       const documentText = typeof value.document === 'string' ? value.document : '';
       const schemesText = typeof value.schemes === 'string' ? value.schemes : '';
-      // 宿主是空的（第一次升级到宿主存储）：把本地缓存推上去，否则用户不改任何设置就永远带不走旧配置
-      if (documentText === '' || schemesText === '') {
-        migrateLocalToHost(documentText === '', schemesText === '');
-        return;
-      }
+      /*
+       * 两个字段必须**各自独立**处理：空的那个走迁移，非空的那个走应用。
+       *
+       * 早先写成 `if (documentText === '' || schemesText === '') { migrate(...); return; }`，
+       * 用「或」判断 —— 任一字段为空就整个 return，**两个字段都不应用**。
+       * 于是「有配置、但从没存过方案」的用户（首次使用的常态），
+       * 宿主的 document 永远读不进界面：每次都走 migrate，而 migrate 有一次性守卫，
+       * 第二次进来什么都不做。表现为「配置在宿主里，界面却是默认布局」。
+       *
+       * 这个组合非常常见：migrateLocalToHost 只在 localStorage 里真有旧方案时才会写 schemes，
+       * 全新安装的 localStorage 是空的，schemes 就一直是空字符串。
+       */
+      const needDocument = documentText === '';
+      const needSchemes = schemesText === '';
+      if (needDocument || needSchemes) migrateLocalToHost(needDocument, needSchemes);
       // 有未保存改动时，宿主推来的一律不采用：本地草稿是用户正在编辑的东西，
       // 被宿主的旧值盖掉就变成「改一下回退一下」甚至循环。显式保存之后不存在这个问题——
       // 用户按「保存」时才会写宿主，写之前宿主手里那份本来就是旧的。
       if (configIsDirty()) return;
-      if (hostPending.document === null && documentText !== hostLastWritten.document) applyHostDocument(documentText);
-      if (hostPending.schemes === null && schemesText !== hostLastWritten.schemes) applyHostSchemes(schemesText);
+      // 非空的字段照常应用；空的那个等迁移写完、宿主回推后再进来（那时它就不空了）
+      if (documentText !== '' && hostPending.document === null && documentText !== hostLastWritten.document) applyHostDocument(documentText);
+      if (schemesText !== '' && hostPending.schemes === null && schemesText !== hostLastWritten.schemes) applyHostSchemes(schemesText);
     }
 
     /** 一次性迁移：宿主该字段为空时，用 localStorage 里的现值填上（不覆盖宿主已有内容）。 */
@@ -4126,6 +4137,18 @@ window.__ModuleLoader__.load({
         return;
       }
       const next = normalizeConfig(parsed);
+      /*
+       * 记下「这份宿主文本已经用过了」。
+       *
+       * 不记的后果：宿主若把同一份 document 推两次（外部改动后订阅多发一次、
+       * 或多客户端同时在线），`documentText !== hostLastWritten.document` 一直为真，
+       * 每次推送都重跑整份 normalizeConfig + 整轮 notify 重渲染。
+       * 结果正确（重复应用是幂等的），但白做。
+       *
+       * 记的是**宿主传来的原始文本**，不是 normalize 后的序列化结果：
+       * 这里要挡的是「同一份宿主文本」，比较对象必须与 consumeHostSnapshot 里的一致。
+       */
+      hostLastWritten = { ...hostLastWritten, document: text };
       try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch (error) { /* 缓存写失败不影响主存储 */ }
       snapshot = { ...snapshot, config: next };
       planCache = { targets: null, config: null, value: null };
@@ -4143,6 +4166,8 @@ window.__ModuleLoader__.load({
         console.warn('[dsh-layout] 宿主里的布局方案不是合法 JSON，保留当前方案表', error);
         return;
       }
+      // 与 applyHostDocument 同理：记下已用过的宿主文本，避免同一份重复应用
+      hostLastWritten = { ...hostLastWritten, schemes: text };
       writeJsonStore(LAYOUTS_KEY, parsed);
       layoutsVersion += 1;
       notify();
@@ -4172,7 +4197,26 @@ window.__ModuleLoader__.load({
             }
           }
         })
-        .catch((error) => { console.warn('[dsh-layout] 写入宿主设置失败，本地缓存仍然有效', error); });
+        .catch((error) => {
+          console.warn('[dsh-layout] 写入宿主设置失败，本地缓存仍然有效', error);
+          /*
+           * 失败也要清掉在途标记：否则 `hostPending[field]` 会一直挡住宿主推来的值，
+           * 界面在 4 秒超时前完全收不到外部改动。写入失败往往意味着宿主已转只读
+           * （`writable` 变 false、权限被收回），那种状态下更需要接受宿主推来的值。
+           *
+           * 同时把 hostLastWritten 回退成「不认这份文本」：这次没写成功，
+           * 若宿主之后推来同一份内容，应当视为外部改动并应用。
+           */
+          if (hostPending[field] === text) {
+            hostPending = { ...hostPending, [field]: null };
+            if (hostPending.document === null && hostPending.schemes === null && hostPendingTimer !== null) {
+              window.clearTimeout(hostPendingTimer);
+              hostPendingTimer = null;
+            }
+          }
+          // 只在「认领的还是这一笔」时回退：串行链里后续的写可能已经把它覆盖成本身的值
+          if (hostLastWritten[field] === text) hostLastWritten = { ...hostLastWritten, [field]: null };
+        });
     }
 
     /**
