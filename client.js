@@ -233,6 +233,7 @@ window.__ModuleLoader__.load({
       relocateEmptySources: '当前没有可搬移的单元。',
       relocateRemove: '移除',
       relocateRedraw: '重画',
+      relocateAdjust: '调整',
       relocatePending: '此刻不在场，暂不生效',
       relocateActive: '已生效',
       relocateGone: '源单元不在场',
@@ -250,8 +251,10 @@ window.__ModuleLoader__.load({
       relocateSourceSlot: '槽位条目',
       frameStart: '开始画框',
       frameCancel: '取消',
+      frameApply: '应用',
       frameTitle: (label) => `正在为「${label}」画框：按下并拖出一个矩形`,
       frameUsage: '松手即应用；Esc 或右键取消。框的左上角就是落位，框宽就是宽度。',
+      frameUsageExisting: '已有框：框内拖可整体移动，拖右边缘可改宽度，方向键微调（Shift 加大步长），Enter 应用，Esc 取消。',
       frameTooSmall: '框太小了，再拉大一点。',
       frameClean: '空白处',
       frameNoHost: '不在任何区域内，按视口定位',
@@ -671,6 +674,7 @@ window.__ModuleLoader__.load({
       relocateEmptySources: 'No movable unit right now.',
       relocateRemove: 'Remove',
       relocateRedraw: 'Redraw',
+      relocateAdjust: 'Adjust',
       relocatePending: 'not present now, inactive',
       relocateActive: 'active',
       relocateGone: 'source not present',
@@ -688,8 +692,10 @@ window.__ModuleLoader__.load({
       relocateSourceSlot: 'Slot entry',
       frameStart: 'Draw frame',
       frameCancel: 'Cancel',
+      frameApply: 'Apply',
       frameTitle: (label) => `Drawing a frame for "${label}": press and drag a rectangle`,
       frameUsage: 'Release to apply; Esc or right click to cancel. The top-left corner is the placement, the frame width is the width.',
+      frameUsageExisting: 'Existing frame: drag inside to move, drag the right edge to resize, arrow keys nudge (Shift for bigger steps), Enter applies, Esc cancels.',
       frameTooSmall: 'The frame is too small, drag a bit further.',
       frameClean: 'free space',
       frameNoHost: 'outside any region, placed against the viewport',
@@ -1774,10 +1780,25 @@ window.__ModuleLoader__.load({
      *
      * 画框取代了「选目标容器 + 选开头/结尾」两步：用户直接在界面上拖出一个框，
      * 位置由框本身给出，目标容器只在运行时做碰撞判定、不进配置。
+     *
+     * 进入时**临时收起编辑面板**并记下它原来是否开着：面板贴在左/右会盖住要画的位置，
+     * 而画框是「对着真实界面指位置」的操作，视野越干净越好。退出时恢复原状，
+     * 否则用户「调整一下」之后面板凭空消失，还得重新找入口。
      */
+    let panelBeforeFramer = false;
     function setFramer(sourceId) {
       if (snapshot.ui.framer === sourceId) return;
-      snapshot = { ...snapshot, ui: { ...snapshot.ui, framer: sourceId } };
+      const entering = sourceId !== '' && snapshot.ui.framer === '';
+      const leaving = sourceId === '' && snapshot.ui.framer !== '';
+      if (entering) {
+        panelBeforeFramer = snapshot.ui.panel;
+        snapshot = { ...snapshot, ui: { ...snapshot.ui, framer: sourceId, panel: false } };
+      } else if (leaving) {
+        snapshot = { ...snapshot, ui: { ...snapshot.ui, framer: sourceId, panel: panelBeforeFramer } };
+        panelBeforeFramer = false;
+      } else {
+        snapshot = { ...snapshot, ui: { ...snapshot.ui, framer: sourceId } };
+      }
       notify();
     }
 
@@ -1786,12 +1807,16 @@ window.__ModuleLoader__.load({
      *
      * 宽度下限夹到源单元实测宽——用户把框画得比源还窄时，源内容会被压没，
      * 而「框不足以容纳源宽高时自动放大」正是这套机制该做的事。
+     *
+     * `mode` 为 'nudge' 时不走放大：拖动已有框只是改位置，宽度沿用配置里的值。
+     * 否则每次微调都会被「源原始宽」重新顶一次，框永远拖不窄、也拖不到源宽以下。
      */
-    function commitFrame(sourceId, rect) {
+    function commitFrame(sourceId, rect, mode) {
       if (typeof sourceId !== 'string' || sourceId === '') return;
       const source = relocateSources(snapshot.targets).find((item) => item.id === sourceId);
       const sourceBox = source === undefined ? null : relocateSourceBox(source.node);
-      const width = Math.max(FRAME_MIN_WIDTH, Math.round(rect.w), sourceBox === null ? 0 : Math.ceil(sourceBox.width));
+      const raw = Math.max(FRAME_MIN_WIDTH, Math.round(rect.w));
+      const width = mode === 'nudge' ? raw : Math.max(raw, sourceBox === null ? 0 : Math.ceil(sourceBox.width));
       updateConfig((draft) => {
         draft.relocate[sourceId] = { frame: normalizeFrame({ x: rect.x, y: rect.y, w: width }) };
       });
@@ -3496,17 +3521,39 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 目标容器内部已被占用的矩形：区域的可读直接子元素。
+     * 目标容器内部已被占用的矩形。
      *
-     * 只取直接子级而不是全部后代——框在区域里是「与同级内容争位置」，
-     * 把容器内部的每一层后代都算进来会得到一堆互相嵌套的框，判定必然处处碰撞。
-     * 源自身（及其祖先链）排除，否则「原地微调」会被自己挡住。
+     * 层级要自适应，不能固定取「直接子元素」：宿主不同区域的结构深度不一样——
+     * 侧栏区域下面是 `[data-slot=sidebar]` 再套一层才是真正的块容器，会话区下面是 convroot。
+     * 固定取直接子级时，这类区域会退化成一个「把整个区域都包住」的障碍，框落哪儿都碰撞。
+     * 所以从源节点所在层开始下钻：只要某层只有一个「实质包裹」子元素（不含源自身），就继续往里走，
+     * 直到拿到一组真正并列的内容块。
+     *
+     * 源自身（及其祖先链）必须排除，否则「原地微调」会被自己挡住。
      */
+    function relocateObstacleLevel(host, sourceNode) {
+      let level = host.node;
+      for (let depth = 0; depth < 4; depth += 1) {
+        const kids = [...level.children].filter((child) => !(sourceNode !== null && sourceNode !== undefined && (child === sourceNode || child.contains(sourceNode))));
+        const readable = kids.filter((child) => readableBox(child) !== null);
+        // 只有一个实质子级、且它几乎撑满父级 → 只是个包裹层，继续下钻
+        if (readable.length !== 1) return { level, kids: readable };
+        const only = readable[0];
+        const parentBox = readableBox(level);
+        const onlyBox = readableBox(only);
+        if (parentBox === null || onlyBox === null) return { level, kids: readable };
+        const spansMost = onlyBox.width >= parentBox.width - 4 && onlyBox.height >= parentBox.height - 4;
+        if (!spansMost) return { level, kids: readable };
+        level = only;
+      }
+      return { level, kids: [...level.children].filter((child) => readableBox(child) !== null) };
+    }
+
     function relocateObstacles(host, sourceNode) {
       if (host === null) return [];
+      const { kids } = relocateObstacleLevel(host, sourceNode);
       const out = [];
-      for (const child of host.node.children) {
-        if (sourceNode !== null && sourceNode !== undefined && (child === sourceNode || child.contains(sourceNode))) continue;
+      for (const child of kids) {
         const box = readableBox(child);
         if (box === null) continue;
         out.push({ left: box.left, top: box.top, right: box.right, bottom: box.bottom });
@@ -4614,8 +4661,16 @@ window.__ModuleLoader__.load({
 /* 形状不适配警告：搬过去能「生效」但内容会被压没，行上直接说明压缩比 */
 .dshl-relocateFitWarn { flex:none; font-size:11px; color:var(--dsw-alias-state-warn-primary); }
 /* 画框中间层：全屏捕捉鼠标，压暗界面但保留可辨认度；框本身反向提亮，一眼看出会盖住什么 */
-.dshl-framer { position:fixed; inset:0; z-index:1300; cursor:crosshair; background:color-mix(in srgb, var(--dsw-alias-bg-layer-1, #111) 22%, transparent); }
-.dshl-frameRect { position:absolute; border:1px solid var(--dsw-alias-brand-primary); background:color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent); box-shadow:0 0 0 9999px color-mix(in srgb, var(--dsw-alias-bg-layer-1, #111) 14%, transparent); pointer-events:none; }
+/* 压暗交给主框的 9999px 投影：它天然把「框内」留亮、「框外」压暗，一眼看出框住了什么。
+   framer 自己不上底色，否则框内也被压一层，反而看不出选了哪块内容。 */
+.dshl-framer { position:fixed; inset:0; z-index:1300; cursor:crosshair; }
+/* 压暗只由主框负责（一框一层遮罩）。多个框各带 9999px 投影会叠加成好几层，越拖越黑。 */
+.dshl-frameRect { position:absolute; border:1px solid var(--dsw-alias-brand-primary); background:color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent); pointer-events:none; }
+.dshl-frameRect:not([data-preview]) { box-shadow:0 0 0 9999px color-mix(in srgb, var(--dsw-alias-bg-layer-1, #111) 14%, transparent); }
+/* 落位影子：自动让位后的真实位置。虚线 + 无底色，与用户画的框区分开 */
+.dshl-frameRect[data-preview="true"] { border-style:dashed; background:transparent; border-color:color-mix(in srgb, var(--dsw-alias-state-success-primary, #2fb37a) 80%, transparent); }
+/* 右边缘改宽抓手：静默时只有一条细线，hover 变宽，提示「这里能拖」 */
+.dshl-frameGrip { position:absolute; width:6px; height:28px; border-radius:3px; background:color-mix(in srgb, var(--dsw-alias-brand-primary) 70%, transparent); cursor:ew-resize; pointer-events:none; }
 .dshl-frameHint { position:absolute; left:50%; transform:translateX(-50%); top:calc(var(--dshl-framer-top, 48px)); max-width:min(560px, calc(100vw - 32px)); padding:8px 12px; border-radius:10px; border:1px solid var(--dsw-alias-border-l2); background:color-mix(in srgb, var(--dsw-alias-bg-layer-1) 96%, transparent); color:var(--dsw-alias-label-primary); font-size:12px; line-height:18px; box-shadow:0 6px 20px rgba(0,0,0,.28); pointer-events:none; }
 .dshl-frameUsage { color:var(--dsw-alias-label-secondary); }
 .dshl-frameCtl { display:flex; align-items:center; gap:8px; margin-top:8px; pointer-events:auto; }
@@ -6454,7 +6509,7 @@ window.__ModuleLoader__.load({
      * 位置由框本身给出（见 docs/plans/2026-11-10-搬移改画框.md）。
      * 已配置的搬移逐条显示此刻状态：生效 / 源不在场 / 需重画（旧形态）/ 位置与容器冲突。
      */
-    function RelocateCard({ config, targets, ui, t }) {
+    function RelocateCard({ config, targets, t }) {
       const allSources = relocateSources(targets);
       const sourceIds = new Set(allSources.map((source) => source.id));
       const [sourceId, setSourceId] = React.useState('');
@@ -6492,8 +6547,7 @@ window.__ModuleLoader__.load({
                   ...items.map((source) => h('option', { key: source.id, value: source.id },
                     source.labelKey === null ? source.name : t(source.labelKey))));
               }))),
-            h('button', { type: 'button', className: 'dshl-btn', 'data-primary': 'true', disabled: sourceId === '', onClick: () => startFraming(sourceId) }, t('frameStart')),
-            ui.framer === '' ? null : h('button', { type: 'button', className: 'dshl-btn', onClick: () => setFramer('') }, t('frameCancel'))),
+            h('button', { type: 'button', className: 'dshl-btn', 'data-primary': 'true', disabled: sourceId === '', onClick: () => startFraming(sourceId) }, t('frameStart'))),
         h('p', { className: 'dshl-hint' }, t('relocateFrameHint')),
         legacyIds.length === 0 ? null : h('div', { className: 'dshl-relocateRow', 'data-squeezed': 'true' },
           h('span', { className: 'dshl-relocateState', 'data-squeezed': 'true' }, t('relocateLegacy')),
@@ -6525,7 +6579,7 @@ window.__ModuleLoader__.load({
                 type: 'button',
                 className: 'dshl-btn',
                 onClick: () => startFraming(id),
-              }, t('relocateRedraw')),
+              }, t('relocateAdjust')),
               h('button', {
                 type: 'button',
                 className: 'dshl-iconBtn',
@@ -7366,7 +7420,7 @@ window.__ModuleLoader__.load({
         externalUnits: () => h(ExternalUnitsCard, { config, targets, t }),
         pluginSources: () => h(PluginSourcesCard, { config, targets, t }),
         arrange: () => h(ArrangeCard, { config, targets, t }),
-        relocate: () => h(RelocateCard, { config, targets, ui, t }),
+        relocate: () => h(RelocateCard, { config, targets, t }),
         sync: () => h(SyncCard, { config, targets, t }),
         rules: () => h(RulesCard, { config, targets, t }),
         conversation: () => h(ConversationCard, { config, targets, t }),
@@ -7518,6 +7572,12 @@ window.__ModuleLoader__.load({
       return panel === '(unknown)' ? t('surfacePluginsManager') : panel;
     }
 
+    /** 画框层的区域名翻译：只有四个固定区域，缺一个就退回原始名。 */
+    function frameHostLabel(name, t) {
+      const key = { sidebar: 'sidebar', center: 'center', rightbar: 'rightbar', settings: 'settingsPanel', bottom: 'bottomBar' }[name];
+      return key === undefined ? name : t(key);
+    }
+
     /**
      * 画框中间层：全屏捕捉鼠标，拖出一个矩形作为搬移的落位与宽度。
      *
@@ -7525,117 +7585,238 @@ window.__ModuleLoader__.load({
      * 目标容器与位置这两维在「用户能直接指出位置」的前提下不需要建模。用户画出什么位置就是什么位置，
      * 于是配置里只剩几何，槽位表与形状表整类问题随之消失（docs/plans/已完成/2026-11-10-搬移改画框.md）。
      *
-     * 交互：按下开始画，移动跟手，松手提交；Esc / 右键 / 点提示条的「取消」退出。
-     * 拖出的框会实时显示「会压住哪个区域里已有的内容」「是不是比源还窄」，用户在松手前就能判断。
+     * 交互：
+     * - 空白处按下并拖 → 画一个新框，松手提交
+     * - 已有框时**框内按住拖 → 整体移动**（不必重画；只改位置，不走宽度放大）
+     * - **拖右边中段 → 改宽度**
+     * - 方向键微调 1px（Shift+方向键 10px），Enter 提交，Esc / 右键 / 「取消」退出
+     *
+     * 松手前实时显示最终会落在哪里（含自动让位后的位置），所见即所得。
      */
     function FrameLayer({ t }) {
       const { targets, ui } = useStoreSnapshot();
       const sourceId = ui.framer;
       const [rect, setRect] = React.useState(null);
       const [hint, setHint] = React.useState('');
-      const originRef = React.useRef(null);
+      /** 拖拽意图：new（新画）/ move（整体平移）/ width（改右边缘宽）。 */
+      const dragRef = React.useRef(null);
+      const rootRef = React.useRef(null);
       const source = React.useMemo(
         () => (sourceId === '' ? null : (relocateSources(targets).find((item) => item.id === sourceId) ?? null)),
         [targets, sourceId],
       );
       const sourceBox = source === null ? null : relocateSourceBox(source.node);
       const sourceWidth = sourceBox === null ? 0 : Math.ceil(sourceBox.width);
+      const sourceHeight = sourceBox === null ? 40 : Math.ceil(sourceBox.height);
+      /** 已有框：进入画框层时用它预填，于是「重画」变成「在旧框上微调」。 */
+      const existing = sourceId === '' ? null : normalizeFrame(snapshot.config.relocate?.[sourceId]?.frame);
+
+      // 首次进入时把已有框填进来；没有就等用户画
+      React.useEffect(() => {
+        if (sourceId === '') return undefined;
+        const start = normalizeFrame(snapshot.config.relocate?.[sourceId]?.frame);
+        setRect(start === null ? null : { x: start.x, y: start.y, w: start.w, h: Math.max(8, sourceHeight) });
+        setHint('');
+        return undefined;
+        // 只在切换目标源时重置：拖拽过程中的 rect 变化不该把框重置回旧值
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, [sourceId]);
 
       // 源在画框期间被 React 重建（页面切换、列表增删）时直接退出，避免对着不存在的东西画框
       React.useEffect(() => {
         if (sourceId !== '' && source === null) setFramer('');
       }, [sourceId, source]);
 
-      const resolveRect = (start, current) => {
-        const left = Math.min(start.x, current.x);
-        const top = Math.min(start.y, current.y);
-        const width = Math.abs(current.x - start.x);
-        const height = Math.abs(current.y - start.y);
-        return { x: Math.round(left), y: Math.round(top), w: Math.round(width), h: Math.round(height) };
-      };
-
       /**
-       * 松手前的即时判定：把「会压住容器里已被占用的内容」「框比源窄」先说清楚。
-       * 用与落位同一套判据（relocateHostOf / relocateObstacles / relocateResolveFrame），
-       * 所以这里说会压住，落位时就真的会触发迁移——不会出现「预览说没事、松手跑掉」。
+       * 用与落位完全相同的判据算「最终会落在哪」：预览说没事、松手就跑掉是不可接受的。
+       * 返回 { probe, host, boxes, resolved, hits } 供提示条与影子框共用。
        */
-      const describeRect = (candidate) => {
-        if (candidate.w < 8 || candidate.h < 8) {
-          setHint(t('frameTooSmall'));
-          return;
-        }
+      const evaluate = (candidate) => {
+        if (candidate === null) return null;
         const width = Math.max(FRAME_MIN_WIDTH, candidate.w, sourceWidth);
         const probe = { x: candidate.x, y: candidate.y, width, height: Math.max(8, candidate.h) };
         const host = relocateHostOf(probe, targets);
         const boxes = relocateObstacles(host, source === null ? null : source.node);
         const hits = boxes.some((box) => frameHitsContainer(probe, box));
         const resolved = relocateResolveFrame(probe, boxes, projectionTopBound(), { width: window.innerWidth, height: window.innerHeight });
-        const place = host === null ? t('frameNoHost') : t('frameHost')(t(host.name === 'settings' ? 'settingsPanel' : host.name === 'center' ? 'center' : host.name === 'sidebar' ? 'sidebar' : host.name === 'rightbar' ? 'rightbar' : host.name));
-        setHint(`${t('frameHint')(width, sourceWidth)} · ${place} · ${hits ? (resolved.conflict === true ? t('frameConflict') : t('frameMigrate')) : t('frameClean')}`);
+        return { probe, host, boxes, resolved, hits };
       };
 
+      const describe = (candidate) => {
+        if (candidate === null || candidate.w < 8 || candidate.h < 8) {
+          setHint(t('frameTooSmall'));
+          return;
+        }
+        const result = evaluate(candidate);
+        if (result === null) return;
+        const place = result.host === null ? t('frameNoHost') : t('frameHost')(frameHostLabel(result.host.name, t));
+        const state = result.hits ? (result.resolved.conflict === true ? t('frameConflict') : t('frameMigrate')) : t('frameClean');
+        setHint(`${t('frameHint')(result.probe.width, sourceWidth)} · ${place} · ${state}`);
+      };
+
+      const resolveRect = (start, current) => {
+        const left = Math.min(start.x, current.x);
+        const top = Math.min(start.y, current.y);
+        return {
+          x: Math.round(left),
+          y: Math.round(top),
+          w: Math.round(Math.abs(current.x - start.x)),
+          h: Math.round(Math.abs(current.y - start.y)),
+        };
+      };
+
+      const REACH = 18;
+      /**
+       * 按下时的意图判定。
+       *
+       * 一个必须避开的坑：已有框时，在框外按下若立刻当成「新画」，用户只是想挪一下
+       * 却点偏了几个像素，旧框就被整个丢掉、回到「从零画」。所以框外按下先标记为
+       * `new`，**等移动超过阈值才真正切到新画**（拖拽开始时才 setRect），单击则什么都不改。
+       */
       const onPointerDown = (event) => {
         if (event.button !== 0) {
           setFramer('');
           return;
         }
         event.preventDefault();
-        originRef.current = { x: event.clientX, y: event.clientY };
-        setRect({ x: Math.round(event.clientX), y: Math.round(event.clientY), w: 0, h: 0 });
-        try { event.currentTarget.setPointerCapture(event.pointerId); } catch (error) { /* 合成事件没有 pointerId 时忽略 */ }
+        const point = { x: event.clientX, y: event.clientY };
+        if (rect !== null && rect.w >= 8) {
+          const nearRightEdge = point.x >= rect.x + rect.w - REACH && point.x <= rect.x + rect.w + REACH
+            && point.y >= rect.y && point.y <= rect.y + rect.h;
+          const inside = point.x >= rect.x && point.x <= rect.x + rect.w && point.y >= rect.y && point.y <= rect.y + rect.h;
+          if (nearRightEdge) dragRef.current = { mode: 'width', origin: point, base: rect, armed: true };
+          else if (inside) dragRef.current = { mode: 'move', origin: point, base: rect, armed: true };
+          // 框外：先待命，移动超过阈值才切成新画
+          else dragRef.current = { mode: 'outside', origin: point, base: rect, armed: false };
+        } else {
+          dragRef.current = { mode: 'new', origin: point, base: null, armed: true };
+          setRect({ x: point.x, y: point.y, w: 0, h: 0 });
+        }
+        try { rootRef.current?.setPointerCapture(event.pointerId); } catch (error) { /* 合成事件可能没有 pointerId */ }
       };
+
       const onPointerMove = (event) => {
-        const origin = originRef.current;
-        if (origin === null) return;
-        const candidate = resolveRect(origin, { x: event.clientX, y: event.clientY });
+        const drag = dragRef.current;
+        if (drag === null) return;
+        const point = { x: event.clientX, y: event.clientY };
+        // 框外待命：位移够大才承认是「另画一个」，否则原框一律不动
+        if (drag.mode === 'outside') {
+          if (Math.abs(point.x - drag.origin.x) < 6 && Math.abs(point.y - drag.origin.y) < 6) return;
+          drag.mode = 'new';
+          setRect({ x: drag.origin.x, y: drag.origin.y, w: 0, h: 0 });
+        }
+        if (drag.mode === 'new') {
+          const candidate = resolveRect(drag.origin, point);
+          setRect(candidate);
+          describe(candidate);
+          return;
+        }
+        const dx = Math.round(point.x - drag.origin.x);
+        if (drag.mode === 'move') {
+          const candidate = { x: drag.base.x + dx, y: drag.base.y, w: drag.base.w, h: drag.base.h };
+          setRect(candidate);
+          describe(candidate);
+          return;
+        }
+        // width：只改宽度，位置与高度不动
+        const candidate = { x: drag.base.x, y: drag.base.y, w: Math.max(8, drag.base.w + dx), h: drag.base.h };
         setRect(candidate);
-        describeRect(candidate);
+        describe(candidate);
       };
-      const onPointerUp = (event) => {
-        const origin = originRef.current;
-        originRef.current = null;
-        if (origin === null) return;
-        const candidate = resolveRect(origin, { x: event.clientX, y: event.clientY });
-        // 单击（没拖出尺寸）视为误触，不提交——否则一个点击就会把源挪到鼠标点
-        if (candidate.w < 8 || candidate.h < 8) {
+
+      const finishDrag = (event) => {
+        const drag = dragRef.current;
+        dragRef.current = null;
+        if (drag === null) return;
+        // 框外单击（没越过阈值）：什么都不改，保留原框
+        if (drag.mode === 'outside') return;
+        if (drag.mode === 'new') {
+          const candidate = resolveRect(drag.origin, { x: event.clientX, y: event.clientY });
+          // 单击（没拖出尺寸）视为误触，不提交——否则一个点击就会把源挪到鼠标点
+          if (candidate.w < 8 || candidate.h < 8) {
+            setRect(null);
+            return;
+          }
+          commitFrame(sourceId, candidate);
+          return;
+        }
+        // 平移或改宽：按当前框提交，宽度不走「放大到源宽」
+        if (rect === null || rect.w < 8) {
           setRect(null);
           return;
         }
-        commitFrame(sourceId, candidate);
+        commitFrame(sourceId, rect, 'nudge');
       };
 
       React.useEffect(() => {
         const onKeyDown = (event) => {
-          if (event.key !== 'Escape') return;
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            event.stopPropagation();
+            setFramer('');
+            return;
+          }
+          if (event.key === 'Enter' && rect !== null && rect.w >= 8) {
+            event.preventDefault();
+            commitFrame(sourceId, rect, 'nudge');
+            return;
+          }
+          const step = event.shiftKey ? 10 : 1;
+          const delta = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[event.key];
+          if (delta === undefined || rect === null) return;
           event.preventDefault();
-          event.stopPropagation();
-          setFramer('');
+          const next = { ...rect, x: rect.x + delta[0], y: rect.y + delta[1] };
+          setRect(next);
+          describe(next);
         };
         // 捕获阶段先拦：画框层在最上面，Esc 不该同时触发面板/白板的逐层退出
         window.addEventListener('keydown', onKeyDown, true);
         return () => window.removeEventListener('keydown', onKeyDown, true);
-      }, []);
+        // rect 进依赖：方向键与 Enter 都要读当前框
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, [rect, sourceId]);
 
       if (sourceId === '') return null;
       const label = source === null
         ? sourceId
         : (source.labelKey === null ? source.name : t(source.labelKey));
+      const shown = rect !== null && rect.w >= 8 && rect.h >= 8 ? rect : null;
+      const preview = shown === null ? null : evaluate(shown);
+      // 落位影子：自动让位后的真实位置。与框重合时不画，避免叠一条重线。
+      const shadow = preview === null || (preview.resolved.x === shown.x && preview.resolved.y === shown.y) ? null : preview.resolved;
       return h('div', {
         className: 'dshl-framer',
         'data-dshl-layer': '',
+        ref: rootRef,
         onPointerDown,
         onPointerMove,
-        onPointerUp,
+        onPointerUp: finishDrag,
         onContextMenu: (event) => { event.preventDefault(); setFramer(''); },
       },
-      rect === null || rect.w < 8 || rect.h < 8 ? null : h('div', {
+      shadow === null ? null : h('div', {
         className: 'dshl-frameRect',
-        style: { left: `${rect.x}px`, top: `${rect.y}px`, width: `${rect.w}px`, height: `${rect.h}px` },
+        'data-preview': 'true',
+        style: { left: `${shadow.x}px`, top: `${shadow.y}px`, width: `${shadow.width}px`, height: `${Math.max(8, shown.h)}px` },
       }),
+      shown === null ? null : h('div', {
+        className: 'dshl-frameRect',
+        style: { left: `${shown.x}px`, top: `${shown.y}px`, width: `${shown.w}px`, height: `${shown.h}px` },
+      },
+      // 右边缘的改宽抓手：只有已画出框时才出现
+      shown === null ? null : h('div', {
+        className: 'dshl-frameGrip',
+        style: { left: `${shown.x + shown.w - 3}px`, top: `${shown.y + shown.h / 2 - 14}px` },
+      })),
       h('div', { className: 'dshl-frameHint' },
         h('div', null, t('frameTitle')(label)),
-        hint === '' ? h('div', { className: 'dshl-frameUsage' }, t('frameUsage')) : h('div', null, hint),
+        hint === '' ? h('div', { className: 'dshl-frameUsage' }, t(existing === null ? 'frameUsage' : 'frameUsageExisting')) : h('div', null, hint),
         h('div', { className: 'dshl-frameCtl' },
+          shown === null ? null : h('button', {
+            type: 'button',
+            className: 'dshl-btn',
+            'data-primary': 'true',
+            onClick: (event) => { event.stopPropagation(); commitFrame(sourceId, shown, 'nudge'); },
+          }, t('frameApply')),
           h('button', {
             type: 'button',
             className: 'dshl-btn',
@@ -8437,12 +8618,23 @@ window.__ModuleLoader__.load({
             const spec = snapshot.config.relocate?.[id] ?? null;
             const frame = spec === null ? null : normalizeFrame(spec.frame);
             const nb = node.getBoundingClientRect();
+            /*
+             * 让位是否真的生效：落位矩形与「它所在区域里已被占用的内容」再判一次相交。
+             * 这是画框机制最容易静默失效的一环——源压住了内容却没人报错，
+             * 用户只会觉得「搬过去把东西盖住了」。
+             */
+            const probe = { x: nb.left, y: nb.top, width: nb.width, height: nb.height };
+            const host = relocateHostOf(probe, snapshot.targets);
+            const boxes = relocateObstacles(host, node);
+            const overlapping = boxes.filter((box) => frameHitsContainer(probe, box)).length;
             report.relocation.push({
               id,
               frame,
+              host: host === null ? null : host.name,
               node: { x: Math.round(nb.x), y: Math.round(nb.y), w: Math.round(nb.width), h: Math.round(nb.height) },
               dx: frame === null ? null : Math.round(nb.x - frame.x),
               dy: frame === null ? null : Math.round(nb.y - frame.y),
+              overlapping,
               transform: getComputedStyle(node).transform.slice(0, 40),
               zeroWidthChildren: [...node.querySelectorAll('*')].filter((child) => child.getBoundingClientRect().width === 0 && child.children.length === 0).length,
             });
@@ -8533,6 +8725,15 @@ window.__ModuleLoader__.load({
           if (badReloc.length > 0) report.verdict.push(`${badReloc.length} 个搬移落点与配置的框不对齐`);
           const clampedNow = report.relocation.filter((item) => item.dy !== null && item.dy > 2 && item.node !== null && Math.abs(item.node.y - winBarH) <= 2);
           if (clampedNow.length > 0) report.verdict.push(`（其中 ${clampedNow.length} 个是被窗口栏下推到 ${winBarH}px，属正常）`);
+          /*
+           * 让位失效检测：落位仍与内容相交，说明「碰撞迁移」没能把源挪开。
+           * 只有 resolved.conflict 的条目才该这样（四周被占满、有意留在原位），其余都是 bug。
+           * 这里按「有没有重叠」报出来，让用户知道是「压住了」而不是「界面自己坏了」。
+           */
+          const stillOverlapping = report.relocation.filter((item) => item.overlapping > 0);
+          for (const item of stillOverlapping) {
+            report.verdict.push(`搬移 ${item.id} 的落点仍与 ${item.overlapping} 块内容相交（区域：${item.host ?? '无'}）—— 要么四周确实占满，要么是让位逻辑没生效`);
+          }
           if (report.panel !== null && !report.panel.panelIsTopmost) report.verdict.push('面板中心点上不是面板自己：可能有东西盖着它');
           if (report.verdict.length === 0) report.verdict.push('未发现已知问题模式，请把整份 JSON 贴回');
           console.log('=== dsh-layout 桌面端诊断 ===');
