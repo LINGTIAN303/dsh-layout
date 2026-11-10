@@ -1906,12 +1906,25 @@ window.__ModuleLoader__.load({
     const LAYOUTS_KEY = 'dsh-layout/layouts/v1';
     const LAYOUTS_MAX = 20;
 
-    /** 方案表：只认结构完整的条目，name 去空白、config 走 normalizeConfig，上限 20 套。 */
+    /**
+     * 方案表：只认结构完整的条目，name 去空白、config 走 normalizeConfig，上限 20 套。
+     *
+     * `truncated` 报告「读取时是否因为超出上限而丢过条目」。
+     * 不能靠调用方用 `list.length > LAYOUTS_MAX` 判断——读取阶段已经 break 过了，
+     * 返回的长度永远不超过上限，那个条件永远为假（实测是死代码）：
+     * 存储里第 21..25 条既读不出来、也永远留在存储里，不清理也不提示。
+     */
     function readLayouts() {
       const raw = readJsonStore(LAYOUTS_KEY);
       const list = [];
-      for (const item of Array.isArray(raw.list) ? raw.list : []) {
-        if (list.length >= LAYOUTS_MAX) break;
+      let truncated = false;
+      const source = Array.isArray(raw.list) ? raw.list : [];
+      for (const item of source) {
+        if (list.length >= LAYOUTS_MAX) {
+          // 还有没被读进来的条目 → 确实被上限截断了
+          truncated = true;
+          break;
+        }
         if (item === null || typeof item !== 'object') continue;
         const id = typeof item.id === 'string' && item.id.length > 0 && item.id.length <= 64 ? item.id : '';
         const name = typeof item.name === 'string' ? item.name.trim().slice(0, 40) : '';
@@ -1920,7 +1933,7 @@ window.__ModuleLoader__.load({
         list.push({ id, name, savedAt: Number.isFinite(Number(item.savedAt)) ? Number(item.savedAt) : 0, config: normalizeConfig(item.config) });
       }
       const active = typeof raw.active === 'string' && list.some((entry) => entry.id === raw.active) ? raw.active : '';
-      return { active, list };
+      return { active, list, truncated };
     }
 
     /** 方案表写两层：本地缓存立即写，宿主设置文档异步跟写（跨浏览器持久化的主力）。 */
@@ -1933,19 +1946,21 @@ window.__ModuleLoader__.load({
     /**
      * 读取方案表，并在「超出上限」时把截断后的结果写回存储。
      *
-     * 只有一种情况该写回：存储里的条目数超过 LAYOUTS_MAX（读取时按上限截断，
-     * 写回是为了让存储与内存一致，避免下次再截一遍）。
+     * 只有一种情况该写回：读取时真的因为超出 LAYOUTS_MAX 丢过条目
+     * （由 readLayouts 的 `truncated` 报告，它是在 break 发生时才置位的）。
      *
      * 这里的判据**不能**写成「raw 比规范化后的 state 长」。规范化会丢弃非法条目
      * （id 为空、name 为空、config 不是对象、id 重复），这些被丢弃的条目本来就该丢；
      * 用它当写回条件会在任何一次「存储里有脏条目」时把整张方案表覆盖成内存里的残缺版本，
-     * 极端情况下（读到的全是脏条目）会把方案表清空 —— 实测切方案规则触发后
+     * 极端情况下（读到的全是脏条目）会把方案表清空——实测切方案规则触发后
      * localStorage 里 config 与 schemes 双双消失，就是从这类覆盖开始的。
+     *
+     * 也不能写成 `state.list.length > LAYOUTS_MAX`：读取阶段已经截断，那个条件恒假（死代码）。
      */
     function readLayoutsNormalized() {
       const state = readLayouts();
-      if (state.list.length > LAYOUTS_MAX) writeLayouts(state);
-      return state;
+      if (state.truncated) writeLayouts({ active: state.active, list: state.list });
+      return { active: state.active, list: state.list };
     }
 
     /** 方案 id 只需在本机唯一：时间戳 + 递增尾数，避免同一毫秒连点两次重号。 */
@@ -4263,6 +4278,20 @@ window.__ModuleLoader__.load({
      * 值是 `undefined`。`undefined !== ''` 为真 → 直接返回 `undefined` → 这类条目互相全等，
      * 结果整张收纳表都显示成「已收纳」（实测 70+ 条误显示为已开启，而配置里是空的）。
      */
+    /**
+     * 收纳条目是否带稳定 id。
+     *
+     * **必须用这个函数，不要写 `entry.id !== ''`**：normalizeConfig 的 storageZone 会把空 id
+     * **整个删掉**（`if (id !== '') record.id = id`），所以运行期条目的 `id` 常常是 `undefined`
+     * 而不是空串。`undefined !== ''` 为真，会走错分支；紧接着 `entry.id.startsWith(...)`
+     * 直接抛 TypeError，整个 annotateStored 中断，后面所有入口的收纳状态都不生效。
+     *
+     * 这条与「身份键判空要判非空字符串」是同一类坑，只是那处已在 storageKeyOf 修过。
+     */
+    function hasStorageId(entry) {
+      return typeof entry.id === 'string' && entry.id !== '';
+    }
+
     function storageKeyOf(entry) {
       if (typeof entry.id === 'string' && entry.id !== '') return entry.id;
       return `${entry.kind ?? ''}\u0000${entry.label}`;
@@ -4415,10 +4444,10 @@ window.__ModuleLoader__.load({
       };
     }
 
-    /** 收纳条目的匹配：稳定身份优先；id 为空的早期条目退回显示名。 */
+    /** 收纳条目的匹配：稳定身份优先；无 id 的早期条目退回显示名。 */
     function findStoredFor(stored, identity, label) {
       for (const entry of stored) {
-        if (entry.id !== '') {
+        if (hasStorageId(entry)) {
           if (identityMatches(entry.id, identity)) return entry;
           continue;
         }
@@ -4445,18 +4474,19 @@ window.__ModuleLoader__.load({
         const kind = node.getAttribute(GUIDE_ENTRY_ATTR) ?? '';
         const label = guideLabelOf(node);
         const hit = guideStored.find((entry) => {
-          const key = entry.id !== '' ? entry.id : (entry.kind ?? '');
+          const key = hasStorageId(entry) ? entry.id : (entry.kind ?? '');
           if (key !== '') return key === kind;
           return entry.label === label;
         });
         if (hit === undefined) continue;
-        mark(node, STORED_GUIDE_ATTR, hit.id !== '' ? hit.id : (hit.kind ?? ''));
+        mark(node, STORED_GUIDE_ATTR, hasStorageId(hit) ? hit.id : (hit.kind ?? ''));
         done.add(node);
       }
       for (const cell of document.querySelectorAll('[data-dshl-unit="set-nav"] button')) {
         const hit = findStoredFor(sectionStored, stableIdentityOf(cell, null), (cell.textContent ?? '').trim());
         if (hit === null) continue;
-        mark(cell, STORED_SECTION_ATTR, hit.id);
+        // 无 id 的条目用它的 key 兜底，避免把 undefined 写进属性
+        mark(cell, STORED_SECTION_ATTR, hasStorageId(hit) ? hit.id : storageKeyOf(hit));
         done.add(cell);
       }
       // 按钮类入口：按槽位条目键 / 列表 key / 组件名匹配容器里的按钮，旧 `label:` 键仍按显示名
@@ -4471,7 +4501,7 @@ window.__ModuleLoader__.load({
           const label = buttonLabelOf(button);
           const identity = stableIdentityOf(button, { component: true });
           const hit = storedButtons.find((entry) => {
-            if (entry.id === '') return entry.label === label;
+            if (!hasStorageId(entry)) return entry.label === label;
             if (entry.id.startsWith('label:')) return entry.id === `label:${label}`;
             return identityMatches(entry.id, identity);
           });
@@ -7044,7 +7074,7 @@ window.__ModuleLoader__.load({
       const activeIds = new Set(Array.isArray(entries) ? entries.filter((entry) => entry.active === true).map((entry) => entry.id) : []);
       const rows = [];
       for (const entry of stored) {
-        const panelId = entry.id !== '' ? entry.id : panelIds.get(entry.label);
+        const panelId = hasStorageId(entry) ? entry.id : panelIds.get(entry.label);
         if (panelId === undefined || panelId === '') continue;
         rows.push({ label: entry.label, panelId, active: activeIds.has(panelId) });
       }
@@ -7069,7 +7099,7 @@ window.__ModuleLoader__.load({
       const stored = config.storage?.views ?? [];
       if (stored.length === 0) return null;
       const currentIds = new Set(Array.isArray(entries) ? entries.filter((entry) => entry.active === true).map((entry) => entry.id) : []);
-      const rows = stored.filter((entry) => entry.id !== '');
+      const rows = stored.filter((entry) => hasStorageId(entry));
       if (rows.length === 0) return null;
       const open = (id) => {
         if (typeof onDismiss === 'function') onDismiss();
@@ -7092,7 +7122,7 @@ window.__ModuleLoader__.load({
       const owners = Array.isArray(entries) ? entries : [];
       const rows = [];
       for (const entry of stored) {
-        const key = entry.id !== '' ? entry.id : (entry.kind ?? '');
+        const key = hasStorageId(entry) ? entry.id : (entry.kind ?? '');
         const hit = key !== ''
           ? owners.find((item) => String(item.id) === key || String(item.id).startsWith(`${key}:`))
           : owners.find((item) => item.label === entry.label);
