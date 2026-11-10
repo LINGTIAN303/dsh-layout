@@ -183,7 +183,6 @@ window.__ModuleLoader__.load({
     const ctlNum = (labelKey, value, min, max, step, write, fallbackText) => ({ kind: 'num', labelKey, value, min, max, step, write, fallbackText });
     const ctlNote = (text) => ({ kind: 'note', text });
     const ctlAction = (labelKey, run, disabled) => ({ kind: 'action', labelKey, run, disabled: disabled === true });
-    const ctlMove = (labelKey, value, options, write) => ({ kind: 'move', labelKey, value, options, write });
 
     /** 区域节点：宿主写死的三栏 + 底部条 + 设置弹层；不画框造结构，只调它们的约束。 */
     function buildRegions(snapshot) {
@@ -281,11 +280,18 @@ window.__ModuleLoader__.load({
           ctlAction('boardMoveUp', () => shiftIn(config.sidebar.order, block, -1, (draft, next) => { draft.sidebar.order = next; }), orderOf(config.sidebar.order, block) <= 0),
           ctlAction('boardMoveDown', () => shiftIn(config.sidebar.order, block, 1, (draft, next) => { draft.sidebar.order = next; }), orderOf(config.sidebar.order, block) >= config.sidebar.order.length - 1),
         ];
-        const relocate = config.relocate?.[`block:${block}`] ?? null;
-        controls.push(ctlMove('boardRelocateTo', relocate?.to ?? '', host.RELOCATE_DESTINATIONS.map((item) => ({ value: item.id, label: host.t(item.labelKey) })), (draft, value) => {
-          if (value === '') delete draft.relocate[`block:${block}`];
-          else draft.relocate[`block:${block}`] = { to: value, place: relocate?.place ?? 'start' };
+        // 搬移：白板里只给「画框 / 清除」两个动作。位置必须对着真实界面画，
+        // 所以点「画框」会关掉白板、由主 bundle 的画框层接管（docs/plans/2026-11-10-搬移改画框.md）。
+        const hasFrame = config.relocate?.[`block:${block}`]?.frame !== undefined;
+        controls.push(ctlAction(hasFrame ? 'boardRelocateRedraw' : 'boardRelocateTo', () => {
+          host.setBoard(false);
+          host.setFramer(`block:${block}`);
         }));
+        if (hasFrame) {
+          controls.push(ctlAction('boardRelocateClear', () => {
+            host.updateConfig((draft) => { delete draft.relocate[`block:${block}`]; });
+          }));
+        }
         out.push(node({
           layer: 'container',
           id: `block:${block}`,
@@ -302,11 +308,15 @@ window.__ModuleLoader__.load({
         const controls = [
           ctlFlag(unit.labelKey, value, (draft, on) => { host.writePath(draft, unit.path, on); }),
         ];
-        const relocate = config.relocate?.[`unit:${unit.id}`] ?? null;
-        if (host.RELOCATE_DESTINATION_IDS.has(`unit:${unit.id}`)) {
-          controls.push(ctlMove('boardRelocateTo', relocate?.to ?? '', host.RELOCATE_DESTINATIONS.map((item) => ({ value: item.id, label: host.t(item.labelKey) })), (draft, value2) => {
-            if (value2 === '') delete draft.relocate[`unit:${unit.id}`];
-            else draft.relocate[`unit:${unit.id}`] = { to: value2, place: relocate?.place ?? 'start' };
+        // 搬移：与侧栏块同理，白板只给入口，真正的框要对着真实界面画
+        const hasFrame = config.relocate?.[`unit:${unit.id}`]?.frame !== undefined;
+        controls.push(ctlAction(hasFrame ? 'boardRelocateRedraw' : 'boardRelocateTo', () => {
+          host.setBoard(false);
+          host.setFramer(`unit:${unit.id}`);
+        }));
+        if (hasFrame) {
+          controls.push(ctlAction('boardRelocateClear', () => {
+            host.updateConfig((draft) => { delete draft.relocate[`unit:${unit.id}`]; });
           }));
         }
         out.push(node({
@@ -720,20 +730,6 @@ window.__ModuleLoader__.load({
               host.updateConfig((draft) => ctl.write(draft, next));
             },
           }));
-      }
-      if (ctl.kind === 'move') {
-        return h('div', { className: 'dshl-boardField' },
-          h('span', { className: 'dshl-boardFieldLabel' }, t(ctl.labelKey)),
-          h('select', {
-            className: 'dshl-select',
-            value: ctl.value,
-            'aria-label': t(ctl.labelKey),
-            onChange: (event) => {
-              const next = event.target.value;
-              host.updateConfig((draft) => ctl.write(draft, next));
-            },
-          }, h('option', { value: '' }, t('boardRelocateNone')),
-          ...ctl.options.map((option) => h('option', { key: option.value, value: option.value }, option.label))));
       }
       return null;
     }
