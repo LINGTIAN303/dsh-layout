@@ -3500,24 +3500,33 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 框落在哪个区域：取包含框中心的区域。
+     * 框落在哪个区域：取与框**相交面积最大**的区域。
      *
      * 区域是框的**目标容器**（框落进去的地方），不是障碍物——这一点必须先分清：
      * 视口被三栏铺满，如果把区域本身当障碍，任何位置都会「碰撞」，迁移永远找不到空位。
      * 真正的障碍是区域**内部**已经被内容占掉的部分（侧栏块、会话头、设置页导航列……），
      * 也就是用户说的「可迁入空间」里已经被占用的那一块。
+     *
+     * 为什么用面积占比而不是「取某个点」：曾经用 (框中心x, 框底边y) 取命中点，
+     * 框高跨出区域底边时（用户从会话区顶部一路往下画）那个点落在所有区域之外，
+     * 于是返回 null、判定成「无宿主」——没有障碍物，让位逻辑整个跳过，源直接盖住内容。
+     * 面积占比同时修掉这种边界失效，也更符合「框主要落在哪」的直觉。
      */
     function relocateHostOf(frame, targets) {
-      const cx = frame.x + frame.width / 2;
-      const cy = frame.y + frame.height;
+      let best = null;
+      let bestArea = 0;
       for (const [name, node] of Object.entries(targets.regions ?? {})) {
         const box = readableBox(node);
         if (box === null) continue;
-        if (cx >= box.left && cx <= box.right && cy >= box.top && cy <= box.bottom) {
-          return { name, box, node };
-        }
+        const width = Math.max(0, Math.min(frame.x + frame.width, box.right) - Math.max(frame.x, box.left));
+        const height = Math.max(0, Math.min(frame.y + frame.height, box.bottom) - Math.max(frame.y, box.top));
+        // 相交面积为 0 说明框完全不在这个区域里，不参与比较
+        const area = width * height;
+        if (area <= 0 || area <= bestArea) continue;
+        bestArea = area;
+        best = { name, box, node };
       }
-      return null;
+      return best;
     }
 
     /**
@@ -3526,27 +3535,47 @@ window.__ModuleLoader__.load({
      * 层级要自适应，不能固定取「直接子元素」：宿主不同区域的结构深度不一样——
      * 侧栏区域下面是 `[data-slot=sidebar]` 再套一层才是真正的块容器，会话区下面是 convroot。
      * 固定取直接子级时，这类区域会退化成一个「把整个区域都包住」的障碍，框落哪儿都碰撞。
-     * 所以从源节点所在层开始下钻：只要某层只有一个「实质包裹」子元素（不含源自身），就继续往里走，
-     * 直到拿到一组真正并列的内容块。
      *
-     * 源自身（及其祖先链）必须排除，否则「原地微调」会被自己挡住。
+     * 下钻规则三条，缺一不可：
+     * 1. 某层只有一个实质子级 → 它可能是包裹层，进到它里面看看；
+     * 2. 但它必须「几乎撑满父级」才算包裹层，否则它就是个普通的小内容块；
+     * 3. **包含源的那个子级不算包裹层，也不当障碍**——那是源自己所在的块，应当下钻进去找它的兄弟。
+     *
+     * 第 3 条是修掉的一个真 bug：早先的写法把所有「包含源」的子级都过滤掉，
+     * 于是源在包裹层里时（宿主侧栏正是这种结构）该层被滤成空数组，
+     * 函数直接返回「没有障碍」——让位逻辑整个跳过，源就那么盖在内容上。
+     * 正确的分界是：源的**祖先**继续下钻，源的**自身**才排除。
      */
     function relocateObstacleLevel(host, sourceNode) {
+      const hasSource = sourceNode !== null && sourceNode !== undefined;
       let level = host.node;
       for (let depth = 0; depth < 4; depth += 1) {
-        const kids = [...level.children].filter((child) => !(sourceNode !== null && sourceNode !== undefined && (child === sourceNode || child.contains(sourceNode))));
-        const readable = kids.filter((child) => readableBox(child) !== null);
-        // 只有一个实质子级、且它几乎撑满父级 → 只是个包裹层，继续下钻
-        if (readable.length !== 1) return { level, kids: readable };
-        const only = readable[0];
-        const parentBox = readableBox(level);
-        const onlyBox = readableBox(only);
-        if (parentBox === null || onlyBox === null) return { level, kids: readable };
-        const spansMost = onlyBox.width >= parentBox.width - 4 && onlyBox.height >= parentBox.height - 4;
-        if (!spansMost) return { level, kids: readable };
-        level = only;
+        const readable = [...level.children].filter((child) => readableBox(child) !== null);
+        // 源自己所在的那个子级：要进去找它的兄弟，不能当障碍
+        const containerOfSource = hasSource ? readable.find((child) => child === sourceNode || child.contains(sourceNode)) : undefined;
+        const others = readable.filter((child) => child !== containerOfSource && child !== sourceNode);
+        // 源在包裹层里、且该层没有别的兄弟 → 进到源所在的那一层继续找
+        if (containerOfSource !== undefined && containerOfSource !== sourceNode && others.length === 0) {
+          level = containerOfSource;
+          continue;
+        }
+        if (readable.length === 1) {
+          const only = readable[0];
+          const parentBox = readableBox(level);
+          const onlyBox = readableBox(only);
+          if (parentBox === null || onlyBox === null) return { level, kids: others };
+          const spansMost = onlyBox.width >= parentBox.width - 4 && onlyBox.height >= parentBox.height - 4;
+          // 包裹层（且不是源自己）→ 继续下钻
+          if (spansMost && only !== sourceNode) {
+            level = only;
+            continue;
+          }
+          return { level, kids: others };
+        }
+        return { level, kids: others };
       }
-      return { level, kids: [...level.children].filter((child) => readableBox(child) !== null) };
+      // 到深度上限：这一层除源自己以外的内容都算障碍
+      return { level, kids: [...level.children].filter((child) => child !== sourceNode && readableBox(child) !== null) };
     }
 
     function relocateObstacles(host, sourceNode) {
@@ -3560,6 +3589,12 @@ window.__ModuleLoader__.load({
       }
       return out;
     }
+
+    /**
+     * 投影运行时状态：条目表 + 帧循环句柄。
+     * 声明在 relocateResolve 之前：它需要读 entries 拿「已在投影中的源当前实际高度」。
+     */
+    const projection = { entries: new Map(), raf: 0, frames: 0, heightDirty: false };
 
     /**
      * 搬移解析：把配置里的框换算成一次落位。
@@ -3587,8 +3622,18 @@ window.__ModuleLoader__.load({
         const sourceBox = relocateSourceBox(source.node);
         if (sourceBox === null) continue;
         const size = relocateFrameSize(frame, sourceBox);
-        // 高度先按源当前高度估：源被改宽后高度会变，帧循环会再校正一次
-        const probe = { x: frame.x, y: frame.y, width: size.width, height: Math.max(1, Math.round(sourceBox.height)) };
+        /*
+         * 高度取值分两种，必须分清：
+         * - 还没投影过（首次落位）：用源原始高度，这是唯一能拿到的值；
+         * - 已经在投影中（重新解析，例如高度变化触发了 refresh）：用**当前实际高度**。
+         *   此时节点已经按框宽排过版，实际高度才是它真会占的高度。
+         * 用错会让「源被改宽后变高、压住下方内容」这类情况判不出来。
+         */
+        const live = projection.entries.get(sourceId);
+        const currentHeight = live !== undefined && live.node === source.node && live.node.isConnected
+          ? Math.max(1, Math.round(live.node.getBoundingClientRect().height))
+          : Math.max(1, Math.round(sourceBox.height));
+        const probe = { x: frame.x, y: frame.y, width: size.width, height: currentHeight };
         // 目标容器 = 框落进去的那个区域；障碍 = 该区域内已被占用的同级内容
         const host = relocateHostOf(probe, targets);
         const obstacles = relocateObstacles(host, source.node);
@@ -3601,8 +3646,6 @@ window.__ModuleLoader__.load({
     function relocateActiveList(targets, config) {
       return relocateResolve(targets, config).active;
     }
-
-    const projection = { entries: new Map(), raf: 0, frames: 0 };
 
     function projectionCreate(item) {
       const node = item.node;
@@ -3621,7 +3664,9 @@ window.__ModuleLoader__.load({
       // 位移必须**增量累加**而不是写绝对坐标：含 transform 的祖先会让 fixed 的 containing block
       // 不是视口，那时 left:0 并不等于屏幕左边，绝对赋值会整体偏移一个祖先的位置。
       // 累加「还差多少」与基准无关，两种情况都收敛到同一个视觉位置（实测踩过这条）。
-      return { sourceId: item.sourceId, node, width: resolved.width, x: resolved.x, y: resolved.y, tx: 0, ty: 0, conflict: resolved.conflict === true };
+      // height 记首次落位时的高度，帧循环据此判断「换行后高度变了」需要重新落位。
+      const startHeight = node.getBoundingClientRect().height;
+      return { sourceId: item.sourceId, node, width: resolved.width, x: resolved.x, y: resolved.y, height: startHeight, tx: 0, ty: 0, conflict: resolved.conflict === true };
     }
 
     function projectionDispose(entry) {
@@ -3690,6 +3735,23 @@ window.__ModuleLoader__.load({
           moving = true;
           continue;
         }
+        /*
+         * 高度变化要触发一次重新落位：落位时用的是「源的原始高度」，而源被改宽后
+         * 换行变了、实际高度可能变高——原本不碰撞的位置可能就压上内容了。
+         * 这里检测到高度明显变化就清掉帧预算、请求一次重算，由 refresh 重走 relocateResolve。
+         * 只在变化超过 4px 时触发，避免舍入误差打成死循环。
+         */
+        if (Math.abs(box.height - entry.height) > 4) {
+          entry.height = box.height;
+          // 预算用完也要允许这一次重算：否则长页面里高度晚变时永远等不到
+          if (!projection.heightDirty) {
+            projection.heightDirty = true;
+            window.setTimeout(() => {
+              projection.heightDirty = false;
+              refresh();
+            }, 0);
+          }
+        }
         const desiredX = Math.min(Math.max(0, entry.x), Math.max(0, viewport.width - entry.width));
         const desiredY = Math.min(Math.max(topBound, entry.y), Math.max(topBound, viewport.height - box.height));
         const dx = desiredX - box.left;
@@ -3726,12 +3788,20 @@ window.__ModuleLoader__.load({
       const next = new Map();
       for (const item of list) {
         const existing = projection.entries.get(item.sourceId);
-        // 位置与宽度都没变就沿用：帧循环自己会收敛，不必重建（重建会重排一次 DOM 属性）
+        const nextConflict = item.resolved.conflict === true;
+        /*
+         * 沿用旧 entry 的条件：节点没被重建、落位与宽度都没变、冲突状态也没变。
+         *
+         * 冲突状态必须进判据：冲突时 resolved.x/y 就是用户画的原值，与「不冲突但恰好落在同一点」
+         * 位置相同——只看 x/y/width 会把「刚刚变成冲突」的条目当成没变化沿用下来，
+         * 于是 entry.conflict 永远停在 false，面板上就不显示「位置冲突」了。
+         */
         if (existing !== undefined
           && existing.node === item.node
           && existing.x === item.resolved.x
           && existing.y === item.resolved.y
-          && existing.width === item.resolved.width) {
+          && existing.width === item.resolved.width
+          && existing.conflict === nextConflict) {
           next.set(item.sourceId, existing);
           continue;
         }
@@ -7629,12 +7699,16 @@ window.__ModuleLoader__.load({
 
       /**
        * 用与落位完全相同的判据算「最终会落在哪」：预览说没事、松手就跑掉是不可接受的。
-       * 返回 { probe, host, boxes, resolved, hits } 供提示条与影子框共用。
+       *
+       * **高度要用源的实际高度，不能用画框高度**：最终落位时源的高度是内容的函数，
+       * 用户画的框高只是个视觉指示。若预览用画框高度、落位用源高度，两者判定就会不一致
+       * （典型：用户画了个矮框，预览说「空白」，实际源更高、压住了内容）。
+       * 这里跟 relocateResolve 完全对齐，取 sourceHeight。
        */
       const evaluate = (candidate) => {
         if (candidate === null) return null;
         const width = Math.max(FRAME_MIN_WIDTH, candidate.w, sourceWidth);
-        const probe = { x: candidate.x, y: candidate.y, width, height: Math.max(8, candidate.h) };
+        const probe = { x: candidate.x, y: candidate.y, width, height: Math.max(8, sourceHeight) };
         const host = relocateHostOf(probe, targets);
         const boxes = relocateObstacles(host, source === null ? null : source.node);
         const hits = boxes.some((box) => frameHitsContainer(probe, box));
@@ -7796,7 +7870,9 @@ window.__ModuleLoader__.load({
       shadow === null ? null : h('div', {
         className: 'dshl-frameRect',
         'data-preview': 'true',
-        style: { left: `${shadow.x}px`, top: `${shadow.y}px`, width: `${shadow.width}px`, height: `${Math.max(8, shown.h)}px` },
+        // 影子里画的是源**真正会占的范围**：宽度是纠正后的（可能被放大到源宽），高度是源高。
+        // 直接套画框的尺寸会骗人——用户画了个矮框，源其实更高。
+        style: { left: `${shadow.x}px`, top: `${shadow.y}px`, width: `${shadow.width}px`, height: `${Math.max(8, sourceHeight)}px` },
       }),
       shown === null ? null : h('div', {
         className: 'dshl-frameRect',
