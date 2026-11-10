@@ -226,46 +226,39 @@ window.__ModuleLoader__.load({
       arrangeRightTabs: '右栏 · 标签栏',
       arrangeSettingsNav: '设置页 · 导航列',
       relocate: '区域搬移',
-      relocateHint: '把单元搬到别的容器里：节点留在原树里只改定位，目标容器用占位符让位；目标不在场时自动回原位。',
+      relocateHint: '把单元搬到界面上任意位置：点「开始画框」，在界面上拖出一个框，框的位置就是落位、框的宽度就是宽度；源单元高度按内容自然展开。',
+      relocateFrameHint: '框只决定位置与宽度。框比源单元窄时自动放大到源宽度；压住别的容器时自动往旁边的空白处让一让。',
       relocateSource: '源单元',
-      relocateTarget: '目标容器',
-      relocateTargetBuiltin: '区域与单元',
-      relocateTargetSlots: '槽位出口',
-      relocateDestSlot: '槽位出口',
-      relocatePlace: '位置',
-      relocateStart: '放在开头',
-      relocateEnd: '放在结尾',
-      relocateAdd: '添加搬移',
-      relocateNone: '还没有配置搬移：选好源单元与目标容器后点「添加搬移」。',
+      relocateNone: '还没有搬移：选一个源单元，再点「开始画框」。',
       relocateEmptySources: '当前没有可搬移的单元。',
       relocateRemove: '移除',
-      relocatePending: '目标不在场，暂不生效',
+      relocateRedraw: '重画',
+      relocatePending: '此刻不在场，暂不生效',
       relocateActive: '已生效',
       relocateGone: '源单元不在场',
-      relocateSqueeze: (pct, from, to) => `宽度压到 ${pct}%（${from} → ${to}px）`,
-      relocateSqueezeHint: '目标容器比源单元窄很多，搬过去后内部内容会被挤压甚至看不见。宽度比例低于 60% 时提示。',
-      relocateChained: '目标被搬走，暂不生效',
-      relocateChainedShort: '目标容器本身也被搬走了',
-      relocateChainedHint: '这条搬移的目标容器自己也在被搬到别处，占位符会跟着飞走、和另一条搬移叠在一起，所以不建立投影。删掉其中一条即可。',
+      relocateMoved: '已避开重叠',
+      relocateFrameAt: (x, y) => `框在 (${x}, ${y})`,
+      relocateFrameSize: (w, h) => ` · ${w}×${h}`,
+      relocateConflict: '位置冲突',
+      relocateConflictShort: '四周都被占满，暂时留在原位',
+      relocateConflictHint: '框四周找不到不相交的位置（相邻容器把可用空间占满了）。把框画到更空的地方，或直接删掉这条搬移。',
+      relocateLegacy: '需重画',
+      relocateLegacyHint: (count) => `${count} 条旧的搬移（按目标容器与开头/结尾配置）没有位置信息，换算不出框。逐条点「重画」，或一次性清空。`,
+      relocateLegacyClear: '清空需重画的',
       relocateSourceBlock: '侧栏块',
       relocateSourceUnit: '拆解单元',
       relocateSourceSlot: '槽位条目',
-      relocateDestBrand: '侧栏 · 品牌行',
-      relocateDestNewSession: '侧栏 · 新建会话',
-      relocateDestPanels: '侧栏 · 面板导航',
-      relocateDestWorkspaces: '侧栏 · 工作区',
-      relocateDestFooter: '侧栏 · 底部操作',
-      relocateDestSidebar: '侧栏（整列）',
-      relocateDestCenter: '会话区（整列）',
-      relocateDestRightbar: '右栏（整列）',
-      relocateDestConvHeader: '会话区 · 会话头',
-      relocateDestConvMessages: '会话区 · 消息区',
-      relocateDestConvComposer: '会话区 · 输入区',
-      relocateDestRbTabs: '右栏 · 标签栏',
-      relocateDestRbContent: '右栏 · 内容区',
-      relocateDestSettingsHeader: '设置页 · 页头',
-      relocateDestSettingsNav: '设置页 · 导航列',
-      relocateDestSettingsOptions: '设置页 · 选项区',
+      frameStart: '开始画框',
+      frameCancel: '取消',
+      frameTitle: (label) => `正在为「${label}」画框：按下并拖出一个矩形`,
+      frameUsage: '松手即应用；Esc 或右键取消。框的左上角就是落位，框宽就是宽度。',
+      frameTooSmall: '框太小了，再拉大一点。',
+      frameClean: '空白处',
+      frameNoHost: '不在任何区域内，按视口定位',
+      frameHost: (name) => `落在「${name}」`,
+      frameMigrate: '会压住容器里已有的内容，松手后自动避让',
+      frameConflict: '会压住容器里已有的内容且四周没空位，松手后留在原位',
+      frameHint: (width, sourceWidth) => `${width}px${width > sourceWidth ? `（已放大到源宽度 ${sourceWidth}px）` : ''}`,
       sync: '联动同步',
       syncHint: '面板导航与插件来源描述的是同一排图标：开启后在一处排序或隐藏，另一处跟着写，不再互相覆盖。',
       syncPanellistOrder: '排序同步',
@@ -450,8 +443,9 @@ window.__ModuleLoader__.load({
       boardColumns: '列数',
       boardGap: '间距',
       boardOrder: '顺序',
-      boardRelocateTo: '搬移到',
-      boardRelocateNone: '不搬移',
+      boardRelocateTo: '画框搬移',
+      boardRelocateRedraw: '重画框',
+      boardRelocateClear: '清除搬移',
       boardStoreTo: '收进「更多」',
       boardReadonly: '这一项只读（入口类槽位只允许排序，隐藏会切断回页面的路径）。',
       boardReadonlyOverlay: '浮层 / 菜单类条目只读。',
@@ -670,46 +664,39 @@ window.__ModuleLoader__.load({
       arrangeRightTabs: 'Right column · tab strip',
       arrangeSettingsNav: 'Settings · navigation column',
       relocate: 'Move between areas',
-      relocateHint: 'Move a unit into another container: the node stays in its React tree and only its position changes; the destination reserves space with a placeholder and the unit returns home when the target is not present.',
+      relocateHint: 'Move a unit anywhere on the interface: press "Draw frame", drag a rectangle over the interface. The frame position becomes the placement, the frame width becomes the width; the unit height follows its content.',
+      relocateFrameHint: 'The frame only decides position and width. Narrower than the source? It grows to the source width. Overlapping another container? It steps aside into free space.',
       relocateSource: 'Source unit',
-      relocateTarget: 'Target container',
-      relocateTargetBuiltin: 'Regions and units',
-      relocateTargetSlots: 'Slot outlets',
-      relocateDestSlot: 'Slot outlet',
-      relocatePlace: 'Place',
-      relocateStart: 'At start',
-      relocateEnd: 'At end',
-      relocateAdd: 'Add move',
-      relocateNone: 'No move configured yet: pick a source unit and a target container, then press "Add move".',
+      relocateNone: 'No move yet: pick a source unit, then press "Draw frame".',
       relocateEmptySources: 'No movable unit right now.',
       relocateRemove: 'Remove',
-      relocatePending: 'target not present, inactive',
+      relocateRedraw: 'Redraw',
+      relocatePending: 'not present now, inactive',
       relocateActive: 'active',
       relocateGone: 'source not present',
-      relocateSqueeze: (pct, from, to) => `width squeezed to ${pct}% (${from} → ${to}px)`,
-      relocateSqueezeHint: 'The destination is much narrower than the source, so its inner content will be crushed or hidden. Warned when the width ratio drops below 60%.',
-      relocateChained: 'target moved away, inactive',
-      relocateChainedShort: 'the destination is moved away too',
-      relocateChainedHint: 'The destination container itself is being moved elsewhere, so the placeholder would fly along and stack on top of the other move. No projection is created; remove one of the two moves.',
+      relocateMoved: 'nudged clear of overlap',
+      relocateFrameAt: (x, y) => `frame at (${x}, ${y})`,
+      relocateFrameSize: (w, h) => ` · ${w}×${h}`,
+      relocateConflict: 'position conflict',
+      relocateConflictShort: 'surrounded, staying put for now',
+      relocateConflictHint: 'No position around the frame avoids overlap (neighbouring containers fill the free space). Draw the frame somewhere emptier, or remove this move.',
+      relocateLegacy: 'needs redraw',
+      relocateLegacyHint: (count) => `${count} older moves (configured by target container plus start/end) carry no position, so no frame can be derived. Redraw them one by one, or clear them all.`,
+      relocateLegacyClear: 'Clear those needing redraw',
       relocateSourceBlock: 'Sidebar block',
       relocateSourceUnit: 'Part unit',
       relocateSourceSlot: 'Slot entry',
-      relocateDestBrand: 'Sidebar · brand row',
-      relocateDestNewSession: 'Sidebar · new session',
-      relocateDestPanels: 'Sidebar · panel list',
-      relocateDestWorkspaces: 'Sidebar · workspaces',
-      relocateDestFooter: 'Sidebar · footer actions',
-      relocateDestSidebar: 'Sidebar (whole column)',
-      relocateDestCenter: 'Conversation (whole column)',
-      relocateDestRightbar: 'Right column (whole column)',
-      relocateDestConvHeader: 'Conversation · header',
-      relocateDestConvMessages: 'Conversation · messages',
-      relocateDestConvComposer: 'Conversation · composer',
-      relocateDestRbTabs: 'Right column · tab strip',
-      relocateDestRbContent: 'Right column · content',
-      relocateDestSettingsHeader: 'Settings · header',
-      relocateDestSettingsNav: 'Settings · navigation column',
-      relocateDestSettingsOptions: 'Settings · options',
+      frameStart: 'Draw frame',
+      frameCancel: 'Cancel',
+      frameTitle: (label) => `Drawing a frame for "${label}": press and drag a rectangle`,
+      frameUsage: 'Release to apply; Esc or right click to cancel. The top-left corner is the placement, the frame width is the width.',
+      frameTooSmall: 'The frame is too small, drag a bit further.',
+      frameClean: 'free space',
+      frameNoHost: 'outside any region, placed against the viewport',
+      frameHost: (name) => `inside "${name}"`,
+      frameMigrate: 'overlaps content already in the container, will step aside on release',
+      frameConflict: 'overlaps content in the container with no free space, will stay put on release',
+      frameHint: (width, sourceWidth) => `${width}px${width > sourceWidth ? ` (grown to source width ${sourceWidth}px)` : ''}`,
       sync: 'Linked state',
       syncHint: 'The panel list and the slot registry describe the same icon row: with this on, ordering or hiding one side writes the other, so the two views no longer override each other.',
       syncPanellistOrder: 'Sync order',
@@ -894,8 +881,9 @@ window.__ModuleLoader__.load({
       boardColumns: 'Columns',
       boardGap: 'Gap',
       boardOrder: 'Order',
-      boardRelocateTo: 'Move to',
-      boardRelocateNone: 'Do not move',
+      boardRelocateTo: 'Draw frame',
+      boardRelocateRedraw: 'Redraw frame',
+      boardRelocateClear: 'Clear move',
       boardStoreTo: 'Store into "More"',
       boardReadonly: 'Read-only: entry-like slots may only be reordered; hiding one cuts the way back to its page.',
       boardReadonlyOverlay: 'Overlay and menu entries are read-only.',
@@ -1178,122 +1166,34 @@ window.__ModuleLoader__.load({
     };
 
     /**
-     * 搬移的形状类别。
+     * 搬移配置只存一个「框」：位置 x/y + 宽度 w（视口坐标，与投影的 fixed 定位同一坐标系）。
      *
-     * 为什么要有这个：搬移原本是「任意源 × 任意目标」，22 × 18 = 396 种组合，
-     * 逐个补形状/链式/窗口栏永远补不完（前几轮已经补了三处，还会继续冒出）。
-     * 业界成熟做法（IntelliJ 的工具窗、Berth 的六槽模型）是**约束优先**：
-     * 先给界面定有限个语义槽位，每个槽位声明它接受哪种形状，配置时只列兼容项——
-     * 不合适的组合在**配置阶段就不出现**，而不是搬完再警告。
+     * 为什么从「源 × 目标 × 位置」改成框（第十六轮）：
+     * 原模型是源 22 × 目标 18 × 位置 2 的笛卡尔积，前五轮（形状兼容、链式剔除、窗口栏避让、
+     * 槽位化、槽位方向修正）全在这个积上做减法，永远补不完。而「目标容器」和「位置」这两维，
+     * 在用户可以直接用鼠标指出位置的前提下根本不需要建模——用户画出什么位置就是什么位置。
      *
-     * 类别按实测尺寸归纳（侧栏 280 宽、会话区 1260 宽）：
-     * - icon：≤32 见方，只占一个图标位
-     * - narrow：窄且单行（宽度跟随容器，高度 ≤64）
-     * - narrow-stack：窄且可高（侧栏里的块）
-     * - wide-short：宽且矮（会话头 1260×40、标题行 1212×30）
-     * - wide-tall：宽且高（消息区、输入区 1253×238）
-     * - medium：中等宽度（右栏 280–900）
+     * 于是配置里只剩几何：框给位置与宽度，源高度按内容自然展开。
+     * 源的形状表、目标的槽位表、二者之间的兼容判据随之全部删除（见 docs/plans/2026-11-10-搬移改框.md）。
      */
-    const SHAPE_ICON = 'icon';
-    const SHAPE_NARROW = 'narrow';
-    const SHAPE_NARROW_STACK = 'narrow-stack';
-    const SHAPE_WIDE_SHORT = 'wide-short';
-    const SHAPE_WIDE_TALL = 'wide-tall';
-    const SHAPE_MEDIUM = 'medium';
 
-    /** 单元（搬移源）的形状类别与能否搬：不在表里的源一律不允许搬。 */
-    const RELOCATE_SOURCE_SHAPES = {
-      'block:brand': SHAPE_NARROW,
-      'block:new-session': SHAPE_NARROW,
-      'block:panels': SHAPE_NARROW_STACK,
-      'block:workspaces': SHAPE_NARROW_STACK,
-      'block:footer': SHAPE_NARROW,
-      'unit:sb-brand': SHAPE_NARROW,
-      'unit:sb-toggle': SHAPE_ICON,
-      'unit:sb-status': SHAPE_NARROW,
-      'unit:sb-account': SHAPE_NARROW,
-      'unit:conv-header': SHAPE_WIDE_SHORT,
-      'unit:conv-title-row': SHAPE_WIDE_SHORT,
-      'unit:conv-messages': SHAPE_WIDE_TALL,
-      'unit:conv-composer': SHAPE_WIDE_TALL,
-      'unit:conv-turn-rail': SHAPE_ICON,
-      'unit:conv-todo-panel': SHAPE_WIDE_SHORT,
-      'unit:conv-dock': SHAPE_WIDE_SHORT,
-      'unit:rb-tabs': SHAPE_WIDE_SHORT,
-      'unit:rb-content': SHAPE_MEDIUM,
-      'unit:set-header': SHAPE_WIDE_SHORT,
-      'unit:set-nav': SHAPE_MEDIUM,
-      'unit:set-options': SHAPE_MEDIUM,
-    };
+    /** 框宽下限：再窄的框没有可读性，源内容会被压没。 */
+    const FRAME_MIN_WIDTH = 120;
+    /** 框坐标与宽度的夹取范围：防止导入脏数据把源投到屏幕外。 */
+    const FRAME_COORD_LIMIT = 20000;
 
-    /**
-     * 槽位表：每个槽位声明它「至少需要多宽」和「能不能纵向堆叠」。
-     *
-     * 判定原则是**单向兼容**：宽容器能放下窄内容（侧栏块搬进会话区没问题），
-     * 反过来不行（会话头 1260 宽搬进 280 侧栏会被压成 22%）。所以槽位只需要声明
-     * 「最小可用宽度」与堆叠能力，不用枚举它接受哪些形状——原先逐个列 accepts
-     * 会把「窄单元 → 宽容器」这种合理组合也挡掉（实测 17 个源里 9 个无法去会话区）。
-     *
-     * `minWidth` 取该类容器实测宽度的保守下限：
-     * - 侧栏系（280px）→ narrow 系
-     * - 右栏（280–900）→ medium 系
-     * - 会话区（1260px）→ wide 系
-     * `stack` 表示能否纵向堆叠多个单元（整列可以，行内槽位不行）。
-     */
-    const RELOCATE_SLOTS = [
-      { id: 'block:brand', labelKey: 'relocateDestBrand', minWidth: 200, stack: false },
-      { id: 'block:new-session', labelKey: 'relocateDestNewSession', minWidth: 200, stack: false },
-      { id: 'block:panels', labelKey: 'relocateDestPanels', minWidth: 200, stack: true },
-      { id: 'block:workspaces', labelKey: 'relocateDestWorkspaces', minWidth: 200, stack: true },
-      { id: 'block:footer', labelKey: 'relocateDestFooter', minWidth: 200, stack: false },
-      { id: 'region:sidebar', labelKey: 'relocateDestSidebar', minWidth: 200, stack: true },
-      { id: 'unit:conv-header', labelKey: 'relocateDestConvHeader', minWidth: 600, stack: false },
-      { id: 'unit:conv-messages', labelKey: 'relocateDestConvMessages', minWidth: 600, stack: true },
-      { id: 'unit:conv-composer', labelKey: 'relocateDestConvComposer', minWidth: 600, stack: true },
-      { id: 'region:center', labelKey: 'relocateDestCenter', minWidth: 600, stack: true },
-      { id: 'unit:rb-tabs', labelKey: 'relocateDestRbTabs', minWidth: 240, stack: false },
-      { id: 'unit:rb-content', labelKey: 'relocateDestRbContent', minWidth: 240, stack: true },
-      { id: 'region:rightbar', labelKey: 'relocateDestRightbar', minWidth: 240, stack: true },
-      { id: 'unit:set-header', labelKey: 'relocateDestSettingsHeader', minWidth: 240, stack: false },
-      { id: 'unit:set-nav', labelKey: 'relocateDestSettingsNav', minWidth: 240, stack: true },
-      { id: 'unit:set-options', labelKey: 'relocateDestSettingsOptions', minWidth: 240, stack: true },
-    ];
-
-    /** 形状类别大致需要多宽才能正常显示（实测归纳，留出余量）。 */
-    const RELOCATE_SHAPE_NEEDS = {
-      [SHAPE_ICON]: 32,
-      [SHAPE_NARROW]: 200,
-      [SHAPE_NARROW_STACK]: 200,
-      [SHAPE_MEDIUM]: 240,
-      [SHAPE_WIDE_SHORT]: 600,
-      [SHAPE_WIDE_TALL]: 600,
-    };
-
-    /**
-     * 某个形状的单元能不能搬进某个槽位：只看「槽位最小宽度 ≥ 单元需求」。
-     * 单向兼容——窄内容进宽容器总是允许的，反之不。
-     */
-    function relocateSlotAccepts(slotId, shape) {
-      const slot = RELOCATE_SLOTS.find((item) => item.id === slotId);
-      if (slot === undefined || shape === undefined) return false;
-      const need = RELOCATE_SHAPE_NEEDS[shape];
-      if (need === undefined) return false;
-      return slot.minWidth >= need;
+    function normalizeFrame(raw) {
+      if (raw === null || typeof raw !== 'object') return null;
+      const x = Number(raw.x);
+      const y = Number(raw.y);
+      const w = Number(raw.w);
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(w)) return null;
+      return {
+        x: Math.round(Math.min(FRAME_COORD_LIMIT, Math.max(-FRAME_COORD_LIMIT, x))),
+        y: Math.round(Math.min(FRAME_COORD_LIMIT, Math.max(-FRAME_COORD_LIMIT, y))),
+        w: Math.round(Math.min(FRAME_COORD_LIMIT, Math.max(FRAME_MIN_WIDTH, w))),
+      };
     }
-
-    /** 某个形状的单元有哪些合法去处（下拉只列这些）。 */
-    function relocateSlotsFor(shape) {
-      const need = RELOCATE_SHAPE_NEEDS[shape];
-      if (need === undefined) return [];
-      return RELOCATE_SLOTS.filter((slot) => slot.minWidth >= need);
-    }
-
-    /**
-     * 搬移目标：从槽位表派生，避免两处各维护一份 id 列表（漂移必然出事）。
-     * 只保留 id 与标签，形状契约仍在 RELOCATE_SLOTS 里。
-     */
-    const RELOCATE_DESTINATIONS = RELOCATE_SLOTS.map((slot) => ({ id: slot.id, labelKey: slot.labelKey }));
-    const RELOCATE_DESTINATION_IDS = new Set(RELOCATE_DESTINATIONS.map((item) => item.id));
 
     /** 联动规则的枚举：条件与动作都只认这几类，配置里出现的其它值一律丢掉。 */
     const RULE_CONDITION_KINDS = new Set(['page', 'collapsed', 'area', 'present']);
@@ -1320,7 +1220,6 @@ window.__ModuleLoader__.load({
       surfaces: [],
       anomalies: [],
       arrange: [],
-      relocateDests: [],
     };
 
     function clampInt(value, min, max, fallback) {
@@ -1489,17 +1388,21 @@ window.__ModuleLoader__.load({
         };
       }
       out.arrange = arrange;
-      // 区域搬移：源 id → { to, place }；目标要么在枚举表里，要么是 slotdest:<槽位键>（列表槽位出口），位置只有 start / end
+      /*
+       * 区域搬移：源 id → { frame: {x, y, w} }。
+       *
+       * 旧形态是 { to, place }（目标容器 + 开头/结尾）。那套值没有位置信息，换算不出框，
+       * 所以不静默丢弃也不猜：保留成 { legacy: true } 让面板标「需重画」。
+       * 静默删会让用户以为搬移自己消失了，而这正是前几轮被反复抱怨的那类行为。
+       */
       const relocateRaw = raw.relocate !== null && typeof raw.relocate === 'object' ? raw.relocate : {};
       const relocate = {};
       for (const [sourceId, value] of Object.entries(relocateRaw)) {
-        if (Object.keys(relocate).length >= 16) break;
+        if (Object.keys(relocate).length >= 64) break;
         if (typeof sourceId !== 'string' || sourceId.length === 0 || sourceId.length > 160) continue;
         if (value === null || typeof value !== 'object') continue;
-        const to = typeof value.to === 'string' ? value.to : '';
-        const slotDest = to.startsWith('slotdest:') && to.length > 9 && to.length <= 120 ? to : '';
-        if (slotDest === '' && !RELOCATE_DESTINATION_IDS.has(to)) continue;
-        relocate[sourceId] = { to: slotDest === '' ? to : slotDest, place: value.place === 'end' ? 'end' : 'start' };
+        const frame = normalizeFrame(value.frame);
+        relocate[sourceId] = frame === null ? { legacy: true } : { frame };
       }
       out.relocate = relocate;
       // 联动规则：条件与动作都按枚举收束，非法规则直接丢弃（而不是留一条永远不生效的）
@@ -1636,14 +1539,18 @@ window.__ModuleLoader__.load({
     let snapshot = {
       config: readStoredConfig() ?? normalizeConfig(null),
       targets: ABSENT_TARGETS,
-      /** panel：编辑面板（全局浮层）是否打开；board：白板是否打开；side：面板贴哪一侧。 */
+      /**
+       * panel：编辑面板（全局浮层）是否打开；board：白板是否打开；side：面板贴哪一侧；
+       * framer：正在画框的源 id（空串 = 没在画框）。画框是「点源 → 在界面上拖出一个框」的两步操作，
+       * 中间态必须进 snapshot 才能让浮层跟着渲染。
+       */
       ui: (() => {
         try {
           const raw = JSON.parse(window.localStorage.getItem('dsh-layout/ui/v1') ?? '{}');
-          return { editing: false, panel: false, board: false, side: raw !== null && raw.side === 'left' ? 'left' : 'right' };
+          return { editing: false, panel: false, board: false, framer: '', side: raw !== null && raw.side === 'left' ? 'left' : 'right' };
         } catch (error) {
           console.warn('[dsh-layout] 读取界面记忆失败，使用默认值', error);
-          return { editing: false, panel: false, board: false, side: 'right' };
+          return { editing: false, panel: false, board: false, framer: '', side: 'right' };
         }
       })(),
       /** 落点重算信号：界面变化（新插件出现、布局重排）导致按钮被遮挡时递增。 */
@@ -1860,6 +1767,35 @@ window.__ModuleLoader__.load({
     function openBoard() {
       if (!snapshot.config.enabled) updateConfig((draft) => { draft.enabled = true; }, { capture: true });
       setBoard(true);
+    }
+
+    /**
+     * 进入 / 退出画框模式。`sourceId` 是要搬的源（空串 = 退出）。
+     *
+     * 画框取代了「选目标容器 + 选开头/结尾」两步：用户直接在界面上拖出一个框，
+     * 位置由框本身给出，目标容器只在运行时做碰撞判定、不进配置。
+     */
+    function setFramer(sourceId) {
+      if (snapshot.ui.framer === sourceId) return;
+      snapshot = { ...snapshot, ui: { ...snapshot.ui, framer: sourceId } };
+      notify();
+    }
+
+    /**
+     * 画框完成：把框写进配置。
+     *
+     * 宽度下限夹到源单元实测宽——用户把框画得比源还窄时，源内容会被压没，
+     * 而「框不足以容纳源宽高时自动放大」正是这套机制该做的事。
+     */
+    function commitFrame(sourceId, rect) {
+      if (typeof sourceId !== 'string' || sourceId === '') return;
+      const source = relocateSources(snapshot.targets).find((item) => item.id === sourceId);
+      const sourceBox = source === undefined ? null : relocateSourceBox(source.node);
+      const width = Math.max(FRAME_MIN_WIDTH, Math.round(rect.w), sourceBox === null ? 0 : Math.ceil(sourceBox.width));
+      updateConfig((draft) => {
+        draft.relocate[sourceId] = { frame: normalizeFrame({ x: rect.x, y: rect.y, w: width }) };
+      });
+      setFramer('');
     }
 
     /**
@@ -3399,38 +3335,17 @@ window.__ModuleLoader__.load({
       for (const node of done) arrangeAnnotated.add(node);
     }
 
-    /* ============================== 区域搬移（投影） ============================== */
+    /* ============================== 区域搬移（画框投影） ============================== */
     /**
-     * 搬移不移动 DOM 节点：源节点留在 React 树里，只改成 fixed 定位并按实测矩形对齐；
-     * 目标容器里插入本插件自己的占位符参与布局，源节点投影到占位符上。
+     * 搬移不移动 DOM 节点：源节点留在 React 树里，只改成 fixed 定位并落到用户画的框上。
      * 这样不触碰 React 协调器（没有 insertBefore/removeChild 风险），事件委托也仍然有效。
-     * 目标容器不在场时搬移不生效（源保持原样），所以「设置页打开时把品牌行搬进设置页」天然成立。
+     *
+     * 第十六轮把「目标容器 + 开头/结尾」整个换成「框」：位置由用户用鼠标直接指出，
+     * 于是配置里只剩几何（框的位置与宽度），源高度按内容自然展开。
+     * 目标容器不再进入配置，也就不再需要槽位表、形状表和它们之间的兼容判据。
+     * 详细推导见 docs/plans/2026-11-10-搬移改画框.md。
      */
     const TELEPORT_ATTR = 'data-dshl-teleport';
-    const PLACEHOLDER_ATTR = 'data-dshl-placeholder';
-
-    /** 搬移目标可用的槽位出口容器：与槽位编排同一套识别（列表槽位 ≥2 个已渲染条目的共同父级）。 */
-    function relocateSlotDestinations(targets) {
-      const out = [];
-      for (const entry of slotArrangeContainers(targets)) {
-        out.push({ id: `slotdest:${entry.slot}`, slot: entry.slot, node: entry.node });
-      }
-      return out;
-    }
-
-    function relocateDestinationNode(targets, id) {
-      if (typeof id !== 'string') return null;
-      if (id.startsWith('block:')) return targets.blocks[id.slice(6)] ?? null;
-      if (id.startsWith('region:')) return targets.regions[id.slice(7)] ?? null;
-      if (id.startsWith('unit:')) return (targets.units?.[id.slice(5)] ?? [])[0] ?? null;
-      // 槽位出口容器：目标按槽位键定位，容器重建后仍能找到（不存节点引用）
-      if (id.startsWith('slotdest:')) {
-        const slot = id.slice(9);
-        const hit = (targets.relocateDests ?? []).find((entry) => entry.slot === slot);
-        return hit === undefined ? null : hit.node;
-      }
-      return null;
-    }
 
     /** 可搬移源：侧栏块、拆解单元（显隐类）、已渲染且可操作的槽位条目（单目标、非弹层）。 */
     function relocateSources(targets) {
@@ -3481,19 +3396,9 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 搬移的形状兼容性：投影只做「宽度对齐 + 平移」，不改变源节点的内部布局。
-     * 所以横向铺开的单元（会话头 1260×40）搬进窄列（侧栏 280×732）时，宽度只剩 22%，
-     * 内部 grid/flex 会把内容压没——实测会话头里 `headerLeading` 直接变 0px，
-     * 标题、视图标签、操作组全部不可见。这类搬移能配上、也能「生效」，但结果没用。
-     *
-     * 判定用宽度压缩比：目标可用宽 / 源原始宽。低于 MIN_WIDTH_RATIO 视为不适配。
-     * 只做提示，不阻断——投影的语义是「用户说了算」，强行拦掉会让一些真能用的情况也做不了。
-     */
-    const RELOCATE_MIN_WIDTH_RATIO = 0.6;
-    /**
-     * 源单元的原始尺寸缓存：投影会把节点压到目标宽度，之后再量就得到压缩后的值，
-     * 宽度压缩比会永远接近 1.0，判定失效。以节点为键记第一次（未投影时）量到的尺寸。
-     * 用 WeakMap，节点被 React 重建后自然失效。
+     * 源单元的原始尺寸缓存：投影会把节点宽度改写（宽度跟框），之后再量得到的是被改写后的值。
+     * 框宽要靠「源原始宽度」兜底（框画窄了自动放大到源宽），所以必须以节点为键记住
+     * 第一次（未投影时）量到的尺寸。用 WeakMap，节点被 React 重建后自然失效。
      */
     const relocateSourceBoxCache = new WeakMap();
     function relocateSourceBox(node) {
@@ -3505,50 +3410,145 @@ window.__ModuleLoader__.load({
       relocateSourceBoxCache.set(node, box);
       return box;
     }
-    function relocateFit(sourceBox, destBox) {
-      if (sourceBox === null || destBox === null) return null;
-      if (sourceBox.width <= 0 || destBox.width <= 0) return null;
-      const ratio = destBox.width / sourceBox.width;
-      if (ratio >= RELOCATE_MIN_WIDTH_RATIO) return null;
-      return { ratio, sourceWidth: Math.round(sourceBox.width), destWidth: Math.round(destBox.width) };
+
+    /**
+     * 框的最终宽高：宽度取「框宽」与「源原始宽」的较大者——用户把框画窄了不该把内容压没，
+     * 这是「框不足以容纳源宽高时自动放大」的落地。高度不参与：源高度随内容自然展开。
+     */
+    function relocateFrameSize(frame, sourceBox) {
+      const width = Math.max(FRAME_MIN_WIDTH, Math.round(frame.w), sourceBox === null ? 0 : Math.ceil(sourceBox.width));
+      return { width };
     }
 
     /**
-     * 搬移的解析结果：`active` 是要建立投影的条目，`chained` 是目标被别的搬移带走、
-     * 因此无法建立投影的源 id（面板要把它标出来，否则用户以为搬移坏了）。
+     * 框是否压住了容器里已被占用的内容：判据是矩形相交（不是「框落在容器内」）。
+     * 压在内容边界上的框同样会盖住它，所以按相交算而不是按包含算。
      *
-     * 剔除链式的理由：占位符插进目标容器内部，而目标容器自己也在被搬走
-     * （`position:fixed`），占位符会跟着飞过去，两个源于是叠在同一处。实测
-     * 「品牌行 → 面板导航」+「面板导航 → 会话区」时，品牌行 1260×60 与面板导航
-     * 1260×212 在 (280,0) 完全重合，品牌行被盖住 60px、内容不可见。
-     * 这类链式搬移没有正确落点——目标是个浮动层，里面放不了东西。
+     * 框高取框自己的高（源的预计高），不能用障碍物的高——那是两个不同物体的尺寸。
+     */
+    function frameHitsContainer(frame, box) {
+      if (box === null) return false;
+      const height = Math.max(1, Math.round(frame.height));
+      const width = frame.width;
+      return frame.x < box.right && frame.x + width > box.left
+        && frame.y < box.bottom && frame.y + height > box.top;
+    }
+
+    /**
+     * 位置合法化：把框夹进视口（上界避开原生窗口栏），然后做碰撞迁移。
+     *
+     * 迁移策略是「四方向 × 由近到远」：框压住某个容器时，沿上下左右依次试「贴到容器外侧」的位置，
+     * 取第一个不再碰撞的；都不行就保留用户画的位置并标记冲突（让面板说明，而不是悄悄换个地方）。
+     *
+     * 为什么不做「自动找最近空白」的全局搜索：用户画框时心里有位置，大幅移动会变成
+     * 「我明明放这儿它自己跑了」。只做贴边微调，改动量最小且可预测。
+     */
+    function relocateResolveFrame(frame, obstacles, topBound, viewport) {
+      const width = frame.width;
+      const height = Math.max(1, Math.round(frame.height));
+      const minX = 0;
+      const maxX = Math.max(minX, viewport.width - width);
+      const minY = topBound;
+      const maxY = Math.max(minY, viewport.height - height);
+      const clampX = (value) => Math.min(maxX, Math.max(minX, Math.round(value)));
+      const clampY = (value) => Math.min(maxY, Math.max(minY, Math.round(value)));
+      let x = clampX(frame.x);
+      let y = clampY(frame.y);
+      const hitAt = (px, py) => obstacles.some((box) => frameHitsContainer({ x: px, y: py, width, height }, box));
+      if (!hitAt(x, y)) return { x, y, width, moved: x !== Math.round(frame.x) || y !== Math.round(frame.y) };
+      // 四方向贴边：distance 用于排序，候选位置取「与冲突容器外侧对齐」
+      const candidates = [];
+      for (const box of obstacles) {
+        candidates.push({ x, y: Math.round(box.top - height), gap: Math.abs(box.top - height - y), axis: 'above' });
+        candidates.push({ x, y: Math.round(box.bottom), gap: Math.abs(box.bottom - y), axis: 'below' });
+        candidates.push({ x: Math.round(box.left - width), y, gap: Math.abs(box.left - width - x), axis: 'left' });
+        candidates.push({ x: Math.round(box.right), y, gap: Math.abs(box.right - x), axis: 'right' });
+      }
+      candidates.sort((a, b) => a.gap - b.gap);
+      for (const candidate of candidates) {
+        const px = clampX(candidate.x);
+        const py = clampY(candidate.y);
+        if (hitAt(px, py)) continue;
+        return { x: px, y: py, width, moved: true, axis: candidate.axis };
+      }
+      return { x, y, width, moved: false, conflict: true };
+    }
+
+    /**
+     * 框落在哪个区域：取包含框中心的区域。
+     *
+     * 区域是框的**目标容器**（框落进去的地方），不是障碍物——这一点必须先分清：
+     * 视口被三栏铺满，如果把区域本身当障碍，任何位置都会「碰撞」，迁移永远找不到空位。
+     * 真正的障碍是区域**内部**已经被内容占掉的部分（侧栏块、会话头、设置页导航列……），
+     * 也就是用户说的「可迁入空间」里已经被占用的那一块。
+     */
+    function relocateHostOf(frame, targets) {
+      const cx = frame.x + frame.width / 2;
+      const cy = frame.y + frame.height;
+      for (const [name, node] of Object.entries(targets.regions ?? {})) {
+        const box = readableBox(node);
+        if (box === null) continue;
+        if (cx >= box.left && cx <= box.right && cy >= box.top && cy <= box.bottom) {
+          return { name, box, node };
+        }
+      }
+      return null;
+    }
+
+    /**
+     * 目标容器内部已被占用的矩形：区域的可读直接子元素。
+     *
+     * 只取直接子级而不是全部后代——框在区域里是「与同级内容争位置」，
+     * 把容器内部的每一层后代都算进来会得到一堆互相嵌套的框，判定必然处处碰撞。
+     * 源自身（及其祖先链）排除，否则「原地微调」会被自己挡住。
+     */
+    function relocateObstacles(host, sourceNode) {
+      if (host === null) return [];
+      const out = [];
+      for (const child of host.node.children) {
+        if (sourceNode !== null && sourceNode !== undefined && (child === sourceNode || child.contains(sourceNode))) continue;
+        const box = readableBox(child);
+        if (box === null) continue;
+        out.push({ left: box.left, top: box.top, right: box.right, bottom: box.bottom });
+      }
+      return out;
+    }
+
+    /**
+     * 搬移解析：把配置里的框换算成一次落位。
+     * `active` 是要建立投影的条目，`legacy` 是旧形态（{to, place}）需要重画的源 id。
      */
     function relocateResolve(targets, config) {
       const byId = new Map(relocateSources(targets).map((source) => [source.id, source]));
-      const candidates = [];
+      const topBound = projectionTopBound();
+      const viewport = { width: window.innerWidth, height: window.innerHeight };
+      const active = [];
+      const legacy = new Set();
       for (const [sourceId, spec] of Object.entries(config.relocate ?? {})) {
+        if (spec === null || typeof spec !== 'object') continue;
+        if (spec.legacy === true) {
+          legacy.add(sourceId);
+          continue;
+        }
+        const frame = normalizeFrame(spec.frame);
+        if (frame === null) {
+          legacy.add(sourceId);
+          continue;
+        }
         const source = byId.get(sourceId);
         if (source === undefined) continue;
-        const dest = relocateDestinationNode(targets, spec.to);
-        if (dest === null || dest.isConnected !== true) continue;
-        if (readableBox(dest) === null) continue;
-        if (dest === source.node || dest.contains(source.node)) continue;
-        // 形状评估要在投影改写节点之前量：投影会把源压到目标宽度，之后再量就没意义了
-        const fit = relocateFit(relocateSourceBox(source.node), readableBox(dest));
-        candidates.push({ sourceId, node: source.node, dest, place: spec.place, fit });
+        const sourceBox = relocateSourceBox(source.node);
+        if (sourceBox === null) continue;
+        const size = relocateFrameSize(frame, sourceBox);
+        // 高度先按源当前高度估：源被改宽后高度会变，帧循环会再校正一次
+        const probe = { x: frame.x, y: frame.y, width: size.width, height: Math.max(1, Math.round(sourceBox.height)) };
+        // 目标容器 = 框落进去的那个区域；障碍 = 该区域内已被占用的同级内容
+        const host = relocateHostOf(probe, targets);
+        const obstacles = relocateObstacles(host, source.node);
+        const resolved = relocateResolveFrame(probe, obstacles, topBound, viewport);
+        active.push({ sourceId, node: source.node, frame, resolved, host: host === null ? '' : host.name });
       }
-      const chained = new Set();
-      for (const item of candidates) {
-        for (const other of candidates) {
-          if (other === item) continue;
-          // 目标被另一个搬移源整个带走，或目标落在它内部——两种情况占位符都会飞走
-          if (other.node === item.dest || other.node.contains(item.dest)) {
-            chained.add(item.sourceId);
-            break;
-          }
-        }
-      }
-      return { active: candidates.filter((item) => !chained.has(item.sourceId)), chained };
+      return { active, legacy };
     }
 
     function relocateActiveList(targets, config) {
@@ -3558,16 +3558,12 @@ window.__ModuleLoader__.load({
     const projection = { entries: new Map(), raf: 0, frames: 0 };
 
     function projectionCreate(item) {
-      const placeholder = document.createElement('div');
-      placeholder.setAttribute(PLACEHOLDER_ATTR, item.sourceId);
-      const box = item.node.getBoundingClientRect();
-      placeholder.style.height = `${Math.max(8, Math.round(box.height))}px`;
-      if (item.place === 'end') item.dest.appendChild(placeholder);
-      else item.dest.insertBefore(placeholder, item.dest.firstChild);
-      item.node.setAttribute(TELEPORT_ATTR, item.sourceId);
-      item.node.style.setProperty('--dshl-tw', `${Math.max(24, Math.round(placeholder.getBoundingClientRect().width))}px`);
-      item.node.style.setProperty('--dshl-tx', '0px');
-      item.node.style.setProperty('--dshl-ty', '0px');
+      const node = item.node;
+      const resolved = item.resolved;
+      node.setAttribute(TELEPORT_ATTR, item.sourceId);
+      node.style.setProperty('--dshl-tw', `${resolved.width}px`);
+      node.style.setProperty('--dshl-tx', '0px');
+      node.style.setProperty('--dshl-ty', '0px');
       /*
        * 注意：源节点若落在「自己形成层叠上下文」的祖先里（桌面端实测 `.composerSeat`
        * 有 z-index:9 + will-change:transform），投影的 z-index:1100 只在那一层内部有效，
@@ -3575,11 +3571,13 @@ window.__ModuleLoader__.load({
        * （实测 1253×128 的整条输入区）一起顶高，压住旁边不该被盖的内容。
        * 层叠问题留待单独评估，见 docs/details/注释/布局引擎.md。
        */
-      return { sourceId: item.sourceId, node: item.node, dest: item.dest, placeholder, tx: 0, ty: 0 };
+      // 位移必须**增量累加**而不是写绝对坐标：含 transform 的祖先会让 fixed 的 containing block
+      // 不是视口，那时 left:0 并不等于屏幕左边，绝对赋值会整体偏移一个祖先的位置。
+      // 累加「还差多少」与基准无关，两种情况都收敛到同一个视觉位置（实测踩过这条）。
+      return { sourceId: item.sourceId, node, width: resolved.width, x: resolved.x, y: resolved.y, tx: 0, ty: 0, conflict: resolved.conflict === true };
     }
 
     function projectionDispose(entry) {
-      if (entry.placeholder.isConnected) entry.placeholder.remove();
       if (entry.node.isConnected) {
         entry.node.removeAttribute(TELEPORT_ATTR);
         entry.node.style.removeProperty('--dshl-tw');
@@ -3588,7 +3586,16 @@ window.__ModuleLoader__.load({
         // 宿主原本没有 style 属性时别留下一个空的
         if (entry.node.getAttribute('style') === '') entry.node.removeAttribute('style');
       }
+      /*
+       * **不要**在这里清源尺寸缓存。
+       *
+       * dispose 发生在重建投影之前（applyRelocations 先拆旧的再建新的），若在这里清缓存，
+       * 紧接着的 relocateResolve 会重新量一次——而节点此刻刚从投影态恢复、宿主样式还没回流，
+       * 量到的可能是被压过的宽度。那会让「框比源窄 → 放大到源宽」永远失效（框越画越窄）。
+       * 缓存以节点为键、节点被 React 重建后自然失效，已经足够；这里只拆投影、不动缓存。
+       */
     }
+
 
     function projectionClear() {
       for (const entry of projection.entries.values()) projectionDispose(entry);
@@ -3598,64 +3605,48 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 对齐帧循环：占位符是「目标位置」，源节点是「实际位置」。
-     * 宽度先对齐（宽度会影响换行与高度），再按矩形差补位移；差值收敛后停帧，等下一次触发。
+     * 校正帧循环：把源节点从「原位置」推到「框的位置」。
      *
-     * **纵向要避开窗口栏**：Electron 原生 `titleBarOverlay` 盖在 Web 层之上（本机 40px），
-     * 那一带的 DOM 收得到 `elementFromPoint` 却收不到真实点击。而侧栏与会话区的顶边都是 y=0，
-     * 所以「放在开头」的搬移必然把源节点顶到窗口栏里——实测会话头搬到侧栏后落在 (0,0) 279×40，
-     * 40px 高度全被盖住，拖拽手柄与按钮在桌面端全部点不动（Web 端看着完全正常）。
-     * 这里把目标位置夹到安全区下沿，占位符仍留在原位（目标容器的布局不受影响），只让源节点下移。
-     * 与恢复按钮用同一套下界判定（launcherTopBound），逻辑见 docs/details/注释/布局引擎.md。
+     * 为什么要循环而不是一次写完：一次定位会触发宿主重排（源被改宽 → 换行变 → 高度变），
+     * 而高度又会改变「是否压住容器」的判定。这里每帧量一次真实矩形、补一次差值，
+     * 差值收敛到 0.5px 以内就停帧。最多追 120 帧，避免常驻抖动。
+     *
+     * **位移用增量累加，不写绝对坐标**：含 transform 的祖先会让 fixed 的 containing block
+     * 不是视口，那时 left:0 不等于屏幕左边，绝对赋值会整体偏移一个祖先的位置。
+     * 累加「还差多少」与基准无关，两种情况都收敛到同一视觉位置。
+     *
+     * **纵向仍要避开窗口栏**：Electron 原生 `titleBarOverlay` 盖在 Web 层之上（本机 40px），
+     * 那一带的 DOM 收得到 `elementFromPoint` 却收不到真实点击。落位阶段已经夹过，
+     * 这里再夹是为了兜住「窗口栏高度变化 / 视口缩放」这类运行时变化。
+     * 逻辑见 docs/details/注释/布局引擎.md。
      */
     function projectionStep() {
       projection.raf = 0;
       if (projection.entries.size === 0) return;
-      // 兜底：宽度/高度互相影响导致的抖动最多追 4 秒，避免帧循环常驻
       projection.frames += 1;
-      if (projection.frames > 240) return;
+      if (projection.frames > 120) return;
       const topBound = projectionTopBound();
+      const viewport = { width: window.innerWidth, height: window.innerHeight };
       let moving = false;
-      /** 目标塌掉的条目先收集，循环结束后统一拆除（在 for...of 里删 Map 会跳过元素）。 */
+      /** 节点被 React 重建（离开文档）的条目先收集，循环结束后统一拆除（在 for...of 里删 Map 会跳过元素）。 */
       const dead = [];
       for (const entry of projection.entries.values()) {
         const node = entry.node;
-        const placeholder = entry.placeholder;
-        if (!node.isConnected || !placeholder.isConnected) {
+        if (!node.isConnected) {
           dead.push(entry);
           continue;
         }
-        /*
-         * 目标容器塌成 0 尺寸（右栏收起、面板关闭）时占位符宽度为 0，
-         * 投影会被压成一条看不见的线，却仍占着位置——桌面端实测表现为
-         * 「一条空白条盖在右栏开始页的标签条上，连页头都被遮住」。
-         * `relocateActiveList` 每轮有 readableBox 守卫，但那要等下一轮 refresh；
-         * 这里在帧循环里立刻拆掉，避免中间态可见。
-         */
-        const phRect = placeholder.getBoundingClientRect();
-        if (phRect.width < 2 || phRect.height < 2) {
-          dead.push(entry);
-          continue;
-        }
-        const target = phRect;
         const box = node.getBoundingClientRect();
-        if (Math.abs(box.height - placeholder.offsetHeight) > 1) {
-          placeholder.style.height = `${Math.max(8, Math.round(box.height))}px`;
-          moving = true;
-        }
-        if (Math.abs(box.width - target.width) > 2) {
-          node.style.setProperty('--dshl-tw', `${Math.round(target.width)}px`);
+        // 宽度跟框：源被改写宽度后若与期望不符（宿主样式抢优先级），每轮重新压一次
+        if (Math.abs(box.width - entry.width) > 2) {
+          node.style.setProperty('--dshl-tw', `${entry.width}px`);
           moving = true;
           continue;
         }
-        const dx = target.left - box.left;
-        /*
-         * 纵向安全区夹取：目标在窗口栏里时，实际落点压到窗口栏下沿。
-         * 注意 `dy` 是视口坐标的差值，累加进 `--dshl-ty` 是正确的——
-         * containing block 只改变渲染基准，不改变「还差多少」这个差值本身。
-         */
-        const desiredTop = Math.max(target.top, topBound);
-        const dy = desiredTop - box.top;
+        const desiredX = Math.min(Math.max(0, entry.x), Math.max(0, viewport.width - entry.width));
+        const desiredY = Math.min(Math.max(topBound, entry.y), Math.max(topBound, viewport.height - box.height));
+        const dx = desiredX - box.left;
+        const dy = desiredY - box.top;
         if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
           entry.tx += dx;
           entry.ty += dy;
@@ -3664,12 +3655,11 @@ window.__ModuleLoader__.load({
           moving = true;
         }
       }
-      // 目标已塌掉（或占位符/节点被移出文档）的投影当场拆除，别留一条空白条盖在界面上
       for (const entry of dead) {
         projectionDispose(entry);
         projection.entries.delete(entry.sourceId);
       }
-      if (moving || dead.length > 0) projection.raf = window.requestAnimationFrame(projectionStep);
+      if (moving) projection.raf = window.requestAnimationFrame(projectionStep);
     }
 
     function ensureProjectionLoop() {
@@ -3689,7 +3679,12 @@ window.__ModuleLoader__.load({
       const next = new Map();
       for (const item of list) {
         const existing = projection.entries.get(item.sourceId);
-        if (existing !== undefined && existing.node === item.node && existing.dest === item.dest && existing.placeholder.parentElement === item.dest) {
+        // 位置与宽度都没变就沿用：帧循环自己会收敛，不必重建（重建会重排一次 DOM 属性）
+        if (existing !== undefined
+          && existing.node === item.node
+          && existing.x === item.resolved.x
+          && existing.y === item.resolved.y
+          && existing.width === item.resolved.width) {
           next.set(item.sourceId, existing);
           continue;
         }
@@ -4493,7 +4488,6 @@ window.__ModuleLoader__.load({
       targets.areaSnapshotVersion = areaSnapshotVersion;
       targets.slotSources = slotsService === null ? null : scanSlots();
       targets.arrange = readArrangeContainers(targets);
-      targets.relocateDests = relocateSlotDestinations(targets);
       targets.storageZones = readStorageZones(targets);
       targets.surfaces = readSurfaces(targets);
       targets.anomalies = Object.values(surfaceAnomalies).sort((a, b) => b.lastSeenAt - a.lastSeenAt);
@@ -4619,9 +4613,13 @@ window.__ModuleLoader__.load({
 .dshl-relocateState[data-active="true"] { color:var(--dsw-alias-state-success-primary); }
 /* 形状不适配警告：搬过去能「生效」但内容会被压没，行上直接说明压缩比 */
 .dshl-relocateFitWarn { flex:none; font-size:11px; color:var(--dsw-alias-state-warn-primary); }
+/* 画框中间层：全屏捕捉鼠标，压暗界面但保留可辨认度；框本身反向提亮，一眼看出会盖住什么 */
+.dshl-framer { position:fixed; inset:0; z-index:1300; cursor:crosshair; background:color-mix(in srgb, var(--dsw-alias-bg-layer-1, #111) 22%, transparent); }
+.dshl-frameRect { position:absolute; border:1px solid var(--dsw-alias-brand-primary); background:color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent); box-shadow:0 0 0 9999px color-mix(in srgb, var(--dsw-alias-bg-layer-1, #111) 14%, transparent); pointer-events:none; }
+.dshl-frameHint { position:absolute; left:50%; transform:translateX(-50%); top:calc(var(--dshl-framer-top, 48px)); max-width:min(560px, calc(100vw - 32px)); padding:8px 12px; border-radius:10px; border:1px solid var(--dsw-alias-border-l2); background:color-mix(in srgb, var(--dsw-alias-bg-layer-1) 96%, transparent); color:var(--dsw-alias-label-primary); font-size:12px; line-height:18px; box-shadow:0 6px 20px rgba(0,0,0,.28); pointer-events:none; }
+.dshl-frameUsage { color:var(--dsw-alias-label-secondary); }
+.dshl-frameCtl { display:flex; align-items:center; gap:8px; margin-top:8px; pointer-events:auto; }
 [data-dshl-teleport] { position:fixed !important; left:0 !important; top:0 !important; right:auto !important; bottom:auto !important; margin:0 !important; z-index:1100 !important; width:var(--dshl-tw, auto) !important; max-width:none !important; box-sizing:border-box; transform:translate(var(--dshl-tx, 0px), var(--dshl-ty, 0px)) !important; }
-[data-dshl-placeholder] { display:block !important; width:100% !important; box-sizing:border-box; pointer-events:none; }
-body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in srgb, var(--dsw-alias-brand-primary) 45%, transparent); outline-offset:-1px; border-radius:var(--dsw-radius-md, 8px); }
 .dshl-storageMenuItem { display:flex; align-items:center; gap:8px; width:100%; padding:8px 12px; border:none; background:transparent; color:var(--dsw-alias-label-primary); font:inherit; font-size:13px; line-height:20px; text-align:left; border-radius:var(--dsw-radius-md, 8px); cursor:pointer; }
 .dshl-storageMenuItem:hover { background:var(--dsw-alias-interactive-bg-hover); }
 .dshl-storageMenuItem[data-current="true"] { color:var(--dsw-alias-brand-primary); }
@@ -6450,74 +6448,35 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
     }
 
     /**
-     * 区域搬移卡片：选源、选目标、选位置后添加；已配置的搬移逐条显示是否生效，可移除。
-     * 「生效」= 源与目标此刻都在场；目标不在场时配置保留但不投影（源保持原样）。
+     * 区域搬移卡片：选源 → 在界面上画一个框，位置与宽度都由框决定。
+     *
+     * 第十六轮去掉了「选目标容器」与「选开头/结尾」两个下拉：目标容器不进配置，
+     * 位置由框本身给出（见 docs/plans/2026-11-10-搬移改画框.md）。
+     * 已配置的搬移逐条显示此刻状态：生效 / 源不在场 / 需重画（旧形态）/ 位置与容器冲突。
      */
-    function RelocateCard({ config, targets, t }) {
-      // 只把「声明过形状」的源列进下拉：没声明的单元不知道能放哪，列出来只会制造无效配置
+    function RelocateCard({ config, targets, ui, t }) {
       const allSources = relocateSources(targets);
-      const sources = allSources.filter((source) => RELOCATE_SOURCE_SHAPES[source.id] !== undefined);
-      const sourceIds = new Set(sources.map((source) => source.id));
+      const sourceIds = new Set(allSources.map((source) => source.id));
       const [sourceId, setSourceId] = React.useState('');
-      const [place, setPlace] = React.useState('start');
-      /**
-       * 目标下拉按所选源的形状过滤：这是槽位化的核心——
-       * 会话头（wide-short）的下拉里根本不会出现「侧栏」，而不是搬完再警告形状不适配。
-       * 还没选源时只列出「至少接受一种形状」的槽位，避免空列表吓人。
-       */
-      const currentShape = sourceId === '' ? undefined : RELOCATE_SOURCE_SHAPES[sourceId];
-      const availableSlots = currentShape === undefined
-        ? RELOCATE_SLOTS
-        : relocateSlotsFor(currentShape);
-      const [targetId, setTargetId] = React.useState(RELOCATE_SLOTS[0].id);
-      // 目标不在当前源的合法列表里时，自动落到第一个合法槽位（否则会保留一个非法值）
-      const effectiveTarget = availableSlots.some((slot) => slot.id === targetId)
-        ? targetId
-        : (availableSlots[0]?.id ?? RELOCATE_SLOTS[0].id);
       const resolved = relocateResolve(targets, config);
-      const activeList = resolved.active;
-      const activeIds = new Set(activeList.map((item) => item.sourceId));
-      /** 链式搬移：目标本身被另一条搬移带走，占位符会跟着飞，所以没有建立投影。 */
-      const chainedIds = resolved.chained;
-      /** 形状不适配的搬移：生效但内容会被压没，行上标警告，用户才知道为什么看不到东西。 */
-      const fitById = new Map(activeList.filter((item) => item.fit !== null).map((item) => [item.sourceId, item.fit]));
-      // 槽位出口容器：除了内置槽位，还能把单元搬进任意列表槽位的出口（与槽位编排同一套识别）
-      const allSlotDests = targets.relocateDests ?? [];
-      /**
-       * 槽位出口也过一遍形状过滤：它的宽度只有运行时才知道（不同列表槽位宽窄差很多），
-       * 但可以用和内置槽位同一条宽度压缩比判据——目标宽度 / 源原始宽度 < 60% 就不列出来。
-       * 不做这层的话，会话头（1260 宽）照样能选到 `sidebar.panellist`（侧栏图标列表），
-       * 又回到槽位化之前的老问题。
-       */
-      const slotDests = currentShape === undefined
-        ? allSlotDests
-        : allSlotDests.filter((dest) => {
-          const source = allSources.find((item) => item.id === sourceId);
-          if (source === undefined) return true;
-          const sourceBox = source.node.getBoundingClientRect();
-          const destBox = dest.node.getBoundingClientRect();
-          if (sourceBox.width <= 0 || destBox.width <= 0) return true;
-          return destBox.width / sourceBox.width >= RELOCATE_MIN_WIDTH_RATIO;
-        });
-      const destLabel = (id) => {
-        const dest = RELOCATE_DESTINATIONS.find((item) => item.id === id);
-        if (dest !== undefined) return t(dest.labelKey);
-        if (id.startsWith('slotdest:')) return `${t('relocateDestSlot')} ${id.slice(9)}`;
-        return id;
-      };
+      const activeById = new Map(resolved.active.map((item) => [item.sourceId, item]));
       const groups = [
         ['block', 'relocateSourceBlock'],
         ['unit', 'relocateSourceUnit'],
         ['slot', 'relocateSourceSlot'],
       ];
-      const add = () => {
-        if (sourceId === '') return;
-        updateConfig((draft) => { draft.relocate[sourceId] = { to: effectiveTarget, place }; });
-        setSourceId('');
+      /** 开始画框：面板保持开着也无妨——画框层在最上面，面板留在下面当状态参考。 */
+      const startFraming = (id) => {
+        if (id === '') return;
+        setFramer(id);
       };
       const configured = Object.entries(config.relocate ?? {});
+      const legacyIds = configured.filter(([, spec]) => spec !== null && typeof spec === 'object' && spec.legacy === true).map(([id]) => id);
+      const clearLegacy = () => updateConfig((draft) => {
+        for (const id of legacyIds) delete draft.relocate[id];
+      });
       return h(Card, { title: t('relocate'), desc: t('relocateHint') },
-        sources.length === 0
+        allSources.length === 0
           ? h('p', { className: 'dshl-hint' }, t('relocateEmptySources'))
           : h('div', { className: 'dshl-relocateForm' },
             h('label', { className: 'dshl-relocateField' }, t('relocateSource'),
@@ -6528,50 +6487,45 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
               },
               h('option', { value: '' }, '—'),
               ...groups.map(([group, labelKey]) => {
-                const items = sources.filter((source) => source.group === group);
+                const items = allSources.filter((source) => source.group === group);
                 return items.length === 0 ? null : h('optgroup', { key: group, label: t(labelKey) },
                   ...items.map((source) => h('option', { key: source.id, value: source.id },
                     source.labelKey === null ? source.name : t(source.labelKey))));
               }))),
-            h('label', { className: 'dshl-relocateField' }, t('relocateTarget'),
-              h('select', {
-                className: 'dshl-select',
-                value: effectiveTarget,
-                onChange: (event) => setTargetId(event.target.value),
-              },
-              // 只列当前形状能去的槽位：这是槽位化的核心，非法组合在配置阶段就不出现
-              h('optgroup', { label: t('relocateTargetBuiltin') },
-                ...availableSlots.map((slot) => h('option', { key: slot.id, value: slot.id }, t(slot.labelKey)))),
-              slotDests.length === 0 ? null : h('optgroup', { label: t('relocateTargetSlots') },
-                ...slotDests.map((dest) => h('option', { key: dest.id, value: dest.id }, dest.slot))),
-              // 已配置但此刻不在场的槽位目标也要能显示名字，否则下拉框会跳到空值
-              ...(effectiveTarget.startsWith('slotdest:') && !slotDests.some((dest) => dest.id === effectiveTarget)
-                ? [h('option', { key: effectiveTarget, value: effectiveTarget }, `${t('relocateDestSlot')} ${effectiveTarget.slice(9)}`)]
-                : []))),
-            h('label', { className: 'dshl-relocateField' }, t('relocatePlace'),
-              h('select', {
-                className: 'dshl-select',
-                value: place,
-                onChange: (event) => setPlace(event.target.value),
-              },
-              h('option', { value: 'start' }, t('relocateStart')),
-              h('option', { value: 'end' }, t('relocateEnd')))),
-            h('button', { type: 'button', className: 'dshl-btn', 'data-primary': 'true', disabled: sourceId === '', onClick: add }, t('relocateAdd'))),
+            h('button', { type: 'button', className: 'dshl-btn', 'data-primary': 'true', disabled: sourceId === '', onClick: () => startFraming(sourceId) }, t('frameStart')),
+            ui.framer === '' ? null : h('button', { type: 'button', className: 'dshl-btn', onClick: () => setFramer('') }, t('frameCancel'))),
+        h('p', { className: 'dshl-hint' }, t('relocateFrameHint')),
+        legacyIds.length === 0 ? null : h('div', { className: 'dshl-relocateRow', 'data-squeezed': 'true' },
+          h('span', { className: 'dshl-relocateState', 'data-squeezed': 'true' }, t('relocateLegacy')),
+          h('span', { className: 'dshl-itemLabel' }, t('relocateLegacyHint')(legacyIds.length)),
+          h('button', { type: 'button', className: 'dshl-btn', onClick: clearLegacy }, t('relocateLegacyClear'))),
         configured.length === 0
           ? h('p', { className: 'dshl-hint' }, t('relocateNone'))
           : h('div', { className: 'dshl-list' }, configured.map(([id, spec]) => {
-            const chained = chainedIds.has(id);
-            const live = activeIds.has(id);
-            // 链式搬移优先说明：它目标是「目标在场」但投影建不起来，比 pending/gone 更需要解释
-            const stateKey = chained ? 'relocateChained' : live ? 'relocateActive' : sourceIds.has(id) ? 'relocatePending' : 'relocateGone';
-            const fit = fitById.get(id) ?? null;
-            const warn = fit === null ? null : t('relocateSqueeze')(Math.round(fit.ratio * 100), fit.sourceWidth, fit.destWidth);
-            return h('div', { key: id, className: 'dshl-relocateRow', 'data-squeezed': fit === null && !chained ? undefined : 'true' },
-              h('span', { className: 'dshl-relocateState', 'data-active': live ? 'true' : undefined, 'data-squeezed': fit === null && !chained ? undefined : 'true' }, t(stateKey)),
-              h('span', { className: 'dshl-itemLabel', title: id }, `${relocateSourceLabel(t, id)} → ${destLabel(spec.to)} · ${spec.place === 'end' ? t('relocateEnd') : t('relocateStart')}`),
-              chained
-                ? h('span', { className: 'dshl-itemSub dshl-relocateFitWarn', title: t('relocateChainedHint') }, t('relocateChainedShort'))
-                : (warn === null ? null : h('span', { className: 'dshl-itemSub dshl-relocateFitWarn', title: t('relocateSqueezeHint') }, warn)),
+            if (spec !== null && typeof spec === 'object' && spec.legacy === true) {
+              return h('div', { key: id, className: 'dshl-relocateRow', 'data-squeezed': 'true' },
+                h('span', { className: 'dshl-relocateState', 'data-squeezed': 'true' }, t('relocateLegacy')),
+                h('span', { className: 'dshl-itemLabel', title: id }, relocateSourceLabel(t, id)),
+                h('button', { type: 'button', className: 'dshl-btn', onClick: () => startFraming(id) }, t('relocateRedraw')));
+            }
+            const live = activeById.get(id) ?? null;
+            const present = sourceIds.has(id);
+            const conflict = live !== null && live.resolved.conflict === true;
+            const moved = live !== null && live.resolved.moved === true && !conflict;
+            const stateKey = conflict ? 'relocateConflict' : !present ? 'relocateGone' : live !== null ? 'relocateActive' : 'relocatePending';
+            const frame = live === null ? spec.frame : live.frame;
+            const size = live === null ? '' : t('relocateFrameSize')(live.resolved.width, live.node.getBoundingClientRect().height);
+            return h('div', { key: id, className: 'dshl-relocateRow', 'data-squeezed': conflict ? 'true' : undefined },
+              h('span', { className: 'dshl-relocateState', 'data-active': live !== null && !conflict ? 'true' : undefined, 'data-squeezed': conflict ? 'true' : undefined }, t(stateKey)),
+              h('span', { className: 'dshl-itemLabel', title: id }, `${relocateSourceLabel(t, id)} · ${t('relocateFrameAt')(frame.x, frame.y)}${size}`),
+              conflict
+                ? h('span', { className: 'dshl-itemSub dshl-relocateFitWarn', title: t('relocateConflictHint') }, t('relocateConflictShort'))
+                : (moved ? h('span', { className: 'dshl-itemSub' }, t('relocateMoved')) : null),
+              h('button', {
+                type: 'button',
+                className: 'dshl-btn',
+                onClick: () => startFraming(id),
+              }, t('relocateRedraw')),
               h('button', {
                 type: 'button',
                 className: 'dshl-iconBtn',
@@ -7412,7 +7366,7 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
         externalUnits: () => h(ExternalUnitsCard, { config, targets, t }),
         pluginSources: () => h(PluginSourcesCard, { config, targets, t }),
         arrange: () => h(ArrangeCard, { config, targets, t }),
-        relocate: () => h(RelocateCard, { config, targets, t }),
+        relocate: () => h(RelocateCard, { config, targets, ui, t }),
         sync: () => h(SyncCard, { config, targets, t }),
         rules: () => h(RulesCard, { config, targets, t }),
         conversation: () => h(ConversationCard, { config, targets, t }),
@@ -7562,6 +7516,131 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       if (external !== null && external !== undefined) return external.pageKey;
       const panel = activePageKey();
       return panel === '(unknown)' ? t('surfacePluginsManager') : panel;
+    }
+
+    /**
+     * 画框中间层：全屏捕捉鼠标，拖出一个矩形作为搬移的落位与宽度。
+     *
+     * 为什么要有这一层（取代原来的「选目标容器 + 选开头/结尾」）：
+     * 目标容器与位置这两维在「用户能直接指出位置」的前提下不需要建模。用户画出什么位置就是什么位置，
+     * 于是配置里只剩几何，槽位表与形状表整类问题随之消失（docs/plans/已完成/2026-11-10-搬移改画框.md）。
+     *
+     * 交互：按下开始画，移动跟手，松手提交；Esc / 右键 / 点提示条的「取消」退出。
+     * 拖出的框会实时显示「会压住哪个区域里已有的内容」「是不是比源还窄」，用户在松手前就能判断。
+     */
+    function FrameLayer({ t }) {
+      const { targets, ui } = useStoreSnapshot();
+      const sourceId = ui.framer;
+      const [rect, setRect] = React.useState(null);
+      const [hint, setHint] = React.useState('');
+      const originRef = React.useRef(null);
+      const source = React.useMemo(
+        () => (sourceId === '' ? null : (relocateSources(targets).find((item) => item.id === sourceId) ?? null)),
+        [targets, sourceId],
+      );
+      const sourceBox = source === null ? null : relocateSourceBox(source.node);
+      const sourceWidth = sourceBox === null ? 0 : Math.ceil(sourceBox.width);
+
+      // 源在画框期间被 React 重建（页面切换、列表增删）时直接退出，避免对着不存在的东西画框
+      React.useEffect(() => {
+        if (sourceId !== '' && source === null) setFramer('');
+      }, [sourceId, source]);
+
+      const resolveRect = (start, current) => {
+        const left = Math.min(start.x, current.x);
+        const top = Math.min(start.y, current.y);
+        const width = Math.abs(current.x - start.x);
+        const height = Math.abs(current.y - start.y);
+        return { x: Math.round(left), y: Math.round(top), w: Math.round(width), h: Math.round(height) };
+      };
+
+      /**
+       * 松手前的即时判定：把「会压住容器里已被占用的内容」「框比源窄」先说清楚。
+       * 用与落位同一套判据（relocateHostOf / relocateObstacles / relocateResolveFrame），
+       * 所以这里说会压住，落位时就真的会触发迁移——不会出现「预览说没事、松手跑掉」。
+       */
+      const describeRect = (candidate) => {
+        if (candidate.w < 8 || candidate.h < 8) {
+          setHint(t('frameTooSmall'));
+          return;
+        }
+        const width = Math.max(FRAME_MIN_WIDTH, candidate.w, sourceWidth);
+        const probe = { x: candidate.x, y: candidate.y, width, height: Math.max(8, candidate.h) };
+        const host = relocateHostOf(probe, targets);
+        const boxes = relocateObstacles(host, source === null ? null : source.node);
+        const hits = boxes.some((box) => frameHitsContainer(probe, box));
+        const resolved = relocateResolveFrame(probe, boxes, projectionTopBound(), { width: window.innerWidth, height: window.innerHeight });
+        const place = host === null ? t('frameNoHost') : t('frameHost')(t(host.name === 'settings' ? 'settingsPanel' : host.name === 'center' ? 'center' : host.name === 'sidebar' ? 'sidebar' : host.name === 'rightbar' ? 'rightbar' : host.name));
+        setHint(`${t('frameHint')(width, sourceWidth)} · ${place} · ${hits ? (resolved.conflict === true ? t('frameConflict') : t('frameMigrate')) : t('frameClean')}`);
+      };
+
+      const onPointerDown = (event) => {
+        if (event.button !== 0) {
+          setFramer('');
+          return;
+        }
+        event.preventDefault();
+        originRef.current = { x: event.clientX, y: event.clientY };
+        setRect({ x: Math.round(event.clientX), y: Math.round(event.clientY), w: 0, h: 0 });
+        try { event.currentTarget.setPointerCapture(event.pointerId); } catch (error) { /* 合成事件没有 pointerId 时忽略 */ }
+      };
+      const onPointerMove = (event) => {
+        const origin = originRef.current;
+        if (origin === null) return;
+        const candidate = resolveRect(origin, { x: event.clientX, y: event.clientY });
+        setRect(candidate);
+        describeRect(candidate);
+      };
+      const onPointerUp = (event) => {
+        const origin = originRef.current;
+        originRef.current = null;
+        if (origin === null) return;
+        const candidate = resolveRect(origin, { x: event.clientX, y: event.clientY });
+        // 单击（没拖出尺寸）视为误触，不提交——否则一个点击就会把源挪到鼠标点
+        if (candidate.w < 8 || candidate.h < 8) {
+          setRect(null);
+          return;
+        }
+        commitFrame(sourceId, candidate);
+      };
+
+      React.useEffect(() => {
+        const onKeyDown = (event) => {
+          if (event.key !== 'Escape') return;
+          event.preventDefault();
+          event.stopPropagation();
+          setFramer('');
+        };
+        // 捕获阶段先拦：画框层在最上面，Esc 不该同时触发面板/白板的逐层退出
+        window.addEventListener('keydown', onKeyDown, true);
+        return () => window.removeEventListener('keydown', onKeyDown, true);
+      }, []);
+
+      if (sourceId === '') return null;
+      const label = source === null
+        ? sourceId
+        : (source.labelKey === null ? source.name : t(source.labelKey));
+      return h('div', {
+        className: 'dshl-framer',
+        'data-dshl-layer': '',
+        onPointerDown,
+        onPointerMove,
+        onPointerUp,
+        onContextMenu: (event) => { event.preventDefault(); setFramer(''); },
+      },
+      rect === null || rect.w < 8 || rect.h < 8 ? null : h('div', {
+        className: 'dshl-frameRect',
+        style: { left: `${rect.x}px`, top: `${rect.y}px`, width: `${rect.w}px`, height: `${rect.h}px` },
+      }),
+      h('div', { className: 'dshl-frameHint' },
+        h('div', null, t('frameTitle')(label)),
+        hint === '' ? h('div', { className: 'dshl-frameUsage' }, t('frameUsage')) : h('div', null, hint),
+        h('div', { className: 'dshl-frameCtl' },
+          h('button', {
+            type: 'button',
+            className: 'dshl-btn',
+            onClick: (event) => { event.stopPropagation(); setFramer(''); },
+          }, t('frameCancel')))));
     }
 
     /** 全局编辑面板：任意页面都能打开，开着时识别与预览都对着当前界面。 */
@@ -7875,11 +7954,14 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       // 白板同理：它要描在设置弹层、插件页这些页面之上，留在 overlay 里会被盖住（实测设置页打开后白板整条被压住）。
       const boardNode = ui.board ? h(Boundary, null, h(BoardLayer, { t })) : null;
       const board = boardNode === null || createPortal === null ? boardNode : createPortal(boardNode, document.body);
+      // 画框层：要盖住设置弹层与插件页才能对着真实界面画框，所以同样渲染到 body。
+      const framerNode = ui.framer === '' ? null : h(Boundary, null, h(FrameLayer, { t }));
+      const framer = framerNode === null || createPortal === null ? framerNode : createPortal(framerNode, document.body);
       // 授予式「更多」：设置页导航与插件页第三方组没有 actions 槽位，锚点挂到这两个容器里
       const granted = h(GrantedStorageMenus, { t });
       // 面板不依赖三栏骨架：没有可拖区域时也能开，用于识别与调整。
       // 白板同理：它要能在「未启用 / 未识别结构」时打开（比如刚恢复默认想重新搭），所以一起带上。
-      if (!active) return h(React.Fragment, null, granted, board, panel);
+      if (!active) return h(React.Fragment, null, granted, framer, board, panel);
       // 打开插件页：中栏被藏起来时先放出来，否则切过去也是空白
       const openPlugins = () => {
         if (snapshot.config.columns.hideCenter) {
@@ -8022,6 +8104,8 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
         granted,
         // 白板是独立 chunk，只在打开时才挂载并加载；关闭时不占任何开销。portal 到 body 才能盖住设置弹层
         board,
+        // 画框层同样 portal 到 body：要对着设置弹层、插件页这些真实界面画框
+        framer,
         panel);
     }
 
@@ -8043,12 +8127,14 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
       Switch,
       BLOCKS,
       PART_UNITS,
-      RELOCATE_DESTINATIONS,
-      RELOCATE_DESTINATION_IDS,
       BLOCK_LABEL_KEYS,
       readPath,
       writePath,
       pageKindOf,
+      /** 画框入口：白板的属性面板用它把「搬移到」换成「重画框」，两边共用同一套逻辑。 */
+      setFramer,
+      relocateSources,
+      relocateResolve,
       /**
        * 白板读骨架用的页面 key：**必须与主 bundle 写快照时同一套判定**。
        * 白板原先自己用 pageKindOf 推导（会话优先），而写快照用 boardPageKey（第三方页优先），
@@ -8345,18 +8431,18 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
           };
           checkBar('[data-dshl-teleport]', 'teleport');
           checkBar('[data-dshl-button]', 'launcher');
-          // 3) 投影偏差与内部压扁
+          // 3) 投影落位与内部压扁：没有占位符了，改比「配置里的框」与「节点实际矩形」
           for (const node of document.querySelectorAll('[data-dshl-teleport]')) {
             const id = node.getAttribute('data-dshl-teleport');
-            const ph = document.querySelector(`[data-dshl-placeholder="${id}"]`);
+            const spec = snapshot.config.relocate?.[id] ?? null;
+            const frame = spec === null ? null : normalizeFrame(spec.frame);
             const nb = node.getBoundingClientRect();
-            const pb = ph === null ? null : ph.getBoundingClientRect();
             report.relocation.push({
               id,
+              frame,
               node: { x: Math.round(nb.x), y: Math.round(nb.y), w: Math.round(nb.width), h: Math.round(nb.height) },
-              placeholder: pb === null ? null : { x: Math.round(pb.x), y: Math.round(pb.y), w: Math.round(pb.width), h: Math.round(pb.height) },
-              dx: pb === null ? null : Math.round(nb.x - pb.x),
-              dy: pb === null ? null : Math.round(nb.y - pb.y),
+              dx: frame === null ? null : Math.round(nb.x - frame.x),
+              dy: frame === null ? null : Math.round(nb.y - frame.y),
               transform: getComputedStyle(node).transform.slice(0, 40),
               zeroWidthChildren: [...node.querySelectorAll('*')].filter((child) => child.getBoundingClientRect().width === 0 && child.children.length === 0).length,
             });
@@ -8425,7 +8511,6 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
               return {
                 tag: child.tagName,
                 cls: String(child.className).slice(0, 44),
-                isPlaceholder: child.hasAttribute('data-dshl-placeholder'),
                 rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
                 topmostAtCenter: hit === null ? null : `${hit.tagName}.${String(hit.className).slice(0, 32)}`,
                 coveredByOthers: hit !== null && !child.contains(hit) && hit !== child,
@@ -8433,25 +8518,21 @@ body:has(.dshl-panel) [data-dshl-placeholder] { outline:1px dashed color-mix(in 
             });
             const covered = report.centerArea.filter((row) => row.coveredByOthers);
             if (covered.length > 0) report.verdict.push(`会话区有 ${covered.length} 个子块中心点被别的东西盖住`);
-            const placeholders = report.centerArea.filter((row) => row.isPlaceholder);
-            for (const ph of placeholders) {
-              if (ph.rect.w === 0 || ph.rect.h === 0) report.verdict.push(`会话区里有 ${ph.rect.w}×${ph.rect.h} 的零尺寸占位符（会留空白条）`);
-            }
           }
           /*
-           * 对齐判定要排除「安全区夹取」这个合法偏移：
-           * 目标落在窗口栏里时投影会被主动下推到 winBarH，此时 dy 恰好等于下推量，
-           * 那是正确行为而不是错位。只有 dx 偏差、或 dy 既不是 0 也不是下推量，才算不对齐。
+           * 对齐判定：现在没有占位符了，直接比「配置里的框」与「节点实际矩形」。
+           * 只允许两种合法偏移——水平方向被视口夹取、纵向被窗口栏下推（dy >= 0 且落点在安全区内）。
+           * 其余偏差都算错位。
            */
           const badReloc = report.relocation.filter((item) => {
             if (item.dx === null) return false;
-            const clamped = Math.max(0, Math.round(winBarH - item.placeholder.y));
-            if (Math.abs(item.dx) > 2) return true;
-            return Math.abs(item.dy) > 2 && Math.abs(item.dy - clamped) > 2;
+            const insideBar = item.node !== null && item.node.y < winBarH;
+            if (insideBar) return true;
+            return Math.abs(item.dx) > 2 || (Math.abs(item.dy) > 2 && item.dy < 0);
           });
-          if (badReloc.length > 0) report.verdict.push(`${badReloc.length} 个搬移投影与占位符不对齐`);
-          const clampedNow = report.relocation.filter((item) => item.dy !== null && Math.abs(item.dy - Math.max(0, Math.round(winBarH - item.placeholder.y))) <= 2 && Math.abs(item.dy) > 2);
-          if (clampedNow.length > 0) report.verdict.push(`（其中 ${clampedNow.length} 个是安全区下推 ${winBarH}px，属正常）`);
+          if (badReloc.length > 0) report.verdict.push(`${badReloc.length} 个搬移落点与配置的框不对齐`);
+          const clampedNow = report.relocation.filter((item) => item.dy !== null && item.dy > 2 && item.node !== null && Math.abs(item.node.y - winBarH) <= 2);
+          if (clampedNow.length > 0) report.verdict.push(`（其中 ${clampedNow.length} 个是被窗口栏下推到 ${winBarH}px，属正常）`);
           if (report.panel !== null && !report.panel.panelIsTopmost) report.verdict.push('面板中心点上不是面板自己：可能有东西盖着它');
           if (report.verdict.length === 0) report.verdict.push('未发现已知问题模式，请把整份 JSON 贴回');
           console.log('=== dsh-layout 桌面端诊断 ===');
