@@ -6424,11 +6424,16 @@ window.__ModuleLoader__.load({
       const registerPage = () => {
         if (external === null || externalUnits.length === 0) return;
         registerExternalPage(external.pageKey, externalUnits);
+        // 档位是按登记表在扫描时算出来的：不失效缓存的话，接下来 1.5 秒内的 refresh
+        // 会拿到同一份旧 units（tier 还是 auto），行上的「登记」标记要等下次真扫描才出现，
+        // 用户以为登记没生效。清空登记同理（要退回 auto）。
+        externalScanCache = { pageKey: '', root: null, at: 0, units: [] };
         refresh();
       };
       const clearRegistry = () => {
         if (external === null) return;
         clearExternalPageRegistry(external.pageKey);
+        externalScanCache = { pageKey: '', root: null, at: 0, units: [] };
         refresh();
       };
       const exportExternal = () => {
@@ -6576,9 +6581,17 @@ window.__ModuleLoader__.load({
         || item.id.toLowerCase().includes(query)
         || (item.registrant ?? '').toLowerCase().includes(query)
         || (item.componentName ?? '').toLowerCase().includes(query);
-      // 槽位键命中时整组条目都算命中（否则只能搜条目名，搜槽位名会得到空组）
-      const matchesGroup = (group) => query === '' || group.slot.toLowerCase().includes(query) || group.items.some(matchesItem);
-      const itemsOf = (group) => (group.slot.toLowerCase().includes(query) ? group.items : group.items.filter(matchesItem));
+      /**
+       * 组内可见条目。
+       * 未开「显示全部槽位」时只列已渲染条目——与上面 pluginSourcesCount 的口径必须一致：
+       * 计数算的是 `group.rendered`，列表却列 `group.items`，于是「条目 2 · 已渲染 2」下面
+       * 挂着 3 行（其中一行是未渲染的），用户按计数去数永远数不上。
+       * 槽位名命中时整组保留，但仍按同一口径过滤（docs/plans/已完成/2026-11-10-面板卡片UI排查.md）。
+       */
+      const itemsOf = (group) => {
+        const base = group.slot.toLowerCase().includes(query) ? group.items : group.items.filter(matchesItem);
+        return showAll ? base : base.filter((item) => item.rendered);
+      };
       const visibleGroups = groups
         .map((group) => ({ group, items: itemsOf(group) }))
         .filter((entry) => query === '' || entry.group.slot.toLowerCase().includes(query) || entry.items.length > 0);
@@ -6948,6 +6961,24 @@ window.__ModuleLoader__.load({
       const schemeList = readLayoutsNormalized().list;
       const [schemeId, setSchemeId] = React.useState(schemeList[0]?.id ?? '');
       const conditions = valueOptions(condKind);
+      /**
+       * 下拉当前值必须在**渲染时**校验是否还在可选项里。
+       *
+       * `useState` 初值只在挂载时求一次：面板若开在「识别不到任何搬移源」的页面，
+       * sourceOptions 为空 → hideTarget 落成 ''；之后切到有源的页面，sourceOptions 有值了，
+       * 但 state 仍是 ''，于是「添加规则」按钮永久禁用，用户只能关掉面板重开。
+       * 方案列表与容器清单同理（面板开着时才存方案、才切页面都会遇到）。
+       *
+       * 值失效就退回第一个可选项，但**不回写 state**：用户的选择只在用户自己改时进 state，
+       * 否则又变成「渲染期写状态」的循环（docs/plans/已完成/2026-11-10-面板卡片UI排查.md）。
+       */
+      const pickValid = (value, options) => (options.some((option) => String(option.value) === String(value))
+        ? value
+        : (options[0]?.value ?? ''));
+      const condValueNow = pickValid(condValue, conditions);
+      const hideTargetNow = sourceOptions.some((option) => option.id === hideTarget) ? hideTarget : (sourceOptions[0]?.id ?? '');
+      const containerNow = containers.some((option) => option.id === container) ? container : (containers[0]?.id ?? '');
+      const schemeIdNow = schemeList.some((item) => item.id === schemeId) ? schemeId : (schemeList[0]?.id ?? '');
       const condLabel = (rule) => {
         const options = valueOptions(rule.when.kind);
         const hit = options.find((option) => String(option.value) === String(rule.when.value));
@@ -6968,15 +6999,15 @@ window.__ModuleLoader__.load({
         return `${t('ruleActionArrange')}：${hit === undefined ? rule.then.container : hit.label} · ${rule.then.columns} ${t('ruleColumns')}`;
       };
       const plan = computePlan(targets, config);
-      const canAdd = actionKind === 'hide' ? hideTarget !== '' : actionKind === 'scheme' ? schemeId !== '' : container !== '';
+      const canAdd = actionKind === 'hide' ? hideTargetNow !== '' : actionKind === 'scheme' ? schemeIdNow !== '' : containerNow !== '';
       const add = () => {
         if (!canAdd) return;
         const then = actionKind === 'hide'
-          ? { kind: 'hide', target: hideTarget }
+          ? { kind: 'hide', target: hideTargetNow }
           : actionKind === 'scheme'
-            ? { kind: 'scheme', scheme: schemeId, schemeName: schemeList.find((item) => item.id === schemeId)?.name ?? '' }
-            : { kind: 'arrange', container, columns };
-        const rule = { id: `r${Date.now().toString(36)}`, when: { kind: condKind, value: condValue }, then };
+            ? { kind: 'scheme', scheme: schemeIdNow, schemeName: schemeList.find((item) => item.id === schemeIdNow)?.name ?? '' }
+            : { kind: 'arrange', container: containerNow, columns };
+        const rule = { id: `r${Date.now().toString(36)}`, when: { kind: condKind, value: condValueNow }, then };
         updateConfig((draft) => { draft.rules = [...draft.rules, rule].slice(0, 12); });
       };
       const field = (label, children) => h('label', { className: 'dshl-relocateField' }, label, children);
@@ -6999,7 +7030,7 @@ window.__ModuleLoader__.load({
           ].map(([kind, labelKey]) => h('option', { key: kind, value: kind }, t(labelKey))))),
           field('=', h('select', {
             className: 'dshl-select',
-            value: String(condValue),
+            value: String(condValueNow),
             onChange: (event) => {
               const raw = event.target.value;
               setCondValue(condKind === 'collapsed' ? raw === 'true' : raw);
@@ -7018,7 +7049,7 @@ window.__ModuleLoader__.load({
           actionKind === 'hide'
             ? field(t('ruleActionHide'), h('select', {
               className: 'dshl-select',
-              value: hideTarget,
+              value: hideTargetNow,
               onChange: (event) => setHideTarget(event.target.value),
             }, sourceOptions.length === 0
               ? h('option', { value: '' }, t('ruleEmptyValue'))
@@ -7026,7 +7057,7 @@ window.__ModuleLoader__.load({
             : actionKind === 'scheme'
               ? field(t('ruleActionScheme'), h('select', {
                 className: 'dshl-select',
-                value: schemeId,
+                value: schemeIdNow,
                 onChange: (event) => setSchemeId(event.target.value),
               }, schemeList.length === 0
                 ? h('option', { value: '' }, t('ruleSchemeEmpty'))
@@ -7034,7 +7065,7 @@ window.__ModuleLoader__.load({
               : h(React.Fragment, null,
                 field(t('ruleActionArrange'), h('select', {
                   className: 'dshl-select',
-                  value: container,
+                  value: containerNow,
                   onChange: (event) => setContainer(event.target.value),
                 }, containers.length === 0
                   ? h('option', { value: '' }, t('ruleEmptyValue'))
@@ -7132,13 +7163,19 @@ window.__ModuleLoader__.load({
           }
         }
         if (patches.length === 0) return;
+        /*
+         * 必须 silent：这不是用户改动，是历史数据的自动补全。
+         * 不传 silent 会走 markDirty，于是「一打开面板就显示有未保存改动」；
+         * 更糟的是「还原」把配置退回补全前的形态后，本 effect 因依赖变化再次触发、再次记脏，
+         * 还原按钮永远点不掉（docs/plans/已完成/2026-11-10-面板卡片UI排查.md）。
+         */
         updateConfig((draft) => {
           for (const patch of patches) {
             const list = draft.storage[patch.zone] ?? [];
             const at = list.findIndex((item) => item.label === patch.entry.label && (item.kind ?? '') === (patch.entry.kind ?? ''));
             if (at >= 0) list[at] = { ...list[at], id: patch.id };
           }
-        });
+        }, { silent: true });
       }, [config.storage, targets.storageZones]);
       const hiddenLabels = config.sidebar.panelHidden;
       const renderZone = (section) => {
