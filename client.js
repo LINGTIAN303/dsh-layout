@@ -2631,13 +2631,24 @@ window.__ModuleLoader__.load({
      * 找外部插件页面的根节点。
      * 会话页不扫；其余页面从 main 槽位里第一个真实布局盒起，收拢「整页单子级包裹」直到出现分支。
      * 槽位本身常是 display:contents（零尺寸），先按层级展开到第一个有尺寸的盒子，避免把零尺寸包裹当页面根。
+     *
+     * **必须设访问上限**：这是无界 BFS——只跳过 STYLE/SCRIPT，其余子元素一律入队，
+     * 而每个节点都要 `getComputedStyle` + `getBoundingClientRect`（两者都强制同步布局）。
+     * 第三方插件页里若「第一个够大的盒子」埋得很深（虚拟滚动容器、编辑器、把内容包在很多层
+     * display:contents wrapper 里的库），遍历会扫遍整棵树。实测 2 万个 contents 节点 =
+     * 2 万次强制布局；真实浏览器里每次都要重算样式，而 `refresh` 每轮都会走到这里。
+     * 超过上限就放弃扫描（返回 null → 该页不进外部拆解），比卡住界面好。
      */
+    const FIRST_BOX_MAX_VISITS = 400;
     function firstLaidOutBox(scope) {
+      let visits = 0;
       const queue = [scope];
       while (queue.length > 0) {
         const node = queue.shift();
         for (const child of node.children) {
           if (child.tagName === 'STYLE' || child.tagName === 'SCRIPT') continue;
+          visits += 1;
+          if (visits > FIRST_BOX_MAX_VISITS) return null;
           const style = getComputedStyle(child);
           const rect = child.getBoundingClientRect();
           if (style.display === 'contents' || rect.width < 40 || rect.height < 40) {
@@ -2689,12 +2700,31 @@ window.__ModuleLoader__.load({
       return { pageKey, root, iframe: null, units: [] };
     }
 
-    /** 页面里所有「真的在滚动」的容器数量：只有一个时它是页面主体，禁止隐藏。 */
+    /**
+     * 页面里所有「真的在滚动」的容器数量：只有一个时它是页面主体，禁止隐藏。
+     *
+     * **这个函数是整段外部扫描里最贵的**：它无界递归整棵子树，且每个节点都读
+     * `getComputedStyle` + `scrollHeight` + `clientHeight`——三个都会强制同步布局/回流。
+     * 第三方插件页里若有一个深层大列表（消息流、表格、日志面板），这一趟就够卡一帧。
+     *
+     * 超过访问上限就停止并返回已统计到的数量：宁可少判一个滚动容器（退化为「可以隐藏」），
+     * 也不要卡住界面。判据本身是「只有一个滚动容器时禁止隐藏」，漏判只会让某个容器
+     * 少一条保护，用户可以手动隐藏后自己恢复——代价可控。
+     */
+    const SCROLL_COUNT_MAX_VISITS = 1200;
     function countScrollContainers(root) {
       let count = 0;
+      let visits = 0;
+      let aborted = false;
       const walk = (node) => {
+        if (aborted) return;
         for (const child of node.children) {
           if (child.tagName === 'STYLE' || child.tagName === 'SCRIPT' || child.tagName === 'IFRAME') continue;
+          visits += 1;
+          if (visits > SCROLL_COUNT_MAX_VISITS) {
+            aborted = true;
+            return;
+          }
           const style = getComputedStyle(child);
           if ((style.overflowY === 'auto' || style.overflowY === 'scroll') && child.scrollHeight > child.clientHeight + 4) count += 1;
           walk(child);
@@ -2813,7 +2843,22 @@ window.__ModuleLoader__.load({
         return rect.width >= 16 && rect.height >= 12;
       });
       const declaredSet = new Set(declaredNodes);
-      const inDeclared = (node) => declaredNodes.some((declared) => declared === node || declared.contains(node));
+      /*
+       * 判定「节点是否落在某个声明单元里」。
+       *
+       * 早先写成 `declaredNodes.some((d) => d === node || d.contains(node))`，对每个候选节点
+       * 都跑一遍全部声明节点，而 `contains` 在 DOM 上是真实的祖先链遍历（不是 O(1)）。
+       * 声明 80 个、L1 有 30 个、每个 L1 又有 20 个 L2 子级时 = 5 万次 contains，
+       * 每次扫描都跑一遍，第三方插件页会明显掉帧。
+       *
+       * 改成沿祖先链向上查集合：复杂度是 O(深度)，只走一条路径。
+       */
+      const inDeclared = (node) => {
+        for (let cur = node; cur !== null && cur !== undefined; cur = cur.parentElement) {
+          if (declaredSet.has(cur)) return true;
+        }
+        return false;
+      };
       declaredNodes.forEach((node, index) => {
         if (units.length >= EXTERNAL_MAX_UNITS) return;
         const rect = node.getBoundingClientRect();
@@ -2865,6 +2910,9 @@ window.__ModuleLoader__.load({
       });
       if (EXTERNAL_MAX_DEPTH < 2) return units;
       kept.forEach((node) => {
+        // 已达单元上限就整体停下：后续每个 L1 还要做 classifyRegion + 多次 getBoundingClientRect，
+        // 全都不会产出（push 会被上限挡住），纯白算
+        if (units.length >= EXTERNAL_MAX_UNITS) return;
         const l1Index = l1Nodes.indexOf(node);
         const parentKey = `L1.${l1Index}`;
         const kids = [...node.children].filter((child) => {
