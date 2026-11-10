@@ -1,5 +1,8 @@
 # dsh-layout（布局）
 
+[![npm 版本](https://img.shields.io/npm/v/dsh-layout)](https://www.npmjs.com/package/dsh-layout)
+[![许可证](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
+
 DSH 界面布局插件：把左栏、右栏、会话区、设置页的结构、顺序、宽度和显隐交给用户自己调。
 
 - 它不产出内容，只调整界面。
@@ -55,13 +58,21 @@ DSH 界面布局插件：把左栏、右栏、会话区、设置页的结构、�
 
 ## 安装
 
-由 DSH 插件管理器安装本地目录（本仓库根目录即插件包），target 填仓库克隆到的本地路径：
+已发布到 npm（[dsh-layout](https://www.npmjs.com/package/dsh-layout)）。通过 DSH 插件管理器安装：
+
+```text
+plugin_manager install_bundle，target 为 dsh-layout@0.9.1（npm 包名@版本）
+```
+
+插件市场索引暂未收录本插件，市场内搜索不到属正常，按上面的 target 直接装即可。
+
+开发或本地调试时，可改为安装本地目录（本仓库根目录即插件包），target 填仓库克隆到的本地路径：
 
 ```text
 plugin_manager install_bundle，target 为本仓库的本地目录（示例：E:\dsh-layout）
 ```
 
-安装后 bundle 名为 `dsh-layout`，行 id 为 `layout`。更换 `client.js` 后刷新页面即可生效（本地目录为 link 安装，无需重装）。
+安装后 bundle 名为 `dsh-layout`，行 id 为 `layout`。npm 安装的升级走插件管理器换新版本号；本地目录为 link 安装，更换 `client.js` 后刷新页面即可生效，无需重装。
 
 ## 入口与操作路径
 
