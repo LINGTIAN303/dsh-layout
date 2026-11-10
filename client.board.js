@@ -397,6 +397,36 @@ window.__ModuleLoader__.load({
       const sources = targets.slotSources ?? null;
       if (sources !== null) {
         for (const group of sources.graph) {
+          /**
+           * 槽位内的视觉顺序：宿主按「order 升序、同值按注册顺序」摆放，配置里的 order 覆盖前者。
+           * 与主 bundle 的 PluginSourcesCard.visualItems 同一套判据，两处显示必须一致。
+           */
+          const visualIds = group.items
+            .map((item, index) => {
+              const override = config.slots.order?.[item.entryKey];
+              return { id: item.id, weight: override === undefined ? (item.order ?? 0) : override, index };
+            })
+            .sort((left, right) => (left.weight - right.weight) || (left.index - right.index))
+            .map((entry) => entry.id);
+          /**
+           * 上移 / 下移：与相邻项交换后**整组重写 0..n-1 序号**。
+           *
+           * 不能写 `order ± 1`：条目原来的 order 由宿主注册优先级决定（实测是 10 / 20 / 30 这种值，
+           * 不等于「当前视觉序号」），在旧值上加减会让「上移」点下去视觉上毫无变化
+           * （b 从 20 变 19，仍大于 a 的 10，位置不动）。主 bundle 第八轮就修过这个坑，
+           * 白板这份实现没跟上（docs/plans/已完成/2026-11-10-白板排查.md）。
+           */
+          const moveBy = (id, delta) => {
+            const at = visualIds.indexOf(id);
+            const to = at + delta;
+            if (at < 0 || to < 0 || to >= visualIds.length) return;
+            const next = [...visualIds];
+            const [moved] = next.splice(at, 1);
+            next.splice(to, 0, moved);
+            host.updateConfig((draft) => {
+              for (const [index, entryId] of next.entries()) draft.slots.order[`${group.slot}::${entryId}`] = index;
+            });
+          };
           for (const item of group.items) {
             const key = item.entryKey;
             const hidden = config.slots.hide.includes(key);
@@ -407,15 +437,10 @@ window.__ModuleLoader__.load({
               draft.slots.hide = list;
             }));
             if (item.orderable) {
-              // 顺序用上移/下移，不用裸数字滑块：`slots.order` 存的是相对序号，
-              // 用户无法从「拖到 23」推出它会排到第几位；现有六页面板也是用上下移。
-              const order = config.slots.order?.[key] ?? item.order ?? 0;
-              controls.push(ctlAction('boardMoveUp', () => {
-                host.updateConfig((draft) => { draft.slots.order[key] = order - 1; });
-              }));
-              controls.push(ctlAction('boardMoveDown', () => {
-                host.updateConfig((draft) => { draft.slots.order[key] = order + 1; });
-              }));
+              // 首尾要禁用：否则「上移」按到底也只是把 order 越减越小，用户看不出边界
+              const at = visualIds.indexOf(item.id);
+              controls.push(ctlAction('boardMoveUp', () => moveBy(item.id, -1), at <= 0));
+              controls.push(ctlAction('boardMoveDown', () => moveBy(item.id, 1), at < 0 || at >= visualIds.length - 1));
             }
             if (controls.length === 0) controls.push(ctlNote(item.reason === 'overlay' ? host.t('boardReadonlyOverlay') : host.t('boardReadonly')));
             out.push(node({
@@ -450,17 +475,37 @@ window.__ModuleLoader__.load({
       }
       const zones = targets.storageZones ?? null;
       if (zones !== null) {
+        /**
+         * 收纳条目的身份匹配：与主 bundle 的 findStoredFor 同一套**非对称**规则。
+         *
+         * 配置里的条目：有非空 id → 比 id；没有 id（历史数据，normalizeConfig 把空 id 删掉了）
+         *              → 比 label + kind。
+         * 不能写成对称的「两边各算一个 key 再比」：配置里的老条目没有 id、界面上的条目有 id，
+         * 两边算出来的 key 天然不同（`\0任务看板` vs `task-board`），永远配不上。
+         * 也不能写成裸 `value.id === entry.id`：`undefined === 'task-board'` 恒假，同一个后果，
+         * 而且过滤时删不掉无 id 的老条目 → 打开开关会写出第二条重复条目。
+         * 主 bundle 那边靠 StorageCard 的补 id effect 兜底，白板没有那个 effect，必须直接判对。
+         * （docs/plans/已完成/2026-11-10-白板排查.md）
+         */
+        const sameEntry = (value, entry) => {
+          if (typeof value.id === 'string' && value.id !== '') return value.id === entry.id;
+          return value.label === entry.label && (value.kind ?? '') === (entry.kind ?? '');
+        };
         for (const [zone, entries] of Object.entries(zones)) {
           for (const entry of entries) {
-            const stored = (config.storage?.[zone] ?? []).some((value) => value.id === entry.id);
+            const stored = (config.storage?.[zone] ?? []).some((value) => sameEntry(value, entry));
             out.push(node({
               layer: 'control',
               id: `store:${zone}::${entry.id}`,
               label: `${entry.label} · ${zone}`,
               source: 'official',
               controls: [ctlFlag('boardStoreTo', stored, (draft, on) => {
-                const list = (draft.storage[zone] ?? []).filter((value) => value.id !== entry.id);
-                if (on) list.push({ id: entry.id, label: entry.label });
+                const list = (draft.storage[zone] ?? []).filter((value) => !sameEntry(value, entry));
+                // 写入时只存有值的字段：`id: ''` 会被 normalizeConfig 当成另一条（空 id 与无 id 走不同分支）
+                const record = { label: entry.label };
+                if (typeof entry.id === 'string' && entry.id !== '') record.id = entry.id;
+                if (typeof entry.kind === 'string' && entry.kind !== '') record.kind = entry.kind;
+                if (on) list.push(record);
                 draft.storage[zone] = list;
               })],
             }));
